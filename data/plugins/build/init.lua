@@ -653,7 +653,7 @@ local BuildBarView = ToolbarView:extend()
 
 function BuildBarView:new()
   BuildBarView.super.new(self)
-  self.toolbar_font = renderer.font.load(get_plugin_directory() .. PATHSEP .. "build.ttf", style.icon_big_font:get_size())
+  self.toolbar_font = renderer.font.load(get_plugin_directory() .. PATHSEP .. "build.ttf", style.icon_big_font:get_size() * SCALE)
   self.toolbar_commands = {
     {symbol = "!", command = "build:build"},
     {symbol = '"', command = "build:run-or-term-or-kill"},
