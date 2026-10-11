@@ -1436,8 +1436,18 @@ function core.run()
           next_step = nil -- if we've recevied an event, perform a step
         end
       else
-        system.wait_event()
-        next_step = nil -- perform a step when we're not in focus if get we an event
+        -- Not in focus: no cursor blink, so only step on events (threads that
+        -- set core.redraw are handled by force_draw), but still wake up for
+        -- threads (LSP clients, file watchers, ...), which would otherwise only
+        -- run when an event happens to arrive.
+        local got_event
+        if time_to_wake < math.huge then
+          got_event = system.wait_event(time_to_wake)
+        else
+          got_event = system.wait_event()
+        end
+        -- perform a step when we're not in focus if we get an event
+        if got_event then next_step = nil else next_step = math.huge end
       end
     else -- if we redrew, then make sure we only draw at most FPS/sec
       run_threads_full = 0
