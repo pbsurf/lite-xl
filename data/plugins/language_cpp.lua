@@ -102,12 +102,12 @@ syntax.add {
     { pattern = "[%a_][%w_]*%f[(]",         type = "function" },
     -- Macros
     { pattern = "^%s*#%s*define%s+()[%a_][%a%d_]*",
-      type = { "keyword", "symbol" }
+      type = { "preprocessor", "symbol" }
     },
     { pattern = "#%s*include%s+()<.->",
-      type = { "keyword", "string" }
+      type = { "preprocessor", "string" }
     },
-    { pattern = "%f[#]#%s*[%a_][%w_]*",     type = "keyword"   },
+    { pattern = "%f[#]#%s*[%a_][%w_]*",     type = "preprocessor" },
     -- Everything else to make the tokenizer work properly
     { pattern = "[%a_][%w_]*",              type = "symbol"   },
   },
@@ -206,17 +206,17 @@ syntax.add {
     ["char8_t"]  = "keyword2",
     ["char16_t"] = "keyword2",
     ["char32_t"] = "keyword2",
-    ["#include"] = "keyword",
-    ["#if"]      = "keyword",
-    ["#ifdef"]   = "keyword",
-    ["#ifndef"]  = "keyword",
-    ["#elif"]    = "keyword",
-    ["#else"]    = "keyword",
-    ["#elseif"]  = "keyword",
-    ["#endif"]   = "keyword",
-    ["#define"]  = "keyword",
-    ["#warning"] = "keyword",
-    ["#error"]   = "keyword",
-    ["#pragma"]  = "keyword",
+    ["#include"] = "preprocessor",
+    ["#if"]      = "preprocessor",
+    ["#ifdef"]   = "preprocessor",
+    ["#ifndef"]  = "preprocessor",
+    ["#elif"]    = "preprocessor",
+    ["#else"]    = "preprocessor",
+    ["#elseif"]  = "preprocessor",
+    ["#endif"]   = "preprocessor",
+    ["#define"]  = "preprocessor",
+    ["#warning"] = "preprocessor",
+    ["#error"]   = "preprocessor",
+    ["#pragma"]  = "preprocessor",
   },
 }
