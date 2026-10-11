@@ -1,0 +1,86 @@
+#!/bin/bash
+# Evaluate Lua in a running lite-xl (needs data/plugins/repl.lua).
+#
+# Usage: lxeval [-g] [-p PID] [-t SECONDS] CODE...
+#        lxeval [-g] [-p PID] [-t SECONDS] -f FILE
+#        lxeval [-g] [-p PID] [-t SECONDS] < FILE
+#
+# Without -p, talks to the most recently started lite-xl.  If there's no reply
+# within the timeout (default 5s), the editor is stuck: with -g, lxeval then
+# attaches gdb, prints the C backtrace, arms the repl plugin's hook in the running
+# Lua code and waits again, so CODE runs inside the stuck code (see `_where`,
+# `_locals`, abort() in data/plugins/repl.lua).  If there's still no reply, it's stuck
+# in C, and the backtrace is what there is.
+#
+# Exits 1 if the code raised an error, 2 if lite-xl didn't answer.
+set -eu
+
+usage() { sed -n '2,/^$/s/^# \{0,1\}//p' "$0" >&2; exit 64; }
+
+pid= timeout=5 file= use_gdb=
+while getopts gp:t:f:h opt; do
+  case $opt in
+    g) use_gdb=1 ;;
+    p) pid=$OPTARG ;;
+    t) timeout=$OPTARG ;;
+    f) file=$OPTARG ;;
+    *) usage ;;
+  esac
+done
+shift $((OPTIND - 1))
+
+base=${XDG_RUNTIME_DIR:?XDG_RUNTIME_DIR is not set}
+if [ -z "$pid" ]; then
+  # newest live lite-xl that has a repl directory
+  pid=$(for d in "$base"/lite-xl-*; do
+          p=${d##*-}
+          [ -d "/proc/$p" ] && echo "$(stat -c %Y "/proc/$p") $p"
+        done | sort -n | tail -1 | cut -d' ' -f2)
+  [ -n "$pid" ] || { echo "lxeval: no running lite-xl with the repl plugin" >&2; exit 2; }
+fi
+dir=$base/lite-xl-$pid
+[ -d "$dir" ] || { echo "lxeval: $dir not found" >&2; exit 2; }
+
+if [ -n "$file" ]; then code=$(cat -- "$file")
+elif [ $# -gt 0 ]; then code="$*"
+else code=$(cat)
+fi
+
+id=$$-$RANDOM
+printf '%s' "$code" > "$dir/.req-$id.lua"
+mv "$dir/.req-$id.lua" "$dir/req-$id.lua"
+
+resp=$dir/resp-$id
+wait_reply() {
+  local deadline=$(( $(date +%s%N) + ${timeout%.*} * 1000000000 ))
+  until [ -e "$resp" ]; do
+    [ "$(date +%s%N)" -gt "$deadline" ] && return 1
+    sleep 0.005
+  done
+}
+
+# Arm the repl hook (registered for every coroutine by data/plugins/repl.lua) on the Lua
+# state running in the innermost luaV_execute frame; LUA_MASKCOUNT is 8.
+arm_hook() {
+  echo "lxeval: no reply within ${timeout}s; arming the hook via gdb" >&2
+  gdb -p "$pid" -batch -nx -q \
+    -ex 'bt 12' \
+    -ex 'frame function luaV_execute' \
+    -ex "call (void)lua_sethook(L, 'ldblib.c'::hookf, 8, 1000)" 2>&1 \
+    | grep -v -E '^\[(New|Thread) |^Using host libthread_db|^\[Inferior .* detached\]' >&2
+  return 0
+}
+
+if ! wait_reply && ! { [ -n "$use_gdb" ] && arm_hook && wait_reply; }; then
+  rm -f "$dir/req-$id.lua"
+  echo "lxeval: no reply from lite-xl $pid${use_gdb:+ (stuck outside Lua?)}" >&2
+  [ -n "$use_gdb" ] || echo "lxeval: if it's stuck, retry with -g" >&2
+  exit 2
+fi
+
+reply=$(cat "$resp")
+rm -f "$resp"
+printf '%s\n' "$reply"
+case $reply in
+  "error: "*|"syntax error: "*|*$'\n'"error: "*) exit 1 ;;
+esac
