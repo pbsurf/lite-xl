@@ -9,6 +9,7 @@
 -- LSP Documentation:
 -- https://microsoft.github.io/language-server-protocol/specifications/specification-3-17
 
+local core = require "core"
 local json = require "plugins.lsp.json"
 local util = require "plugins.lsp.util"
 local diagnostics = require "plugins.lsp.diagnostics"
@@ -985,15 +986,16 @@ function Server:process_raw()
         return
       end
 
-      if #raw.raw_data > chunks then
-        -- TODO: perform proper error handling
-        self:send_data(raw.raw_data:sub(1, chunks))
-        raw.raw_data = raw.raw_data:sub(chunks+1)
-      else
-        -- TODO: perform proper error handling
-        self:send_data(raw.raw_data)
-        raw.raw_data = ""
+      local chunk = raw.raw_data:sub(1, chunks)
+      if not self:send_data(chunk) then
+        -- part of the message is lost, so the server will not see it as
+        -- intended (and may misread what follows); don't report it as sent
+        self:log("Failed sending %s; the server may need a restart", raw.method)
+        core.error("[LSP/%s] Failed sending %s", self.name, raw.method)
+        table.remove(self.raw_list, index)
+        return
       end
+      raw.raw_data = raw.raw_data:sub(#chunk + 1)
 
       self.write_fails = 0
 

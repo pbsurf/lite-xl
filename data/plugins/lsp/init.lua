@@ -2078,7 +2078,7 @@ core.add_thread(function()
         local raw_send = coroutine.create(function()
           server:process_raw()
         end)
-        coroutine.resume(raw_send)
+        local _, wait = coroutine.resume(raw_send)
         while coroutine.status(raw_send) ~= "dead" do
           -- while sending raw request we only read from lsp to not
           -- conflict with the written raw data so remember no calls
@@ -2086,8 +2086,10 @@ core.add_thread(function()
           -- or server:process_notifications()
           server:process_errors(config.plugins.lsp.log_server_stderr)
           server:process_responses()
-          coroutine.yield()
-          coroutine.resume(raw_send)
+          -- pass on the wait requested by send_data() between retries of a
+          -- failed write, so its ~1s of backoff isn't used up in a few frames
+          coroutine.yield(wait)
+          _, wait = coroutine.resume(raw_send)
         end
       end
 
