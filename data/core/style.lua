@@ -28,13 +28,23 @@ style.icon_font = renderer.font.load(DATADIR .. "/fonts/icons.ttf", 16 * SCALE, 
 style.icon_big_font = style.icon_font:copy(23 * SCALE)
 style.code_font = renderer.font.load(DATADIR .. "/fonts/JetBrainsMono-Regular.ttf", 15 * SCALE)
 
-style.syntax = {}
+-- Token types that color schemes may leave undefined, and the type whose
+-- color (and font) to use instead.
+style.syntax_fallbacks = { preprocessor = "keyword" }
+local syntax_fallback_mt = {
+  __index = function(t, type)
+    local fallback = style.syntax_fallbacks[type]
+    if fallback then return t[fallback] end
+  end
+}
+
+style.syntax = setmetatable({}, syntax_fallback_mt)
 
 -- This can be used to override fonts per syntax group.
 -- The syntax highlighter will take existing values from this table and
 -- override style.code_font on a per-token basis, so you can choose to eg.
 -- render comments in an italic font if you want to.
-style.syntax_fonts = {}
+style.syntax_fonts = setmetatable({}, syntax_fallback_mt)
 -- style.syntax_fonts["comment"] = renderer.font.load(path_to_font, size_of_font, rendering_options)
 
 style.log = {}

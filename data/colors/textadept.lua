@@ -26,7 +26,6 @@ style.nagbar              =     { common.color(red) }
 style.nagbar_text         =     { common.color(b00) }
 style.nagbar_dim          =     { common.color(b05) }
 --------------------------=--------------------------
-style.syntax              =                        {}
 style.syntax['normal']    =     { common.color(b80) }
 style.syntax['symbol']    =     { common.color(b80) }
 style.syntax['comment']   =     { common.color(b60) }
