@@ -111,6 +111,7 @@ local StatusView = require "core.statusview"
 local model = require "plugins.debugger.model"
 
 local draw_line_gutter = DocView.draw_line_gutter
+local docview_get_gutter_width = DocView.get_gutter_width
 local docview_on_mouse_moved = DocView.on_mouse_moved
 local docview_on_mouse_pressed = DocView.on_mouse_pressed
 local draw_line_text = DocView.draw_line_text
@@ -191,6 +192,10 @@ config.plugins.debugger = common.merge({
     "/usr/include/*/*",
     "/usr/include/*/*/*",
     "/usr/include/*/*/*/*"
+  },
+  -- syntax names of the files that get a breakpoint column; languages gdb debugs
+  breakpoint_syntaxes = {
+    "C", "C++", "Objective-C", "D", "Go", "Rust", "Fortran", "Zig", "Odin", "Nim"
   }
 }, config.plugins.debugger)
 
@@ -245,9 +250,28 @@ function debugger:should_show_drawer()
   return self.drawer_visible == true or (self.drawer_visible == nil and model.state ~= "inactive" or (system.get_time() - debugger.last_exited) < (config.plugins.debugger.hide_drawer_after or 0))
 end
 
+local function supports_breakpoints(doc)
+  if not (doc and doc.abs_filename and doc.syntax) then return false end
+  for _, name in ipairs(config.plugins.debugger.breakpoint_syntaxes) do
+    if doc.syntax.name == name then return true end
+  end
+  return false
+end
+
+-- width of the breakpoint column, left of the line numbers
+local function breakpoint_column_width(dv)
+  return supports_breakpoints(dv.doc) and math.floor(dv:get_line_height() * 0.9) or 0
+end
+
+function DocView:get_gutter_width()
+  local width, padding = docview_get_gutter_width(self)
+  return width + breakpoint_column_width(self), padding
+end
+
 function DocView:on_mouse_pressed(button, x, y, clicks)
-  if self.hovering_gutter and command.perform("debugger:toggle-line-breakpoint", self.hovering_gutter) then 
-    return true 
+  if button == "left" and self.hovering_breakpoint_line then
+    command.perform("debugger:toggle-line-breakpoint", self.hovering_breakpoint_line)
+    return true
   end
   return docview_on_mouse_pressed(self, button, x, y, clicks)
 end
@@ -256,25 +280,43 @@ function DocView:on_mouse_moved(x, y, ...)
   self.last_moved_time = { x, y, system.get_time() }
   self.watch_hover_value = nil
   self.watch_token = nil
+  self.hovering_breakpoint_line = nil
   if docview_on_mouse_moved(self, x, y, ...) then return true end
-  local minline, maxline = self:get_visible_line_range()
-  local _, docy = self:get_line_screen_position(minline)
-  if x > self.position.x and x < self.position.x + self:get_gutter_width() then
-    self.cursor = "arrow"
-    local line = minline + math.floor((y - docy) / self:get_line_height())
-    self.hovering_gutter = self.get_dline and self:get_dline(line) or line
+  if x >= self.position.x and x < self.position.x + breakpoint_column_width(self)
+     and not self:scrollbar_overlaps_point(x, y) then
+    self.hovering_breakpoint_line = self:resolve_screen_position(x, y)
+  end
+end
+
+-- filled shapes from 1px rows, as the renderer has no circles or polygons
+local function draw_disc(cx, cy, r, color)
+  for row = -r, r - 1 do
+    local half = math.sqrt(r * r - (row + 0.5) ^ 2)
+    renderer.draw_rect(cx - half, cy + row, half * 2, 1, color)
+  end
+end
+
+local function draw_arrow(x, cy, r, color)
+  for row = -r, r - 1 do
+    renderer.draw_rect(x, cy + row, (r - math.abs(row + 0.5)) * 2, 1, color)
   end
 end
 
 function DocView:draw_line_gutter(vline, x, y, width)
-  local idx = self.get_dline and self:get_dline(vline) or vline
-  if model:has_breakpoint(self.doc.abs_filename, idx) then
-    renderer.draw_rect(x, y, self:get_gutter_width(), self:get_line_height(), style.debugger.breakpoint)
+  local bw = breakpoint_column_width(self)
+  if bw > 0 then
+    local idx = self.get_dline and self:get_dline(vline) or vline
+    local lh = self:get_line_height()
+    local r = math.floor(lh * 0.3)
+    local cx, cy = x + style.padding.x / 2 + bw / 2, math.floor(y + lh / 2)
+    if model:has_breakpoint(self.doc.abs_filename, idx) then
+      draw_disc(cx, cy, r, style.debugger.breakpoint)
+    end
+    if model.state == "stopped" and debugger.instruction and debugger.instruction[1] == self.doc.abs_filename and idx == debugger.instruction[2] then
+      draw_arrow(cx - r, cy, r, style.debugger.instruction)
+    end
   end
-  if model.state == "stopped" and debugger.instruction and debugger.instruction[1] == self.doc.abs_filename and idx == debugger.instruction[2] then
-    renderer.draw_rect(x, y+1, self:get_gutter_width(), self:get_line_height()-2, style.debugger.instruction)
-  end
-  return draw_line_gutter(self, vline, x, y, width)
+  return draw_line_gutter(self, vline, x + bw, y, width - bw)
 end
 
 function DocView:update()
@@ -665,7 +707,7 @@ end, {
 })
 
 command.add(function()
-  return core.active_view and core.active_view.doc
+  return core.active_view and supports_breakpoints(core.active_view.doc)
 end, {
   ["debugger:toggle-line-breakpoint"] = function(line)
     if not line then line = get_selection(core.active_view, true) end
