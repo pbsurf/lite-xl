@@ -1,5 +1,6 @@
 #!/bin/bash
-# Evaluate Lua in a running lite-xl (needs data/plugins/repl.lua).
+# Evaluate Lua in a running lite-xl (needs the repl plugin, data/extra/plugins/repl.lua,
+# in config.extra_plugins).
 #
 # Usage: lxeval [-g] [-p PID] [-t SECONDS] CODE...
 #        lxeval [-g] [-p PID] [-t SECONDS] -f FILE
@@ -9,7 +10,7 @@
 # within the timeout (default 5s), the editor is stuck: with -g, lxeval then
 # attaches gdb, prints the C backtrace, arms the repl plugin's hook in the running
 # Lua code and waits again, so CODE runs inside the stuck code (see `_where`,
-# `_locals`, abort() in data/plugins/repl.lua).  If there's still no reply, it's stuck
+# `_locals`, abort() in data/extra/plugins/repl.lua).  If there's still no reply, it's stuck
 # in C, and the backtrace is what there is.
 #
 # Exits 1 if the code raised an error, 2 if lite-xl didn't answer.
@@ -59,7 +60,7 @@ wait_reply() {
   done
 }
 
-# Arm the repl hook (registered for every coroutine by data/plugins/repl.lua) on the Lua
+# Arm the repl hook (registered for every coroutine by data/extra/plugins/repl.lua) on the Lua
 # state running in the innermost luaV_execute frame; LUA_MASKCOUNT is 8.
 arm_hook() {
   echo "lxeval: no reply within ${timeout}s; arming the hook via gdb" >&2
