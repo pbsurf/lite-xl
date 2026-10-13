@@ -1,5 +1,6 @@
 -- mod-version:3
 local syntax = require "core.syntax"
+local tokenizer = require "core.tokenizer"
 
 local yaml_bracket_list = {
   patterns = {
@@ -35,7 +36,7 @@ local yaml_bracket_list = {
   symbols = {}
 }
 
-syntax.add {
+local yaml = {
   name = "YAML",
   files = { "%.yml$", "%.yaml$" },
   comment = "#",
@@ -146,9 +147,62 @@ syntax.add {
     { pattern = "%p+",                         type = "string"   }
   },
   symbols = {
-    ["true"]  = "number",
-    ["false"] = "number",
-    ["y"]     = "number",
-    ["n"]     = "number"
+    -- YAML 1.2 core schema; 1.1's y/n/yes/no/on/off are plain strings now
+    ["true"]  = "number", ["True"]  = "number", ["TRUE"]  = "number",
+    ["false"] = "number", ["False"] = "number", ["FALSE"] = "number",
+    ["null"]  = "number", ["Null"]  = "number", ["NULL"]  = "number",
+    ["~"]     = "number"
   }
 }
+
+-- true, null, ... in flow collections too: "[true, null]"
+yaml_bracket_list.symbols = yaml.symbols
+
+syntax.add(yaml)
+
+-- Block scalars ("key: |", "- >-", ...) run until the first non-blank line
+-- indented no deeper than their key, which patterns can't express: the
+-- tokenizer state only records which patterns are open.  So for YAML documents,
+-- keep that indent in the state, as "\255" repeated indent + 1 times (which the
+-- tokenizer reads as no open pattern), and color the content lines here.
+
+-- If `text` starts a block scalar, return the indent its content must exceed.
+local function block_scalar_indent(text)
+  local line = text:gsub("%s+#.*", ""):gsub("%s+$", "")
+  local head = line:match("^(.-)[|>][%-+%d]*$")
+  if not head then return end
+  -- drop anchors and tags before the indicator, as in "key: &a !!str |"
+  repeat
+    local n
+    head, n = head:gsub("%s[&!]%S*%s+$", " ")
+  until n == 0
+  local indent = #head:match("^%s*")
+  local rest, dash = head:sub(indent + 1)
+  -- a sequence entry nests its content one level deeper: "- key: |"
+  while rest:match("^%-%s+") do
+    dash = rest:match("^%-%s+")
+    indent, rest = indent + #dash, rest:sub(#dash + 1)
+  end
+  if rest == "" and dash then
+    return indent - #dash -- "- |": the scalar is the entry itself
+  elseif rest:match("^[^%s].-:%s+$") then
+    return indent
+  end
+end
+
+local tokenize = tokenizer.tokenize
+function tokenizer.tokenize(syn, text, state, resume)
+  if syn ~= yaml then return tokenize(syn, text, state, resume) end
+  if not resume and state and state:byte(1) == 255 then
+    if text:match("^%s*$") or #text:match("^ *") >= #state then
+      return { "string", text }, state
+    end
+    state = nil
+  end
+  local res, new_state, new_resume = tokenize(syn, text, state, resume)
+  if not new_resume and new_state == "\0" then
+    local indent = block_scalar_indent(text)
+    if indent then new_state = ("\255"):rep(indent + 1) end
+  end
+  return res, new_state, new_resume
+end
