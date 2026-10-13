@@ -12,6 +12,8 @@ style.dim = { common.color "#b0b0b0" }
 style.divider = { common.color "#e8e8e8" }
 style.scrollbar = { common.color "#e0e0e0" }
 style.scrollbar2 = { common.color "#c0c0c0" }
+-- summer doesn't set this, so it would keep default's dark track
+style.scrollbar_track = { common.color "#f2f2f2" }
 
 -- Editor
 style.background = { common.color "#ffffff" }                 -- Text
