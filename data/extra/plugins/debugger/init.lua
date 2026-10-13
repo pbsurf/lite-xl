@@ -114,6 +114,7 @@ local draw_line_gutter = DocView.draw_line_gutter
 local docview_get_gutter_width = DocView.get_gutter_width
 local docview_on_mouse_moved = DocView.on_mouse_moved
 local docview_on_mouse_pressed = DocView.on_mouse_pressed
+local docview_on_mouse_left = DocView.on_mouse_left
 local draw_line_text = DocView.draw_line_text
 local docview_draw = DocView.draw
 local docview_update = DocView.update
@@ -258,9 +259,15 @@ local function supports_breakpoints(doc)
   return false
 end
 
--- width of the breakpoint column, left of the line numbers
+-- width added to the gutter for the breakpoint column, left of the line numbers
 local function breakpoint_column_width(dv)
   return supports_breakpoints(dv.doc) and math.floor(dv:get_line_height() * 0.9) or 0
+end
+
+-- the column's clickable area, which includes the gutter's left padding
+local function breakpoint_column_hit_width(dv)
+  local bw = breakpoint_column_width(dv)
+  return bw > 0 and bw + style.padding.x / 2 or 0
 end
 
 function DocView:get_gutter_width()
@@ -282,38 +289,38 @@ function DocView:on_mouse_moved(x, y, ...)
   self.watch_token = nil
   self.hovering_breakpoint_line = nil
   if docview_on_mouse_moved(self, x, y, ...) then return true end
-  if x >= self.position.x and x < self.position.x + breakpoint_column_width(self)
+  if x >= self.position.x and x < self.position.x + breakpoint_column_hit_width(self)
      and not self:scrollbar_overlaps_point(x, y) then
     self.hovering_breakpoint_line = self:resolve_screen_position(x, y)
+    self.cursor = "hand"
   end
 end
 
--- filled shapes from 1px rows, as the renderer has no circles or polygons
-local function draw_disc(cx, cy, r, color)
-  for row = -r, r - 1 do
-    local half = math.sqrt(r * r - (row + 0.5) ^ 2)
-    renderer.draw_rect(cx - half, cy + row, half * 2, 1, color)
-  end
+function DocView:on_mouse_left()
+  docview_on_mouse_left(self)
+  self.hovering_breakpoint_line = nil
 end
 
-local function draw_arrow(x, cy, r, color)
-  for row = -r, r - 1 do
-    renderer.draw_rect(x, cy + row, (r - math.abs(row + 0.5)) * 2, 1, color)
-  end
+-- Markers are glyphs of the code font, so they're antialiased (the renderer can
+-- only draw aliased rectangles) and follow zoom.
+local function draw_marker(dv, glyph, x, y, color, opacity)
+  if opacity then color = { color[1], color[2], color[3], (color[4] or 255) * opacity } end
+  common.draw_text(dv:get_font(), color, glyph, "center", x, y,
+    breakpoint_column_hit_width(dv), dv:get_line_height())
 end
 
 function DocView:draw_line_gutter(vline, x, y, width)
   local bw = breakpoint_column_width(self)
   if bw > 0 then
     local idx = self.get_dline and self:get_dline(vline) or vline
-    local lh = self:get_line_height()
-    local r = math.floor(lh * 0.3)
-    local cx, cy = x + style.padding.x / 2 + bw / 2, math.floor(y + lh / 2)
     if model:has_breakpoint(self.doc.abs_filename, idx) then
-      draw_disc(cx, cy, r, style.debugger.breakpoint)
+      draw_marker(self, "●", x, y, style.debugger.breakpoint)
+    elseif self.hovering_breakpoint_line == idx then
+      -- preview where a click would set one
+      draw_marker(self, "●", x, y, style.debugger.breakpoint, 0.35)
     end
     if model.state == "stopped" and debugger.instruction and debugger.instruction[1] == self.doc.abs_filename and idx == debugger.instruction[2] then
-      draw_arrow(cx - r, cy, r, style.debugger.instruction)
+      draw_marker(self, "▶", x, y, style.debugger.instruction)
     end
   end
   return draw_line_gutter(self, vline, x + bw, y, width - bw)
