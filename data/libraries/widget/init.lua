@@ -216,10 +216,13 @@ function Widget:show()
     self.prev_size.x = 0
     self.prev_size.y = 0
   end
+  if self.visible then return end
   self.visible = true
   -- re-triggers update to make sure everything was properly calculated
   -- and redraw the interface once, maybe something else can be changed
   -- to not require this action, but for now lets do this.
+  -- Only on hide -> show: callers like search_ui show() from update() on
+  -- every frame, and the redraw would keep the editor drawing forever.
   core.add_thread(function()
     self:update()
     core.redraw = true
