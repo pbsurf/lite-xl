@@ -1,0 +1,2 @@
+# imported snapshots: keep them byte-for-byte (some upstream files are CRLF)
+* -text
