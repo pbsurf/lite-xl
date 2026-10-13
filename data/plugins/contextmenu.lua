@@ -4,7 +4,6 @@ local command = require "core.command"
 local keymap = require "core.keymap"
 local ContextMenu = require "core.contextmenu"
 local RootView = require "core.rootview"
-local config = require "core.config"
 
 local menu = ContextMenu()
 local on_view_mouse_pressed = RootView.on_view_mouse_pressed
@@ -71,13 +70,6 @@ local cmds = {
   { text = "Find",    command = "find-replace:find"    },
   { text = "Replace", command = "find-replace:replace" }
 }
-
-if config.plugins.scale ~= false and require("plugins.scale") then
-  table.move(cmds, 4, 6, 7)
-  cmds[4] = { text = "Font +",     command = "scale:increase" }
-  cmds[5] = { text = "Font -",     command = "scale:decrease" }
-  cmds[6] = { text = "Font Reset", command = "scale:reset"    }
-end
 
 menu:register("core.docview", cmds)
 

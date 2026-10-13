@@ -168,6 +168,10 @@ command.add(nil, {
   ["scale:increase"] = function() inc_scale() end,
 })
 
+command.keywords["scale:reset"] = "font size zoom default"
+command.keywords["scale:decrease"] = "font size zoom out smaller"
+command.keywords["scale:increase"] = "font size zoom in bigger larger"
+
 keymap.add {
   ["ctrl+0"] = "scale:reset",
   ["ctrl+-"] = "scale:decrease",

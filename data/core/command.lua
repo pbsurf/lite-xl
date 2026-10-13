@@ -1,6 +1,11 @@
 local core = require "core"
 local command = {}
 
+---Extra words `core:find-command` matches for a command, so it can be found by
+---what it does as well as by its name; e.g. "font zoom" for "scale:increase".
+---@type table<string, string>
+command.keywords = {}
+
 ---A predicate function accepts arguments from `command.perform()` and evaluates to a boolean. </br>
 ---If the function returns true, then the function associated with the command is executed.
 ---

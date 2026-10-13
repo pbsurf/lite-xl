@@ -73,12 +73,24 @@ command.add(nil, {
         end
       end,
       suggest = function(text)
-        local res = common.fuzzy_match(commands, text)
-        for i, name in ipairs(res) do
+        local res = {}
+        for _, name in ipairs(commands) do
+          local score = system.fuzzy_match(name, text)
+          local keywords = command.keywords[name]
+          if keywords then
+            -- scored separately, as the matcher penalizes longer strings; keywords
+            -- first, so e.g. "font inc" finds "scale:increase"
+            local kscore = system.fuzzy_match(keywords .. " " .. name, text)
+            if kscore and (not score or kscore > score) then score = kscore end
+          end
+          if score then table.insert(res, { name = name, score = score }) end
+        end
+        table.sort(res, function(a, b) return a.score > b.score end)
+        for i, item in ipairs(res) do
           res[i] = {
-            text = command.prettify_name(name),
-            info = keymap.get_binding(name),
-            command = name,
+            text = command.prettify_name(item.name),
+            info = keymap.get_binding(item.name),
+            command = item.name,
           }
         end
         return res
