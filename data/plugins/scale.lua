@@ -81,7 +81,9 @@ local function get_scale()
 end
 
 local function res_scale()
-  set_scale(default_scale)
+  -- the configured default, as applied at startup; else the autodetected one
+  local scale = config.plugins.scale.default_scale
+  set_scale(type(scale) == "number" and scale or default_scale)
 end
 
 local function inc_scale()
