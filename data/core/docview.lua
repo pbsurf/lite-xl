@@ -388,7 +388,9 @@ function DocView:on_mouse_moved(x, y, ...)
     self.cursor = "ibeam"
   end
 
-  if self.mouse_selecting then
+  if self.gutter_selecting then
+    self:select_whole_lines(self.gutter_selecting, (self:resolve_screen_position(x, y)))
+  elseif self.mouse_selecting then
     local l1, c1 = self:resolve_screen_position(x, y)
     local l2, c2, snap_type = table.unpack(self.mouse_selecting)
     if keymap.modkeys["ctrl"] then
@@ -425,6 +427,20 @@ function DocView:mouse_selection(doc, snap_type, line1, col1, line2, col2)
 end
 
 
+---Selects lines `anchor` to `line` (in either order) including the last line's
+---newline, with the caret at the end on `line`'s side.
+function DocView:select_whole_lines(anchor, line)
+  local first, last = math.min(anchor, line), math.max(anchor, line)
+  local end_line, end_col = last + 1, 1
+  if last == #self.doc.lines then end_line, end_col = last, #self.doc.lines[last] end
+  if line < anchor then
+    self.doc:set_selection(first, 1, end_line, end_col)
+  else
+    self.doc:set_selection(end_line, end_col, first, 1)
+  end
+end
+
+
 function DocView:on_mouse_pressed(button, x, y, clicks)
   if button ~= "left" or not self.hovering_gutter then
     return DocView.super.on_mouse_pressed(self, button, x, y, clicks)
@@ -438,11 +454,9 @@ function DocView:on_mouse_pressed(button, x, y, clicks)
       self.doc:set_selection(line, 1, sline2, #self.doc.lines[sline2])
     end
   else
-    if clicks == 1 then
-      self.doc:set_selection(line, 1, line, 1)
-    elseif clicks == 2 then
-      self.doc:set_selection(line, 1, line, #self.doc.lines[line])
-    end
+    -- select the line; dragging extends the selection by whole lines
+    self:select_whole_lines(line, line)
+    self.gutter_selecting = line
   end
   return true
 end
@@ -451,6 +465,7 @@ end
 function DocView:on_mouse_released(...)
   DocView.super.on_mouse_released(self, ...)
   self.mouse_selecting = nil
+  self.gutter_selecting = nil
 end
 
 
