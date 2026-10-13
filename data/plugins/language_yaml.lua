@@ -10,7 +10,7 @@ local yaml_bracket_list = {
     { pattern = { "'", "'", '\\' },            type = "string"   },
     -- keys
     {
-      pattern = "[%w%d]+%g+()%s*():()%s",
+      pattern = "%w%g*()%s*():()%s",
       type = { "keyword2", "normal", "operator", "normal" }
     },
      -- variables
@@ -44,11 +44,11 @@ syntax.add {
   --- rules that start with spaces first and those taking precedence
     -- parent and child keys
     {
-      pattern = "^[%w%d]+%g+%s*%f[:]",
+      pattern = "^%w%g*%s*%f[:]",
       type = "literal"
     },
     {
-      pattern = "^%s+[%w%d]+%g+%s*%f[:]",
+      pattern = "^%s+%w%g*%s*%f[:]",
       type = "keyword2"
     },
     -- bracket lists after key declaration
@@ -62,12 +62,12 @@ syntax.add {
     },
     -- child key
     {
-      pattern = "^%s+()[%w%d]+%g+()%s*():()%s",
+      pattern = "^%s+()%w%g*()%s*():()%s",
       type = { "normal", "keyword2", "normal", "operator", "normal" }
     },
     -- child list element
     {
-      pattern = "^%s+()%-()%s+()[%w%d]+%g+()%s*():()%s",
+      pattern = "^%s+()%-()%s+()%w%g*()%s*():()%s",
       type = { "normal", "operator", "normal", "keyword2", "normal", "operator", "normal" }
     },
     -- unkeyed bracket lists
@@ -109,7 +109,7 @@ syntax.add {
     { pattern = "%.NaN",                       type = "number"   },
     -- parent list element
     {
-      pattern = "^%-()%s+()[%w%d]+%g+()%s*():()%s",
+      pattern = "^%-()%s+()%w%g*()%s*():()%s",
       type = { "operator", "normal", "keyword2", "normal", "operator", "normal" }
     },
     -- key label
@@ -127,7 +127,7 @@ syntax.add {
     { pattern = "!!%g+",                       type = "keyword"  },
     -- parent key
     {
-      pattern = "^[%w%d]+%g+()%s*():()%s",
+      pattern = "^%w%g*()%s*():()%s",
       type = { "literal", "normal", "operator", "normal" }
     },
     -- variables
