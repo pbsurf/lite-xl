@@ -57,6 +57,10 @@ config.max_clicks = 3
 -- set as true to be able to test non supported plugins
 config.skip_plugins_version = false
 
+-- names of the plugins in EXTRADIR/plugins to load, e.g. { "lsp", "minimap" };
+-- unlike those in DATADIR/plugins and USERDIR/plugins, they're off by default
+config.extra_plugins = {}
+
 -- holds the plugins real config table
 local plugins_config = {}
 
