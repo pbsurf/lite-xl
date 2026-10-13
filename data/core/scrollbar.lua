@@ -1,6 +1,7 @@
 local core = require "core"
 local common = require "core.common"
 local config = require "core.config"
+local keymap = require "core.keymap"
 local style = require "core.style"
 local Object = require "core.object"
 
@@ -27,6 +28,7 @@ function Scrollbar:__tostring() return "Scrollbar" end
 ---@field force_status "expanded" | "contracted" | false @Force the scrollbar status
 ---@field expanded_size number? @Override the default value specified by `style.expanded_scrollbar_size`
 ---@field contracted_size number? @Override the default value specified by `style.scrollbar_size`
+---@field page_on_track_click boolean? @Clicking the track pages instead of jumping there (default true)
 
 ---@param options ScrollbarOptions
 function Scrollbar:new(options)
@@ -64,6 +66,8 @@ function Scrollbar:new(options)
   self.contracted_size = options.contracted_size
   ---@type number? @Override the default value specified by `style.scrollbar_size`
   self.expanded_size = options.expanded_size
+  ---@type boolean @Clicking the track pages towards the click; shift+click jumps there
+  self.page_on_track_click = options.page_on_track_click ~= false
 end
 
 
@@ -186,11 +190,15 @@ function Scrollbar:_on_mouse_pressed_normal(button, x, y, clicks)
   local overlaps = self:_overlaps_normal(x, y)
   if overlaps then
     local _, along, _, along_size = self:_get_thumb_rect_normal()
-    self.dragging = true
     if overlaps == "thumb" then
+      self.dragging = true
       self.drag_start_offset = along - y
       return true
     elseif overlaps == "track" then
+      if self.page_on_track_click and not keymap.modkeys["shift"] then
+        return y < along and "page_backward" or "page_forward"
+      end
+      self.dragging = true
       local nr = self.normal_rect
       self.drag_start_offset = - along_size / 2
       return common.clamp((y - nr.along - along_size / 2) / (nr.along_size - along_size), 0, 1)
@@ -206,9 +214,10 @@ end
 ---
 ---Returns a falsy value if the event happened outside the scrollbar.
 ---Returns `true` if the thumb was pressed.
----If the track was pressed this returns a value between 0 and 1
----representing the percent of the position.
----@return boolean|number
+---If the track was pressed this returns "page_backward" or "page_forward",
+---or with shift held, a value between 0 and 1 representing the percent of
+---the position.
+---@return boolean|number|"page_backward"|"page_forward"
 function Scrollbar:on_mouse_pressed(button, x, y, clicks)
   if button ~= "left" then return end
   x, y = self:real_to_normal(x, y)

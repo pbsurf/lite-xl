@@ -139,14 +139,22 @@ function View:on_mouse_pressed(button, x, y, clicks)
   if not self.scrollable then return end
   local result = self.v_scrollbar:on_mouse_pressed(button, x, y, clicks)
   if result then
-    if result ~= true then
+    if type(result) == "string" then
+      local _, _, _, h_track = self.h_scrollbar:get_track_rect()
+      local page = self.size.y - h_track
+      self.scroll.to.y = self.scroll.to.y + (result == "page_forward" and page or -page)
+    elseif result ~= true then
       self.scroll.to.y = result * self:get_scrollable_size()
     end
     return true
   end
   result = self.h_scrollbar:on_mouse_pressed(button, x, y, clicks)
   if result then
-    if result ~= true then
+    if type(result) == "string" then
+      local _, _, v_track = self.v_scrollbar:get_track_rect()
+      local page = self.size.x - v_track
+      self.scroll.to.x = self.scroll.to.x + (result == "page_forward" and page or -page)
+    elseif result ~= true then
       self.scroll.to.x = result * self:get_h_scrollable_size()
     end
     return true

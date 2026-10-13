@@ -294,7 +294,9 @@ function MiniMap:new(dv, original_v_scrollbar)
   MiniMap.super.new(self, { direction = "v", alignment = "e",
                             force_status = "expanded",
                             expanded_size = cached_settings.width,
-                            expanded_margin = 0 })
+                            expanded_margin = 0,
+                            -- clicking jumps to the clicked line
+                            page_on_track_click = false })
   self.original_force_status = original_v_scrollbar.force_status
   self.original_expanded_size = original_v_scrollbar.expanded_size
   self.original_expanded_margin = original_v_scrollbar.expanded_margin
