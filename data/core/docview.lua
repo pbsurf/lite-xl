@@ -68,6 +68,9 @@ function DocView:new(doc)
   self.hovering_gutter = false
   self.v_scrollbar:set_forced_status(config.force_scrollbar_status)
   self.h_scrollbar:set_forced_status(config.force_scrollbar_status)
+  -- widest line seen this session; nil when it needs a full measure
+  self.max_line_width = nil
+  doc:add_lines_listener(self)
 end
 
 
@@ -120,8 +123,102 @@ function DocView:get_scrollable_size()
   return self:get_line_height() * (#self.doc.lines - 1) + self.size.y
 end
 
+
+-- Uses the default font only; tokens drawn with `style.syntax_fonts` are ignored.
+local function measure_lines(font, lines, line1, line2, width)
+  for i = line1, line2 do
+    local text = lines[i]
+    if text then
+      width = math.max(width, font:get_width(text:sub(1, -2)))
+    end
+  end
+  return width
+end
+
+
+function DocView:on_doc_lines_changed(doc, line1, line2)
+  if not line1 then
+    self.max_line_width = nil
+    self.max_line_width_scan = nil
+  elseif self.max_line_width then
+    -- grow only, so the scroll width doesn't jump around while editing
+    local font = self:get_font()
+    font:set_tab_size(select(2, doc:get_indent_info()))
+    self.max_line_width = measure_lines(font, doc.lines, line1, line2, self.max_line_width)
+    if self.max_line_width_scan then
+      self.max_line_width_scanned = measure_lines(font, doc.lines, line1, line2, self.max_line_width_scanned)
+    end
+  end
+end
+
+
+-- Measures every line in a background thread, as that can take a noticeable
+-- time on large files. Until it's done, the width is `estimate` or the widest
+-- line measured so far, whichever is larger.
+function DocView:start_max_line_width_scan(estimate)
+  local token = {}
+  self.max_line_width_scan = token
+  -- measure what's on screen now, so the scroll position isn't clamped meanwhile
+  local font = self:get_font()
+  font:set_tab_size(select(2, self.doc:get_indent_info()))
+  local minline, maxline = self:get_visible_line_range()
+  local width = measure_lines(font, self.doc.lines, minline, maxline, 0)
+  for _, line1, _, line2 in self.doc:get_selections() do
+    width = measure_lines(font, self.doc.lines, line1, line1, width)
+    width = measure_lines(font, self.doc.lines, line2, line2, width)
+  end
+  self.max_line_width_scanned = width
+  self.max_line_width = math.max(estimate, width)
+  core.add_thread(function()
+    local i, nlines = 1, #self.doc.lines
+    while self.max_line_width_scan == token and i <= #self.doc.lines do
+      -- restart if lines were added or removed, as that shifts unscanned lines
+      if #self.doc.lines ~= nlines then i, nlines = 1, #self.doc.lines end
+      local font = self:get_font()
+      font:set_tab_size(select(2, self.doc:get_indent_info()))
+      local last = math.min(i + 2000, nlines)
+      self.max_line_width_scanned = measure_lines(font, self.doc.lines, i, last, self.max_line_width_scanned)
+      self.max_line_width = math.max(self.max_line_width, self.max_line_width_scanned)
+      i = last + 1
+      coroutine.yield()
+    end
+    if self.max_line_width_scan == token then
+      self.max_line_width_scan = nil
+      self.max_line_width = self.max_line_width_scanned
+    end
+  end, token)
+end
+
+
+-- Rescans when the font, its size (zoom changes it in place) or the tab size
+-- changes, or after the document is reloaded.
+function DocView:get_max_line_width()
+  local font = self:get_font()
+  local font_size = font:get_size()
+  local _, indent_size = self.doc:get_indent_info()
+  if not self.max_line_width
+    or font ~= self.max_line_width_font
+    or font_size ~= self.max_line_width_font_size
+    or indent_size ~= self.max_line_width_indent
+  then
+    local estimate = 0
+    if self.max_line_width and font == self.max_line_width_font then
+      estimate = self.max_line_width * font_size / self.max_line_width_font_size
+    end
+    self.max_line_width_font = font
+    self.max_line_width_font_size = font_size
+    self.max_line_width_indent = indent_size
+    self:start_max_line_width_scan(estimate)
+  end
+  return self.max_line_width
+end
+
+
 function DocView:get_h_scrollable_size()
-  return math.huge
+  -- matches the margins used by scroll_to_make_visible
+  local _, _, scroll_w = self.v_scrollbar:get_track_rect()
+  local xmargin = 3 * self:get_font():get_width(' ')
+  return self:get_gutter_width() + self:get_max_line_width() + xmargin + scroll_w
 end
 
 

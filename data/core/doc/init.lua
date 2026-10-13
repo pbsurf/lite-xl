@@ -84,6 +84,7 @@ function Doc:load(filename)
   end
   fp:close()
   self:reset_syntax()
+  self:notify_lines_changed()
 end
 
 
@@ -142,6 +143,23 @@ function Doc:get_indent_info()
   return self.indent_info.type or config.tab_type,
          self.indent_info.size or config.indent_size,
          self.indent_info.confirmed
+end
+
+
+---Registers `listener` to have `listener:on_doc_lines_changed(doc, line1, line2)`
+---called whenever lines `line1` to `line2` change; both are nil when all lines
+---were replaced. Listeners are held weakly.
+function Doc:add_lines_listener(listener)
+  self.lines_listeners = self.lines_listeners or setmetatable({}, { __mode = "k" })
+  self.lines_listeners[listener] = true
+end
+
+
+function Doc:notify_lines_changed(line1, line2)
+  if not self.lines_listeners then return end
+  for listener in pairs(self.lines_listeners) do
+    listener:on_doc_lines_changed(self, line1, line2)
+  end
 end
 
 
@@ -409,6 +427,7 @@ function Doc:raw_insert(line, col, text, undo_stack, time)
 
   -- splice lines into line array
   common.splice(self.lines, line, 1, lines)
+  self:notify_lines_changed(line, line + #lines - 1)
 
   -- keep cursors where they should be
   for idx, cline1, ccol1, cline2, ccol2 in self:get_selections(true, true) do
@@ -444,6 +463,7 @@ function Doc:raw_remove(line1, col1, line2, col2, undo_stack, time)
 
   -- splice line into line array
   common.splice(self.lines, line1, line_removal + 1, { before .. after })
+  self:notify_lines_changed(line1, line1)
 
   local merge = false
 
