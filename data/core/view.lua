@@ -130,6 +130,48 @@ function View:scrollbar_hovering()
 end
 
 
+---Scrolls one page along `scrollbar` if its thumb hasn't reached the pointer
+---yet; returns whether it scrolled.
+local function page_scroll(self, scrollbar, direction, x, y)
+  local axis, page, size
+  if scrollbar.direction == "v" then
+    local _, _, _, h_track = self.h_scrollbar:get_track_rect()
+    axis, page, size = "y", self.size.y - h_track, self:get_scrollable_size()
+  else
+    local _, _, v_track = self.v_scrollbar:get_track_rect()
+    axis, page, size = "x", self.size.x - v_track, self:get_h_scrollable_size()
+  end
+  local target = scrollbar:get_percent_at(x, y) * size
+  local pos = self.scroll.to[axis]
+  if direction == "page_forward" and pos < target then
+    self.scroll.to[axis] = pos + page
+  elseif direction == "page_backward" and pos > target then
+    self.scroll.to[axis] = pos - page
+  else
+    return false
+  end
+  self:clamp_scroll_position()
+  return true
+end
+
+
+---Pages once, then repeatedly while the button is held, like most toolkits.
+local function start_paging(self, scrollbar, direction, x, y)
+  page_scroll(self, scrollbar, direction, x, y)
+  local paging = { x = x, y = y }
+  self.scroll_paging = paging
+  core.add_thread(function()
+    coroutine.yield(0.4)
+    while self.scroll_paging == paging do
+      if page_scroll(self, scrollbar, direction, paging.x, paging.y) then
+        core.redraw = true
+      end
+      coroutine.yield(0.05)
+    end
+  end, paging)
+end
+
+
 ---@param button core.view.mousebutton
 ---@param x number
 ---@param y number
@@ -140,9 +182,7 @@ function View:on_mouse_pressed(button, x, y, clicks)
   local result = self.v_scrollbar:on_mouse_pressed(button, x, y, clicks)
   if result then
     if type(result) == "string" then
-      local _, _, _, h_track = self.h_scrollbar:get_track_rect()
-      local page = self.size.y - h_track
-      self.scroll.to.y = self.scroll.to.y + (result == "page_forward" and page or -page)
+      start_paging(self, self.v_scrollbar, result, x, y)
     elseif result ~= true then
       self.scroll.to.y = result * self:get_scrollable_size()
     end
@@ -151,9 +191,7 @@ function View:on_mouse_pressed(button, x, y, clicks)
   result = self.h_scrollbar:on_mouse_pressed(button, x, y, clicks)
   if result then
     if type(result) == "string" then
-      local _, _, v_track = self.v_scrollbar:get_track_rect()
-      local page = self.size.x - v_track
-      self.scroll.to.x = self.scroll.to.x + (result == "page_forward" and page or -page)
+      start_paging(self, self.h_scrollbar, result, x, y)
     elseif result ~= true then
       self.scroll.to.x = result * self:get_h_scrollable_size()
     end
@@ -167,6 +205,7 @@ end
 ---@param y number
 function View:on_mouse_released(button, x, y)
   if not self.scrollable then return end
+  self.scroll_paging = nil
   self.v_scrollbar:on_mouse_released(button, x, y)
   self.h_scrollbar:on_mouse_released(button, x, y)
 end
@@ -178,6 +217,10 @@ end
 ---@param dy number
 function View:on_mouse_moved(x, y, dx, dy)
   if not self.scrollable then return end
+  if self.scroll_paging then
+    self.scroll_paging.x, self.scroll_paging.y = x, y
+    return true
+  end
   local result
   if self.h_scrollbar.dragging then goto skip_v_scrollbar end
   result = self.v_scrollbar:on_mouse_moved(x, y, dx, dy)

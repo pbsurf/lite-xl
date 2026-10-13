@@ -199,11 +199,23 @@ function Scrollbar:_on_mouse_pressed_normal(button, x, y, clicks)
         return y < along and "page_backward" or "page_forward"
       end
       self.dragging = true
-      local nr = self.normal_rect
       self.drag_start_offset = - along_size / 2
-      return common.clamp((y - nr.along - along_size / 2) / (nr.along_size - along_size), 0, 1)
+      return self:_get_percent_at_normal(y)
     end
   end
+end
+
+function Scrollbar:_get_percent_at_normal(along)
+  local _, _, _, thumb_size = self:_get_thumb_rect_normal()
+  local nr = self.normal_rect
+  return common.clamp((along - nr.along - thumb_size / 2) / (nr.along_size - thumb_size), 0, 1)
+end
+
+---Returns the percent [0-1] that would center the thumb on the given point.
+---@return number
+function Scrollbar:get_percent_at(x, y)
+  local _, along = self:real_to_normal(x, y)
+  return self:_get_percent_at_normal(along)
 end
 
 ---Updates the scrollbar with mouse pressed info.
