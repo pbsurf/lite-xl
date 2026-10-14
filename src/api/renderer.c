@@ -359,6 +359,53 @@ static int f_draw_text(lua_State *L) {
   return 1;
 }
 
+/* path: {"M", x, y, "L", x, y, "Q", cx, cy, x, y, "C", c1x, c1y, c2x, c2y, x, y, "Z", ...} */
+static int f_draw_path(lua_State *L) {
+  luaL_checktype(L, 1, LUA_TTABLE);
+  RenColor color = checkcolor(L, 2, 255);
+  float stroke_width = luaL_optnumber(L, 3, 0);
+  int len = luaL_len(L, 1), ncmds = 0, ncoords = 0;
+  for (int i = 1; i <= len; i++) {
+    if (lua_rawgeti(L, 1, i) == LUA_TSTRING) ncmds++; else ncoords++;
+    lua_pop(L, 1);
+  }
+  char *cmds = lua_newuserdatauv(L, ncmds + 1, 0);
+  float *coords = lua_newuserdatauv(L, (ncoords + 1) * sizeof(float), 0);
+  int c = 0, n = 0, need = 0;
+  for (int i = 1; i <= len; i++) {
+    if (lua_rawgeti(L, 1, i) == LUA_TSTRING) {
+      const char *s = lua_tostring(L, -1);
+      if (need > 0)
+        return luaL_error(L, "path element %d: '%c' needs %d more coordinates", i, cmds[c-1], need);
+      if (c == 0 && s[0] != 'M')
+        return luaL_error(L, "path element %d: path must begin with 'M'", i);
+      if (c > 0 && cmds[c-1] == 'Z' && s[0] != 'M')
+        return luaL_error(L, "path element %d: 'Z' must be followed by 'M'", i);
+      switch (s[0]) {
+        case 'M': case 'L': need = 2; break;
+        case 'Q': need = 4; break;
+        case 'C': need = 6; break;
+        case 'Z': need = 0; break;
+        default: return luaL_error(L, "path element %d: unknown command '%s'", i, s);
+      }
+      cmds[c++] = s[0];
+    } else {
+      if (!lua_isnumber(L, -1))
+        return luaL_error(L, "path element %d: expected a command or a number", i);
+      if (need-- <= 0)
+        return luaL_error(L, "path element %d: unexpected coordinate", i);
+      coords[n++] = lua_tonumber(L, -1);
+    }
+    lua_pop(L, 1);
+  }
+  if (need > 0)
+    return luaL_error(L, "path: '%c' needs %d more coordinates", cmds[c-1], need);
+  if (n / 2 > 32767)
+    return luaL_error(L, "path: too many points");
+  rencache_draw_path(&window_renderer, cmds, c, coords, n, stroke_width, color);
+  return 0;
+}
+
 static const luaL_Reg lib[] = {
   { "show_debug",         f_show_debug         },
   { "get_size",           f_get_size           },
@@ -367,6 +414,7 @@ static const luaL_Reg lib[] = {
   { "set_clip_rect",      f_set_clip_rect      },
   { "draw_rect",          f_draw_rect          },
   { "draw_text",          f_draw_text          },
+  { "draw_path",          f_draw_path          },
   { NULL,                 NULL                 }
 };
 

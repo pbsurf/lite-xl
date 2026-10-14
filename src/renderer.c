@@ -8,6 +8,7 @@
 #include FT_FREETYPE_H
 #include FT_LCD_FILTER_H
 #include FT_OUTLINE_H
+#include FT_STROKER_H
 #include FT_SYSTEM_H
 
 #include "renderer.h"
@@ -730,10 +731,181 @@ void ren_draw_rect(RenSurface *rs, RenRect rect, RenColor color) {
   }
 }
 
+/******************* Paths **********************/
+// Antialiased fill or stroke of a path: FreeType builds the outline (FT_Stroker for
+// strokes) and its smooth rasterizer reports the coverage of each pixel span, which
+// is blended into the surface.
+//
+// The rasterizer keeps each scanline's cells in a list sorted by x and walks it to
+// insert every new cell, so a wide shape with many edges per scanline (a long
+// squiggly underline) costs quadratically in its width; it also re-processes the
+// whole outline whenever a band overflows its small cell pool. So shapes wider than
+// tall are rendered transposed: scanlines become columns of the surface.
+
+static FT_Stroker stroker = NULL;
+
+typedef struct {
+  SDL_Surface *surface;
+  const SDL_PixelFormatDetails *format;
+  SDL_Rect clip;
+  RenColor color;
+  bool transposed;  // raster scanlines are surface columns, raster x is surface y
+} PathTarget;
+
+static int path_cmd_ncoords(char cmd) {
+  switch (cmd) {
+    case 'M': case 'L': return 2;
+    case 'Q': return 4;
+    case 'C': return 6;
+    case 'Z': return 0;
+    default:  return -1;
+  }
+}
+
+static inline void path_blend(uint32_t *pixel, const PathTarget *t, unsigned a) {
+  const SDL_PixelFormatDetails *f = t->format;
+  uint32_t d = *pixel;
+  unsigned r = (d & f->Rmask) >> f->Rshift, g = (d & f->Gmask) >> f->Gshift, b = (d & f->Bmask) >> f->Bshift;
+  r = (t->color.r * a + r * (65025 - a) + 32767) / 65025;
+  g = (t->color.g * a + g * (65025 - a) + 32767) / 65025;
+  b = (t->color.b * a + b * (65025 - a) + 32767) / 65025;
+  *pixel = (d & f->Amask) | r << f->Rshift | g << f->Gshift | b << f->Bshift;
+}
+
+static void path_spans(int y, int count, const FT_Span *spans, void *user) {
+  PathTarget *t = user;
+  SDL_Surface *s = t->surface;
+  // raster y points up, surface y down: raster line y is surface row (or column) -y-1
+  int line = -y - 1, lo = t->transposed ? t->clip.y : t->clip.x;
+  int hi = lo + (t->transposed ? t->clip.h : t->clip.w);
+  if (t->transposed ? line < t->clip.x || line >= t->clip.x + t->clip.w
+                    : line < t->clip.y || line >= t->clip.y + t->clip.h) return;
+  for (int i = 0; i < count; i++) {
+    int p1 = spans[i].x > lo ? spans[i].x : lo;
+    int p2 = spans[i].x + spans[i].len < hi ? spans[i].x + spans[i].len : hi;
+    unsigned a = spans[i].coverage * t->color.a;  // 0..65025
+    for (int p = p1; p < p2; p++) {
+      int row = t->transposed ? p : line, col = t->transposed ? line : p;
+      path_blend((uint32_t*)((uint8_t*)s->pixels + row * s->pitch) + col, t, a);
+    }
+  }
+}
+
+static FT_Vector path_point(const float *c, int scale) {
+  return (FT_Vector){ lroundf(c[0] * scale * 64), -lroundf(c[1] * scale * 64) };
+}
+
+// fill: one closed contour per subpath, nonzero winding
+static FT_Error path_fill_outline(const char *cmds, int ncmds, const float *coords, int scale, FT_Outline *outline) {
+  int npoints = 0, ncontours = 0;
+  for (int i = 0; i < ncmds; i++) {
+    npoints += path_cmd_ncoords(cmds[i]) / 2;
+    if (cmds[i] == 'M') ncontours++;
+  }
+  FT_Error err = FT_Outline_New(library, npoints, ncontours, outline);
+  if (err) return err;
+  int p = 0, c = -1;
+  for (int i = 0; i < ncmds; i++) {
+    int n = path_cmd_ncoords(cmds[i]) / 2;
+    char ctrl = cmds[i] == 'Q' ? FT_CURVE_TAG_CONIC : FT_CURVE_TAG_CUBIC;
+    for (int k = 0; k < n; k++, p++, coords += 2) {
+      outline->points[p] = path_point(coords, scale);
+      outline->tags[p] = k == n - 1 ? FT_CURVE_TAG_ON : ctrl;
+    }
+    if (cmds[i] == 'M') c++;
+    if (c >= 0) outline->contours[c] = p - 1;
+  }
+  return 0;
+}
+
+// stroke: subpaths ending in Z are closed, the others open. FT_Stroker crashes on a
+// subpath without segments, so each is begun at its first segment of nonzero length.
+static FT_Error path_stroke_outline(const char *cmds, int ncmds, const float *coords, int scale, float width, FT_Outline *outline) {
+  FT_Error err;
+  if (!stroker && (err = FT_Stroker_New(library, &stroker))) return err;
+  FT_Stroker_Set(stroker, lroundf(width * scale * 32), FT_STROKER_LINECAP_BUTT, FT_STROKER_LINEJOIN_ROUND, 0);
+  FT_Vector start = {0}, cur = {0};
+  bool open = true, begun = false;
+  for (int i = 0; i < ncmds; i++) {
+    int n = path_cmd_ncoords(cmds[i]) / 2;
+    FT_Vector v[3];
+    bool moves = false;
+    for (int k = 0; k < n; k++) {
+      v[k] = path_point(coords + 2 * k, scale);
+      moves = moves || v[k].x != cur.x || v[k].y != cur.y;
+    }
+    coords += 2 * n;
+    if (cmds[i] == 'M' || cmds[i] == 'Z') {
+      if (begun) FT_Stroker_EndSubPath(stroker);
+      begun = false;
+      if (cmds[i] == 'M') {
+        int j = i + 1;
+        while (j < ncmds && cmds[j] != 'M' && cmds[j] != 'Z') j++;
+        open = j >= ncmds || cmds[j] != 'Z';
+        start = cur = v[0];
+      }
+      continue;
+    }
+    if (!moves) continue;
+    if (!begun) { FT_Stroker_BeginSubPath(stroker, &start, open); begun = true; }
+    switch (cmds[i]) {
+      case 'L': FT_Stroker_LineTo(stroker, &v[0]); break;
+      case 'Q': FT_Stroker_ConicTo(stroker, &v[0], &v[1]); break;
+      case 'C': FT_Stroker_CubicTo(stroker, &v[0], &v[1], &v[2]); break;
+    }
+    cur = v[n - 1];
+  }
+  if (begun) FT_Stroker_EndSubPath(stroker);
+  FT_UInt npoints, ncontours;
+  if ((err = FT_Stroker_GetCounts(stroker, &npoints, &ncontours))) return err;
+  if ((err = FT_Outline_New(library, npoints, ncontours, outline))) return err;
+  outline->n_points = outline->n_contours = 0;
+  FT_Stroker_Export(stroker, outline);
+  return 0;
+}
+
+void ren_draw_path(RenSurface *rs, const char *cmds, int ncmds, const float *coords, float stroke_width, RenColor color) {
+  if (color.a == 0 || ncmds == 0) return;
+  PathTarget target = { rs->surface, SDL_GetPixelFormatDetails(rs->surface->format), {0}, color, false };
+  SDL_GetSurfaceClipRect(rs->surface, &target.clip);
+  if (target.clip.w <= 0 || target.clip.h <= 0) return;
+
+  FT_Outline outline;
+  FT_Error err = stroke_width > 0
+    ? path_stroke_outline(cmds, ncmds, coords, rs->scale, stroke_width, &outline)
+    : path_fill_outline(cmds, ncmds, coords, rs->scale, &outline);
+  if (err) {
+    fprintf(stderr, "ren_draw_path: %s\n", get_ft_error(err));
+    return;
+  }
+  FT_BBox cbox;
+  FT_Outline_Get_CBox(&outline, &cbox);
+  target.transposed = cbox.xMax - cbox.xMin > cbox.yMax - cbox.yMin;
+  if (target.transposed) {
+    // (x, y) -> (-y, -x): raster x becomes surface y, raster y minus surface x
+    for (int i = 0; i < outline.n_points; i++) {
+      FT_Pos x = outline.points[i].x;
+      outline.points[i].x = -outline.points[i].y;
+      outline.points[i].y = -x;
+    }
+  }
+  FT_Raster_Params params = {0};
+  params.flags = FT_RASTER_FLAG_AA | FT_RASTER_FLAG_DIRECT | FT_RASTER_FLAG_CLIP;
+  params.gray_spans = path_spans;
+  params.user = &target;
+  SDL_Rect c = target.clip;
+  params.clip_box = target.transposed
+    ? (FT_BBox){ c.y, -(c.x + c.w), c.y + c.h, -c.x }
+    : (FT_BBox){ c.x, -(c.y + c.h), c.x + c.w, -c.y };
+  FT_Outline_Render(library, &outline, &params);
+  FT_Outline_Done(library, &outline);
+}
+
 /*************** Window Management ****************/
 void ren_free_window_resources(RenWindow *window_renderer) {
   renwin_free(window_renderer);
   SDL_DestroySurface(draw_rect_surface);
+  if (stroker) { FT_Stroker_Done(stroker); stroker = NULL; }
   SDL_free(window_renderer->command_buf);
   window_renderer->command_buf = NULL;
   window_renderer->command_buf_size = 0;

@@ -5,6 +5,7 @@
 #include <stdbool.h>
 #include <stdlib.h>
 #include <string.h>
+#include <math.h>
 
 #ifdef _MSC_VER
   #ifndef alignof
@@ -33,7 +34,7 @@
 #define CMD_BUF_INIT_SIZE (1024 * 512)
 #define COMMAND_BARE_SIZE offsetof(Command, command)
 
-enum CommandType { SET_CLIP, DRAW_TEXT, DRAW_RECT };
+enum CommandType { SET_CLIP, DRAW_TEXT, DRAW_RECT, DRAW_PATH };
 
 typedef struct {
   enum CommandType type;
@@ -61,6 +62,14 @@ typedef struct {
   RenRect rect;
   RenColor color;
 } DrawRectCommand;
+
+typedef struct {
+  RenRect rect;  /* bounding box */
+  RenColor color;
+  float stroke_width;
+  int ncmds, ncoords;
+  float coords[];  /* followed by the ncmds command chars */
+} DrawPathCommand;
 
 static unsigned cells_buf1[CELLS_X * CELLS_Y];
 static unsigned cells_buf2[CELLS_X * CELLS_Y];
@@ -213,6 +222,34 @@ double rencache_draw_text(RenWindow *window_renderer, RenFont **fonts, const cha
 }
 
 
+void rencache_draw_path(RenWindow *window_renderer, const char *cmds, int ncmds, const float *coords, int ncoords, float stroke_width, RenColor color) {
+  if (ncoords < 2 || color.a == 0) { return; }
+  float x1 = coords[0], y1 = coords[1], x2 = x1, y2 = y1;
+  for (int i = 2; i + 1 < ncoords; i += 2) {
+    if (coords[i] < x1) x1 = coords[i];
+    if (coords[i] > x2) x2 = coords[i];
+    if (coords[i+1] < y1) y1 = coords[i+1];
+    if (coords[i+1] > y2) y2 = coords[i+1];
+  }
+  /* curves stay within their control points; pad for the stroke and antialiasing */
+  float pad = (stroke_width > 0 ? stroke_width / 2 : 0) + 1;
+  int rx1 = (int)floorf(x1 - pad), ry1 = (int)floorf(y1 - pad);
+  RenRect rect = { rx1, ry1, (int)ceilf(x2 + pad) - rx1, (int)ceilf(y2 + pad) - ry1 };
+  if (!rects_overlap(last_clip_rect, rect)) { return; }
+  size_t coords_size = ncoords * sizeof(float);
+  DrawPathCommand *cmd = push_command(window_renderer, DRAW_PATH, sizeof(DrawPathCommand) + coords_size + ncmds);
+  if (cmd) {
+    cmd->rect = rect;
+    cmd->color = color;
+    cmd->stroke_width = stroke_width;
+    cmd->ncmds = ncmds;
+    cmd->ncoords = ncoords;
+    memcpy(cmd->coords, coords, coords_size);
+    memcpy((char*)cmd->coords + coords_size, cmds, ncmds);
+  }
+}
+
+
 void rencache_invalidate(void) {
   memset(cells_prev, 0xff, sizeof(cells_buf1));
 }
@@ -312,6 +349,7 @@ void rencache_end_frame(RenWindow *window_renderer) {
       SetClipCommand *ccmd = (SetClipCommand*)&cmd->command;
       DrawRectCommand *rcmd = (DrawRectCommand*)&cmd->command;
       DrawTextCommand *tcmd = (DrawTextCommand*)&cmd->command;
+      DrawPathCommand *pcmd = (DrawPathCommand*)&cmd->command;
       switch (cmd->type) {
         case SET_CLIP:
           ren_set_clip_rect(window_renderer, intersect_rects(ccmd->rect, r));
@@ -322,6 +360,10 @@ void rencache_end_frame(RenWindow *window_renderer) {
         case DRAW_TEXT:
           ren_font_group_set_tab_size(tcmd->fonts, tcmd->tab_size);
           ren_draw_text(&rs, tcmd->fonts, tcmd->text, tcmd->len, tcmd->text_x, tcmd->rect.y, tcmd->color);
+          break;
+        case DRAW_PATH:
+          ren_draw_path(&rs, (const char*)(pcmd->coords + pcmd->ncoords), pcmd->ncmds,
+                        pcmd->coords, pcmd->stroke_width, pcmd->color);
           break;
       }
     }

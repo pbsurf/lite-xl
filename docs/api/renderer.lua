@@ -142,6 +142,23 @@ function renderer.set_clip_rect(x, y, width, height) end
 function renderer.draw_rect(x, y, width, height, color) end
 
 ---
+---Draw an antialiased path, filled (nonzero winding) or stroked.
+---
+---The path is a flat list of commands, each followed by its coordinates:
+---`"M", x, y` starts a subpath, `"L", x, y` a line, `"Q", cx, cy, x, y` a quadratic
+---and `"C", c1x, c1y, c2x, c2y, x, y` a cubic Bézier, `"Z"` closes the subpath
+---(and must be followed by `"M"`). Coordinates may be fractional.
+---
+---Strokes have round joins and butt caps; subpaths not closed with `"Z"` are open.
+---Cost grows with the number of segments; for long wavy lines, prefer line
+---segments with round joins over curves.
+---
+---@param path (string|number)[]
+---@param color renderer.color
+---@param stroke_width? number Stroke width; fills the path when nil or <= 0.
+function renderer.draw_path(path, color, stroke_width) end
+
+---
 ---Draw text and return the x coordinate where the text finished drawing.
 ---
 ---@param font renderer.font
