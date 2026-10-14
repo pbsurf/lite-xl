@@ -1,5 +1,8 @@
 name: CI
 
+# Pushes and PRs build Linux x86_64 and Windows x86_64 (MSVC). The other platforms
+# (macOS, Windows MSYS2) build only when started by hand with "all_platforms" checked.
+
 on:
   push:
     branches:
@@ -10,76 +13,90 @@ on:
       - "*"
 
   workflow_dispatch:
+    inputs:
+      all_platforms:
+        description: Also build macOS and Windows (MSYS2)
+        type: boolean
+        default: false
 
 jobs:
   build_linux:
-    name: Linux
-    runs-on: ubuntu-22.04
-    strategy:
-      matrix:
-        config:
-          - { name: "GCC", cc: gcc, cxx: g++ }
-          # disable this until we have clang in the build box
-          # - { name: "clang", cc: clang, cxx: clang++ }
-    env:
-      CC: ${{ matrix.config.cc }}
-      CXX: ${{ matrix.config.cxx }}
+    name: Linux (x86_64)
+    runs-on: ubuntu-latest
 
     steps:
-      - name: Set Environment Variables
-        if: ${{ matrix.config.cc == 'gcc' }}
-        run: |
-          echo "$HOME/.local/bin" >> "$GITHUB_PATH"
-          echo "INSTALL_REF=${GITHUB_REF##*/}" >> "$GITHUB_ENV"
-          echo "INSTALL_NAME=lite-xl-${GITHUB_REF##*/}-linux-$(uname -m)-portable" >> "$GITHUB_ENV"
-
       - name: Checkout code
-        uses: actions/checkout@v4
+        uses: actions/checkout@v5
 
-      # disabled because this will break our own Python install
-      - name: Python Setup
-        if: false
-        uses: actions/setup-python@v5
-        with:
-          python-version: "3.11"
-
-      # disabled because the container has up-to-date packages
-      - name: Update Packages
-        if: false
-        run: sudo apt-get update
-
-      # disabled as the dependencies are already installed
-      - name: Install Dependencies
-        if: false
-        run: bash scripts/install-dependencies.sh --debug
-
-      - name: Build
+      # packaging runs in the container too: it needs meson, which the runner lacks
+      - name: Build and Package
         uses: docker://ghcr.io/lite-xl/lite-xl-build-box-manylinux:v4
         with:
           entrypoint: /entrypoint.sh
           args: |
-            bash --version
             bash scripts/build.sh --debug --forcefallback --portable
-
-      - name: Package
-        if: ${{ matrix.config.cc == 'gcc' }}
-        run: bash scripts/package.sh --version ${INSTALL_REF} --debug --binary
+            bash scripts/package.sh --debug --binary
 
       - name: Upload Artifacts
-        uses: actions/upload-artifact@v4
-        if: ${{ matrix.config.cc == 'gcc' }}
+        uses: actions/upload-artifact@v5
         with:
-          name: Linux Artifacts
-          path: ${{ env.INSTALL_NAME }}.tar.gz
+          name: lite-xl-linux-x86_64
+          path: lite-xl-linux-x86_64-portable.tar.gz
+          compression-level: 0
+
+  build_windows_msvc:
+    name: Windows (x86_64) (MSVC)
+    runs-on: windows-latest
+
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v5
+
+      - name: Setup MSVC
+        uses: ilammy/msvc-dev-cmd@v1
+        with:
+          arch: x64
+
+      - name: Setup Python
+        uses: actions/setup-python@v6
+        with:
+          python-version: "3.11"
+
+      - name: Install meson and ninja
+        run: pip install --no-cache-dir meson ninja
+
+      - name: Install pkgconf
+        run: vcpkg install pkgconf:x64-windows-release
+
+      # https://github.com/ilammy/msvc-dev-cmd?tab=readme-ov-file#name-conflicts-with-shell-bash
+      - name: Set environment variables
+        run: |
+          echo "PKG_CONFIG=C:\vcpkg\installed\x64-windows-release\tools\pkgconf\pkgconf.exe" | Out-File -FilePath $env:GITHUB_ENV -Encoding utf8 -Append
+          echo "CC_LD=$((Get-Command link.exe).Source)" | Out-File -FilePath $env:GITHUB_ENV -Encoding utf8 -Append
+
+      - name: Build
+        run: bash scripts/build.sh --debug --forcefallback --portable -b build
+
+      - name: Package
+        run: |
+          meson install --skip-subprojects -C build --destdir "$PWD\lite-xl"
+          7z a -mx=9 lite-xl-windows-x86_64-msvc.zip lite-xl
+
+      - name: Upload Artifacts
+        uses: actions/upload-artifact@v5
+        with:
+          name: lite-xl-windows-x86_64-msvc
+          path: lite-xl-windows-x86_64-msvc.zip
           compression-level: 0
 
   build_macos:
     name: macOS
+    if: ${{ inputs.all_platforms }}
     strategy:
       matrix:
         config:
-          - { arch: x86_64, runner: macos-13 } # macos-13 uses x86_64
-          - { arch: arm64, runner: macos-14 } # macos-14 / latest uses M1
+          - { arch: x86_64, runner: macos-15-intel }
+          - { arch: arm64, runner: macos-15 }
 
     runs-on: ${{ matrix.config.runner }}
     env:
@@ -87,79 +104,52 @@ jobs:
       CXX: clang++
 
     steps:
-      - name: System Information
-        run: |
-          system_profiler SPSoftwareDataType
-          bash --version
-          gcc -v
-          xcodebuild -version
-
-      - name: Set Environment Variables
-        run: |
-          echo "$HOME/.local/bin" >> "$GITHUB_PATH"
-          echo "INSTALL_REF=${GITHUB_REF##*/}" >> "$GITHUB_ENV"
-          echo "INSTALL_NAME=lite-xl-${GITHUB_REF##*/}-macos-${{ matrix.config.arch }}" >> "$GITHUB_ENV"
-
       - name: Checkout code
-        uses: actions/checkout@v4
+        uses: actions/checkout@v5
 
       - name: Python Setup
-        uses: actions/setup-python@v5
+        uses: actions/setup-python@v6
         with:
           python-version: "3.11"
 
-      # installing md5sha1sum will eliminate a warning with arm64 and libusb
       - name: Install Dependencies
         run: |
           brew install bash md5sha1sum
           pip install meson ninja dmgbuild
 
       - name: Build
-        run: |
-          bash --version
-          bash scripts/build.sh --bundle --debug --forcefallback
+        run: bash scripts/build.sh --bundle --debug --forcefallback
 
       - name: Create DMG Image
-        run: bash scripts/package.sh --version ${INSTALL_REF} --debug --dmg
+        run: bash scripts/package.sh --debug --dmg
 
       - name: Upload DMG Image
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@v5
         with:
           name: macOS DMG Images (${{ matrix.config.arch }})
-          path: ${{ env.INSTALL_NAME }}.dmg
+          path: lite-xl-macos-${{ matrix.config.arch }}.dmg
           compression-level: 0
 
   build_macos_universal:
     name: macOS (Universal)
-    runs-on: macos-14
+    if: ${{ inputs.all_platforms }}
+    runs-on: macos-15
     needs: build_macos
 
     steps:
-      - name: System Information
-        run: |
-          system_profiler SPSoftwareDataType
-          bash --version
-          gcc -v
-          xcodebuild -version
-
-      - name: Set Environment Variables
-        run: |
-          echo "$HOME/.local/bin" >> "$GITHUB_PATH"
-          echo "INSTALL_NAME=lite-xl-${GITHUB_REF##*/}-macos-universal" >> "$GITHUB_ENV"
+      - name: Checkout code
+        uses: actions/checkout@v5
 
       - name: Setup Python
-        uses: actions/setup-python@v5
+        uses: actions/setup-python@v6
         with:
           python-version: "3.11"
 
       - name: Install dmgbuild
         run: pip install dmgbuild
 
-      - name: Checkout code
-        uses: actions/checkout@v4
-
       - name: Download artifacts
-        uses: actions/download-artifact@v4
+        uses: actions/download-artifact@v6
         id: download
         with:
           pattern: macOS DMG Images *
@@ -167,37 +157,31 @@ jobs:
           path: dmgs-original
 
       - name: Make universal bundles
-        run: |
-          bash --version
-          bash scripts/make-universal-binaries.sh ${{ steps.download.outputs.download-path }} "${INSTALL_NAME}"
+        run: bash scripts/make-universal-binaries.sh ${{ steps.download.outputs.download-path }} lite-xl-macos-universal
 
       - name: Upload DMG Image
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@v5
         with:
           name: macOS DMG Images (Universal)
-          path: ${{ env.INSTALL_NAME }}.dmg
+          path: lite-xl-macos-universal.dmg
           compression-level: 0
 
   build_windows_msys2:
-    name: Windows
-    runs-on: windows-2019
-    strategy:
-      matrix:
-        config:
-          - { msystem: MINGW32, arch: i686 }
-          - { msystem: MINGW64, arch: x86_64 }
+    name: Windows (x86_64) (MSYS2)
+    if: ${{ inputs.all_platforms }}
+    runs-on: windows-latest
     defaults:
       run:
         shell: msys2 {0}
 
     steps:
       - name: Checkout code
-        uses: actions/checkout@v4
+        uses: actions/checkout@v5
 
       - name: Setup MSYS2
         uses: msys2/setup-msys2@v2
         with:
-          msystem: ${{ matrix.config.msystem }}
+          msystem: MINGW64
           install: >-
             base-devel
             git
@@ -211,90 +195,15 @@ jobs:
             pkg-config:p
             ca-certificates:p
 
-      - name: Set Environment Variables
-        run: |
-          echo "$HOME/.local/bin" >> "$GITHUB_PATH"
-          echo "INSTALL_REF=${GITHUB_REF##*/}" >> "$GITHUB_ENV"
-          if [[ "${MSYSTEM}" == "MINGW64" ]]; then
-            echo "INSTALL_NAME=lite-xl-${GITHUB_REF##*/}-windows-x86_64" >> "$GITHUB_ENV"
-          else
-            echo "INSTALL_NAME=lite-xl-${GITHUB_REF##*/}-windows-i686" >> "$GITHUB_ENV"
-          fi
-
-      - name: Install Dependencies
-        if: false
-        run: bash scripts/install-dependencies.sh --debug
-
       - name: Build
-        run: |
-          bash --version
-          bash scripts/build.sh -U --debug --forcefallback
+        run: bash scripts/build.sh -U --debug --forcefallback
 
       - name: Package
-        run: bash scripts/package.sh --version ${INSTALL_REF} --debug --binary
+        run: bash scripts/package.sh --debug --binary
 
       - name: Upload Artifacts
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@v5
         with:
-          name: Windows Artifacts (${{ matrix.config.msystem }})
-          path: ${{ env.INSTALL_NAME }}.zip
-          compression-level: 0
-
-  build_windows_msvc:
-    name: Windows (MSVC)
-    runs-on: windows-2019
-    strategy:
-      matrix:
-        arch:
-          - { target: x86, name: i686 }
-          - { target: x64, name: x86_64 }
-
-    steps:
-      - name: Checkout code
-        uses: actions/checkout@v4
-
-      - name: Setup MSVC
-        id: msvc-dev-cmd
-        uses: ilammy/msvc-dev-cmd@v1
-        with:
-          arch: ${{ matrix.arch.target }}
-
-      - name: Setup Python
-        uses: actions/setup-python@v5
-        with:
-          python-version: "3.11"
-
-      - name: Install meson and ninja
-        run: pip install --no-cache-dir meson ninja
-
-      - name: Export GitHub Actions cache environment variables
-        uses: actions/github-script@v7
-        with:
-          script: |
-            core.exportVariable('ACTIONS_CACHE_URL', process.env.ACTIONS_CACHE_URL || '');
-            core.exportVariable('ACTIONS_RUNTIME_TOKEN', process.env.ACTIONS_RUNTIME_TOKEN || '');
-              
-      - name: Install pkgconf
-        env: { VCPKG_BINARY_SOURCES: "clear;x-gha,readwrite" }
-        run: vcpkg install pkgconf:x64-windows-release
-
-      # https://github.com/ilammy/msvc-dev-cmd?tab=readme-ov-file#name-conflicts-with-shell-bash
-      - name: Set environment variables
-        run: |
-          echo "PKG_CONFIG=C:\vcpkg\installed\x64-windows-release\tools\pkgconf\pkgconf.exe" | Out-File -FilePath $env:GITHUB_ENV -Encoding utf8 -Append
-          echo "CC_LD=$((Get-Command link.exe).Source)" | Out-File -FilePath $env:GITHUB_ENV -Encoding utf8 -Append
-
-      - name: Build
-        run: bash scripts/build.sh --addons --debug --forcefallback --lto --portable --mode ${{ needs.version.outputs.buildtype }} -b build
-
-      - name: Package
-        run: |
-          Remove-Item -Recurse -Force -Path "lite-xl/lib","lite-xl/include"
-          7z a -mx=9 "$env:INSTALL_NAME.zip" lite-xl
-
-      - name: Upload Artifacts
-        uses: actions/upload-artifact@v4
-        with:
-          name: Windows Artifacts (MSVC ${{ matrix.arch.target }})
-          path: ${{ env.INSTALL_NAME }}.zip
+          name: lite-xl-windows-x86_64-msys2
+          path: lite-xl-windows-x86_64.zip
           compression-level: 0
