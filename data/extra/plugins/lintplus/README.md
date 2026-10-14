@@ -118,6 +118,8 @@ lint+ itself looks for the following configuration options:
     - `"blank"`: do not draw underline on line messages
     - `"solid"`: draw single line underline on line messages (default)
     - `"dots"`: draw dotted underline on line messages (slower performance)
+    - `"squiggle"`: draw a squiggly line under each message's range (the
+      `end_column` passed to `lint.add_message`, else the rest of the line)
   - function(x, y, width, color): a custom drawing routine
     - `x`: number
     - `y`: number

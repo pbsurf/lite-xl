@@ -39,6 +39,7 @@ local DocView = require "core.docview"
 local StatusView = require "core.statusview"
 
 local liteipc = require "plugins.lintplus.liteipc"
+local shapes = require "libraries.shapes"
 
 
 local lint = {}
@@ -154,7 +155,10 @@ function lint.clear_messages(filename, source)
 end
 
 
-function lint.add_message(filename, line, column, kind, message, rail, source)
+-- end_column (optional): where the problem ends on the line (exclusive), for
+-- underline styles that mark a range ("squiggle"); math.huge for the rest of the
+-- line. Without it the range is the rest of the line.
+function lint.add_message(filename, line, column, kind, message, rail, source, end_column)
   filename = core.project_absolute_path(filename)
   if not lint.messages[filename] then
     -- This allows us to at least store messages until context is properly
@@ -177,6 +181,7 @@ function lint.add_message(filename, line, column, kind, message, rail, source)
   end
   table.insert(lines[line], {
     column = column,
+    end_column = end_column,
     kind = kind,
     message = message,
     rail = rail,
@@ -591,6 +596,21 @@ local function draw_lens_underline(x, y, width, color)
   end
 end
 
+-- squiggles under each message's own range instead of one line under the
+-- rest of the line and the inline messages
+local function draw_squiggles(dv, idx, x, y, messages)
+  local line = dv.doc.lines[idx]
+  local text_end = #line:gsub("%s+$", "") + 1
+  local min_width = dv:get_font():get_width("w")
+  for _, msg in ipairs(messages) do
+    local col1 = math.min(msg.column, text_end)
+    local col2 = math.min(msg.end_column or text_end, text_end)
+    local x1 = dv:get_col_x_offset(idx, col1)
+    local x2 = math.max(dv:get_col_x_offset(idx, col2), x1 + min_width)
+    shapes.squiggle(x + x1, y, x2 - x1, get_message_group_color({ msg }))
+  end
+end
+
 local function get_or_default(t, index, default)
   if t ~= nil and t[index] ~= nil then
     return t[index]
@@ -646,8 +666,12 @@ function DocView:draw_line_text(idx, x, y)
     end
   end
 
-  local underline_width = msg_x - x - underline_x
-  draw_lens_underline(x + underline_x, yy, underline_width, underline_color)
+  if config.lint.lens_style == "squiggle" then
+    draw_squiggles(self, idx, x, yy, messages)
+  else
+    local underline_width = msg_x - x - underline_x
+    draw_lens_underline(x + underline_x, yy, underline_width, underline_color)
+  end
   return line_height
 end
 

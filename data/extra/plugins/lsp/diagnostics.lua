@@ -261,24 +261,26 @@ function diagnostics.lintplus_populate(filename)
       for _, diagnostic in ipairs(diagnostics.list) do
         local fname = core.normalize_to_project_dir(diagnostic.filename)
         for _, message in pairs(diagnostic.messages) do
-          local line, col = util.toselection(message.range)
+          local line, col, line2, col2 = util.toselection(message.range)
           local text = message.message
           local kind = lintplus_kinds[message.severity or diagnostics.severity.ERROR]
 
-          lintplus.add_message(fname, line, col, kind, text)
+          lintplus.add_message(fname, line, col, kind, text, nil, nil,
+            line2 > line and math.huge or col2)
         end
       end
     else
       local messages = diagnostics.get(filename)
       if messages then
         for _, message in pairs(messages) do
-          local line, col = util.toselection(message.range)
+          local line, col, line2, col2 = util.toselection(message.range)
           local text = message.message
           local kind = lintplus_kinds[message.severity or diagnostics.severity.ERROR]
 
           lintplus.add_message(
             core.normalize_to_project_dir(filename),
-            line, col, kind, text
+            line, col, kind, text, nil, nil,
+            line2 > line and math.huge or col2
           )
         end
       end
