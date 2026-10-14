@@ -10,12 +10,13 @@
 # Usage: scripts/run.sh [lite-xl args...]     e.g. scripts/run.sh ~/projects/foo
 #
 # Environment:
+#   LITE_BUILD    meson build dir (default: build/; e.g. build-prof/ for profiling)
 #   LITE_USERDIR  user config dir (default: user/ next to this repo)
 #   LITE_CLANGD   clangd for the lsp plugin (default: the Android NDK's, 17.0.2)
 set -e
 
 src=$(dirname "$(dirname "$(readlink -f "$0")")")
-build=$src/build
+build=${LITE_BUILD:-$src/build}
 prefix=$build/run
 datadir=$prefix/share/lite-xl
 
