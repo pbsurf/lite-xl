@@ -229,7 +229,14 @@ lsp.hover_timer.on_timer = function()
   lsp.hover_position.triggered = true
   lsp.hover_position.utf8_range = nil
   lsp.hover_position.doc = doc
-  lsp.request_hover(doc, line, col)
+  -- diagnostics under the mouse come first, shown right away; the server's
+  -- hover info is appended when it arrives
+  local diagnostic_text, range = lsp.get_diagnostics_text(doc, line, col)
+  if diagnostic_text then
+    lsp.hover_position.utf8_range = range
+    listbox.show_text(diagnostic_text, { line = line, col = col })
+  end
+  lsp.request_hover(doc, line, col, nil, diagnostic_text)
 end
 
 --
@@ -1010,6 +1017,8 @@ function lsp.get_hovered_location(x, y)
     local line, col = av:resolve_screen_position(x, y)
     local last_x = av:get_col_x_offset(line, #av.doc.lines[line])
     local lx, ly = av:get_line_screen_position(line)
+    -- one character of slack: a diagnostic at the end of a line is marked there
+    last_x = last_x + av:get_font():get_width("w")
     if x > last_x + lx or y > ly + av:get_line_height() then return end
     return doc, line, col
   end
@@ -1545,7 +1554,43 @@ local help_active_node = nil
 local help_bottom_node = nil
 --- Sends a request to applicable LSP servers for information about the
 --- symbol where the cursor is placed and shows it on a tooltip.
-function lsp.request_hover(doc, line, col, in_tab)
+---Returns the messages of the diagnostics covering a position, one per line
+---prefixed with their severity, and the range they span (for the hover
+---position); nil if there are none.
+---@param doc core.doc
+---@param line integer
+---@param col integer
+---@return string|nil text
+---@return table|nil range {line1, col1, line2, col2}
+function lsp.get_diagnostics_text(doc, line, col)
+  local messages = diagnostics.get(core.project_absolute_path(doc.filename))
+  if not messages then return end
+  local severity_names = { "error", "warning", "info", "hint" }
+  local texts, range = {}, nil
+  for _, message in ipairs(messages) do
+    local line1, col1, line2, col2 = util.toselection(message.range, doc)
+    local covers
+    if line1 == line2 and col1 == col2 then
+      covers = line == line1 and col == col1  -- empty range: marked as one character
+    else
+      covers = (line > line1 or (line == line1 and col >= col1))
+        and (line < line2 or (line == line2 and col < col2))
+    end
+    if covers then
+      local severity = severity_names[message.severity or diagnostics.severity.ERROR]
+      table.insert(texts, severity .. ": " .. message.message)
+      if not range then
+        range = { line1 = line1, col1 = col1, line2 = line2, col2 = math.max(col2, col1 + 1) }
+      end
+    end
+  end
+  if #texts == 0 then return end
+  return table.concat(texts, "\n"), range
+end
+
+---@param prefix? string Text shown before the hover info (diagnostics); when
+---given, the hover position keeps the range set for it.
+function lsp.request_hover(doc, line, col, in_tab, prefix)
   if not doc.lsp_open then return end
 
   for _, name in pairs(lsp.get_active_servers(doc.filename, true)) do
@@ -1562,8 +1607,10 @@ function lsp.request_hover(doc, line, col, in_tab)
             else
               line1, col1, line2, col2 = get_token_range(doc, line, col)
             end
-            lsp.hover_position.utf8_range = { line1 = line1, col1 = col1,
-                                              line2 = line2, col2 = col2 }
+            if not prefix then
+              lsp.hover_position.utf8_range = { line1 = line1, col1 = col1,
+                                                line2 = line2, col2 = col2 }
+            end
 
             local content = response.result.contents
             local kind = nil
@@ -1591,6 +1638,7 @@ function lsp.request_hover(doc, line, col, in_tab)
               text = text:gsub("^[\n%s]+", ""):gsub("[\n%s]+$", "")
               if not in_tab then
                 if kind == "markdown" then text = util.strip_markdown(text) end
+                if prefix then text = prefix .. "\n\n" .. text end
                 listbox.show_text(
                   text,
                   { line = line, col = col }

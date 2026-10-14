@@ -113,6 +113,8 @@ lint+ itself looks for the following configuration options:
     - values are booleans
   - controls whether in-line messages are always displayed or only when the line is highlighted.
   - default is `true` (always display)
+  - `false` instead of a table: never display in-line messages (e.g. when the
+    lsp plugin shows them on hover)
 - `config.lint.lens_style`
   - string:
     - `"blank"`: do not draw underline on line messages

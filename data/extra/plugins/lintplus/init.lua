@@ -654,7 +654,8 @@ function DocView:draw_line_text(idx, x, y)
   local text_y = y + self:get_line_text_y_offset()
   local first_message = true
   for i, msg in ipairs(messages) do
-    if highlighted or get_or_default(config.lint.inline_messages, msg.kind, true) then
+    local inline = config.lint.inline_messages
+    if inline ~= false and (highlighted or get_or_default(inline, msg.kind, true)) then
       if first_message then
         msg_x = msg_x + w * 3
       else
