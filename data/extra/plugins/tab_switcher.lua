@@ -1,9 +1,26 @@
 -- mod-version:3
 local core = require "core"
+local config = require "core.config"
 local command = require "core.command"
 local keymap = require "core.keymap"
 local common = require "core.common"
 local DocView = require "core.docview"
+
+config.plugins.tab_switcher = common.merge({
+  -- false: the switch commands change tabs immediately instead of showing a list;
+  -- while the modifier keys are held they keep stepping through the same list
+  show_list = true,
+  config_spec = {
+    name = "Tab Switcher",
+    {
+      label = "Show List",
+      description = "Show the list of tabs when switching, instead of switching immediately.",
+      path = "show_list",
+      type = "toggle",
+      default = true
+    }
+  }
+}, config.plugins.tab_switcher)
 
 local nodes_visit_order = setmetatable({}, {__mode = "k"})
 
@@ -11,6 +28,9 @@ local nodes_visit_order = setmetatable({}, {__mode = "k"})
 local hold_mode = false
 ---Whether or not the CommandView relative to this plugin is active
 local in_switcher = false
+---With show_list off, the tabs being stepped through while the modifiers are held:
+---{ items = tab_switcher.tab_item[], idx = number }
+local cycle = nil
 
 ---@param t table<any, boolean?>
 ---@return boolean
@@ -40,6 +60,12 @@ function keymap.on_key_released(k)
     hold_mode = false
     command.perform("command:submit")
   end
+
+  -- the tabs stepped through don't count as visited, only the one we end on
+  if cycle and not still_pressed then
+    cycle = nil
+    core.set_active_view(core.active_view)
+  end
 end
 
 
@@ -47,8 +73,10 @@ local order_counter = 0
 
 local core_set_active_view = core.set_active_view
 function core.set_active_view(view)
-  nodes_visit_order[view] = order_counter
-  order_counter = order_counter + 1
+  if not cycle then
+    nodes_visit_order[view] = order_counter
+    order_counter = order_counter + 1
+  end
   return core_set_active_view(view)
 end
 
@@ -112,6 +140,21 @@ local function ask_selection(label, items)
   })
 end
 
+---Steps through items without showing them; the first step from the active
+---tab goes to items[2] (dir 1) or to the last item (dir -1).
+---@param items tab_switcher.tab_item[]
+---@param dir number
+local function start_cycle(items, dir)
+  cycle = { items = items, idx = items[1].view == core.active_view and 1 or 0 }
+  if dir < 0 and cycle.idx == 0 then cycle.idx = 1 end
+  command.perform(dir > 0 and "tab-switcher:previous-tab" or "tab-switcher:next-tab")
+  -- not run from a key binding with modifiers: no release will end it
+  if not any_true(keymap.modkeys) then
+    cycle = nil
+    core.set_active_view(core.active_view)
+  end
+end
+
 command.add(function(items)
     items = items or tab_switcher.get_tab_list(core.root_view.root_node)
     return #items > 0, items
@@ -120,8 +163,18 @@ command.add(function(items)
     ask_selection("Switch to tab", items)
   end,
   ["tab-switcher:switch-to-last-tab"] = function(items)
+    if not config.plugins.tab_switcher.show_list then
+      return start_cycle(items, 1)
+    end
     command.perform("tab-switcher:tab-list", items)
     command.perform("tab-switcher:previous-tab")
+  end,
+  ["tab-switcher:switch-to-oldest-tab"] = function(items)
+    if not config.plugins.tab_switcher.show_list then
+      return start_cycle(items, -1)
+    end
+    command.perform("tab-switcher:tab-list", items)
+    command.perform("tab-switcher:next-tab")
   end,
 })
 
@@ -133,17 +186,28 @@ command.add(function(items)
     ask_selection("Switch to tab in current split", items)
   end,
   ["tab-switcher:switch-to-last-tab-in-current-split"] = function(items)
+    if not config.plugins.tab_switcher.show_list then
+      return start_cycle(items, 1)
+    end
     command.perform("tab-switcher:tab-list-current-split", items)
     command.perform("tab-switcher:previous-tab")
   end,
 })
 
-command.add(function() return in_switcher end, {
+---@param dir number 1 for less recently used, -1 for more
+local function step_cycle(dir)
+  cycle.idx = (cycle.idx + dir - 1) % #cycle.items + 1
+  set_active_view(cycle.items[cycle.idx].view)
+end
+
+command.add(function() return in_switcher or cycle ~= nil end, {
   ["tab-switcher:next-tab"] = function()
+    if cycle then return step_cycle(-1) end
     hold_mode = true
     command.perform("command:select-next")
   end,
   ["tab-switcher:previous-tab"] = function()
+    if cycle then return step_cycle(1) end
     hold_mode = true
     command.perform("command:select-previous")
   end,
