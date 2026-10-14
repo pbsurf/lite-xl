@@ -64,6 +64,12 @@ local HelpDoc = require "plugins.lsp.helpdoc"
 ---@field mouse_hover boolean
 ---The amount of time in milliseconds before showing the tooltip.
 ---@field mouse_hover_delay integer
+---What mouse hover shows: "always" everything (symbol info and diagnostics);
+---"modifier" everything, but only while mouse_hover_modifier is held;
+---"important" errors and warnings, and everything else while the modifier is held.
+---@field mouse_hover_mode "always" | "modifier" | "important"
+---Modifier key for mouse_hover_mode: "ctrl", "alt", "shift" or "cmd".
+---@field mouse_hover_modifier string
 ---Show diagnostic messages
 ---@field show_diagnostics boolean
 ---Amount of milliseconds to delay updating the inline diagnostics.
@@ -82,6 +88,8 @@ local HelpDoc = require "plugins.lsp.helpdoc"
 config.plugins.lsp = common.merge({
   mouse_hover = true,
   mouse_hover_delay = 300,
+  mouse_hover_mode = "always",
+  mouse_hover_modifier = "ctrl",
   show_diagnostics = true,
   diagnostics_delay = 500,
   snippets = true,
@@ -110,6 +118,29 @@ config.plugins.lsp = common.merge({
       default = 300,
       min = 50,
       max = 2000
+    },
+    {
+      label = "Mouse Hover Mode",
+      description = "What hovering shows: everything; everything while the modifier "
+        .. "is held; or errors and warnings, and the rest while the modifier is held.",
+      path = "mouse_hover_mode",
+      type = "SELECTION",
+      default = "always",
+      values = {
+        { "Everything", "always" },
+        { "Only with modifier", "modifier" },
+        { "Errors and warnings, rest with modifier", "important" }
+      }
+    },
+    {
+      label = "Mouse Hover Modifier",
+      description = "The modifier key for the mouse hover mode.",
+      path = "mouse_hover_modifier",
+      type = "SELECTION",
+      default = "ctrl",
+      values = {
+        { "Ctrl", "ctrl" }, { "Alt", "alt" }, { "Shift", "shift" }, { "Cmd", "cmd" }
+      }
     },
     {
       label = "Diagnostics",
@@ -223,20 +254,35 @@ lsp.hover_position = {doc = nil, x = -1, y = -1, triggered = false, utf8_range =
 
 ---@type lsp.timer
 lsp.hover_timer = Timer(300, true)
+---Whether the mouse_hover_modifier key is held.
+---@return boolean
+local function hover_modifier_held()
+  return keymap.modkeys[config.plugins.lsp.mouse_hover_modifier or "ctrl"] or false
+end
+
 lsp.hover_timer.on_timer = function()
+  local mode = config.plugins.lsp.mouse_hover_mode or "always"
+  local held = hover_modifier_held()
+  if mode == "modifier" and not held then return end
   local doc, line, col = lsp.get_hovered_location(lsp.hover_position.x, lsp.hover_position.y)
   if not doc then return end
   lsp.hover_position.triggered = true
   lsp.hover_position.utf8_range = nil
   lsp.hover_position.doc = doc
+  -- without the modifier, "important" shows only errors and warnings
+  local everything = mode ~= "important" or held
   -- diagnostics under the mouse come first, shown right away; the server's
   -- hover info is appended when it arrives
-  local diagnostic_text, range = lsp.get_diagnostics_text(doc, line, col)
+  local diagnostic_text, range = lsp.get_diagnostics_text(
+    doc, line, col, not everything and diagnostics.severity.WARNING or nil
+  )
   if diagnostic_text then
     lsp.hover_position.utf8_range = range
     listbox.show_text(diagnostic_text, { line = line, col = col })
   end
-  lsp.request_hover(doc, line, col, nil, diagnostic_text)
+  if everything then
+    lsp.request_hover(doc, line, col, nil, diagnostic_text)
+  end
 end
 
 --
@@ -1560,9 +1606,10 @@ local help_bottom_node = nil
 ---@param doc core.doc
 ---@param line integer
 ---@param col integer
+---@param max_severity? integer Leave out less severe diagnostics (higher numbers).
 ---@return string|nil text
 ---@return table|nil range {line1, col1, line2, col2}
-function lsp.get_diagnostics_text(doc, line, col)
+function lsp.get_diagnostics_text(doc, line, col, max_severity)
   local messages = diagnostics.get(core.project_absolute_path(doc.filename))
   if not messages then return end
   local severity_names = { "error", "warning", "info", "hint" }
@@ -1576,8 +1623,9 @@ function lsp.get_diagnostics_text(doc, line, col)
       covers = (line > line1 or (line == line1 and col >= col1))
         and (line < line2 or (line == line2 and col < col2))
     end
-    if covers then
-      local severity = severity_names[message.severity or diagnostics.severity.ERROR]
+    local severity_level = message.severity or diagnostics.severity.ERROR
+    if covers and severity_level <= (max_severity or math.huge) then
+      local severity = severity_names[severity_level]
       table.insert(texts, severity .. ": " .. message.message)
       if not range then
         range = { line1 = line1, col1 = col1, line2 = line2, col2 = math.max(col2, col1 + 1) }
@@ -2346,6 +2394,42 @@ function RootView:on_mouse_moved(x, y, dx, dy)
   end
   lsp.hover_timer:set_interval(config.plugins.lsp.mouse_hover_delay)
   lsp.hover_timer:restart()
+end
+
+-- Pressing the hover modifier with the mouse resting on a document starts the
+-- hover delay; releasing it hides a popup that needed it (in "important" mode,
+-- the errors and warnings come back after the delay).
+local keymap_on_key_pressed = keymap.on_key_pressed
+function keymap.on_key_pressed(k, ...)
+  local was_held = hover_modifier_held()
+  local handled = keymap_on_key_pressed(k, ...)
+  if config.plugins.lsp.mouse_hover and config.plugins.lsp.mouse_hover_mode ~= "always"
+    and not was_held and hover_modifier_held() and lsp.hover_position.x >= 0 then
+    if lsp.hover_position.triggered then
+      listbox.hide()
+      lsp.hover_position.triggered = false
+    end
+    lsp.hover_timer:set_interval(config.plugins.lsp.mouse_hover_delay)
+    lsp.hover_timer:restart()
+  end
+  return handled
+end
+
+local keymap_on_key_released = keymap.on_key_released
+function keymap.on_key_released(k, ...)
+  local was_held = hover_modifier_held()
+  keymap_on_key_released(k, ...)
+  if config.plugins.lsp.mouse_hover and config.plugins.lsp.mouse_hover_mode ~= "always"
+    and was_held and not hover_modifier_held() then
+    lsp.hover_timer:stop()
+    if lsp.hover_position.triggered then
+      listbox.hide()
+      lsp.hover_position.triggered = false
+    end
+    if config.plugins.lsp.mouse_hover_mode == "important" and lsp.hover_position.x >= 0 then
+      lsp.hover_timer:restart()
+    end
+  end
 end
 
 --
