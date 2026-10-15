@@ -29,7 +29,7 @@ cp "$build/src/lite-xl" "$prefix/bin/lite-xl.new"
 mv -f "$prefix/bin/lite-xl.new" "$prefix/bin/lite-xl"
 
 find "$datadir" -maxdepth 1 -type l ! -exec test -e {} \; -delete  # drop stale links
-for d in plugins colors fonts extra; do ln -sfn "$src/data/$d" "$datadir/$d"; done
+for d in plugins colors fonts; do ln -sfn "$src/data/$d" "$datadir/$d"; done
 find "$datadir/core" -maxdepth 1 -type l ! -exec test -e {} \; -delete  # drop stale links
 for f in "$src"/data/core/*; do ln -sfn "$f" "$datadir/core/"; done
 ln -sfn "$build/start.lua" "$datadir/core/start.lua"

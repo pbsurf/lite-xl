@@ -17,13 +17,7 @@ USERDIR = (system.get_file_info(EXEDIR .. PATHSEP .. 'user') and (EXEDIR .. PATH
        or ((os.getenv("XDG_CONFIG_HOME") and os.getenv("XDG_CONFIG_HOME") .. PATHSEP .. "lite-xl"))
        or (HOME and (HOME .. PATHSEP .. '.config' .. PATHSEP .. 'lite-xl'))
 
--- everything not from upstream lite-xl; its plugins load only when listed in
--- config.extra_plugins, its other modules (libraries, colors) when required
-EXTRADIR = DATADIR .. PATHSEP .. 'extra'
-
-package.path = EXTRADIR .. '/?.lua;'
-package.path = EXTRADIR .. '/?/init.lua;' .. package.path
-package.path = DATADIR .. '/?.lua;' .. package.path
+package.path = DATADIR .. '/?.lua;'
 package.path = DATADIR .. '/?/init.lua;' .. package.path
 package.path = USERDIR .. '/?.lua;' .. package.path
 package.path = USERDIR .. '/?/init.lua;' .. package.path

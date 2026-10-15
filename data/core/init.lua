@@ -989,22 +989,6 @@ function core.load_plugins()
     end
   end
 
-  local extra_dir = EXTRADIR .. PATHSEP .. "plugins"
-  for _, name in ipairs(config.extra_plugins) do
-    local filename
-    for _, f in ipairs { name .. ".lua", name } do
-      if files[f] then filename = false; break end -- loaded anyway
-      if system.get_file_info(extra_dir .. PATHSEP .. f) then filename = f; break end
-    end
-    if filename then
-      table.insert(ordered, {file = filename})
-      files[filename] = extra_dir
-    elseif filename == nil then
-      core.error("Plugin %q in config.extra_plugins not found in %s", name, extra_dir)
-      no_errors = false
-    end
-  end
-
   for _, plugin in ipairs(ordered) do
     local dir = files[plugin.file]
     local name = plugin.file:match("(.-)%.lua$") or plugin.file
