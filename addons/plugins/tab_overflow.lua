@@ -28,12 +28,24 @@ Node.tab_buttons.scroll_right = {
   end,
 }
 
+---A doc's file icon, as the treeview (and an icon plugin like nerdicons) draws it.
+---@return string? icon, renderer.font? font, renderer.color? color
+local function get_icon(view)
+  local TreeView = package.loaded["plugins.treeview"]
+  if not (TreeView and view.doc) then return end
+  return TreeView:get_item_icon({ type = "file", name = view.doc:get_name() }, false, false)
+end
+
 ---Shows the menu of the node's tabs, its top right corner at x, y.
 local function show_menu(node, x, y)
   local items = {}
+  local icon_w = 0
   for _, view in ipairs(node.views) do
+    local icon, icon_font, icon_color = get_icon(view)
+    if icon then icon_w = math.max(icon_w, icon_font:get_width(icon)) end
     table.insert(items, {
       text = view:get_name(),
+      icon = icon, icon_font = icon_font, icon_color = icon_color,
       active = view == node.active_view,
       command = function()
         if node:get_view_idx(view) then node:set_active_view(view) end
@@ -43,6 +55,9 @@ local function show_menu(node, x, y)
   menu.itemset = {}
   menu:register(nil, items)
   if menu:show(x, y) then
+    -- ContextMenu sizes the menu from the text only: add the icon column
+    menu.icon_w = icon_w > 0 and icon_w + style.padding.x / 2 or 0
+    menu.items.width = menu.items.width + menu.icon_w
     menu.position.x = math.max(0, x - menu.items.width)
     menu.node = node
     for i, item in ipairs(items) do
@@ -73,7 +88,7 @@ Node.tab_buttons.menu = {
   end,
 }
 
--- As core's draw_context_menu, with the active tab in the accent color
+-- As core's draw_context_menu, with file icons and the active tab in the accent color
 function menu:draw_context_menu()
   if not self.items then return end
   local bx, by, bw, bh = self.position.x, self.position.y, self.items.width, self.height
@@ -83,8 +98,12 @@ function menu:draw_context_menu()
     if i == self.selected then
       renderer.draw_rect(x, y, w, h, style.selection)
     end
+    local tx = x + style.padding.x
+    if item.icon then
+      common.draw_text(item.icon_font, item.icon_color, item.icon, nil, tx, y, 0, h)
+    end
     local color = item.active and style.accent or style.text
-    common.draw_text(style.font, color, item.text, "left", x + style.padding.x, y, w, h)
+    common.draw_text(style.font, color, item.text, "left", tx + self.icon_w, y, w, h)
   end
 end
 
