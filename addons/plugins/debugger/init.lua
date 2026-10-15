@@ -638,9 +638,10 @@ end)
 
 core.add_thread(function() 
   local item = core.status_view:add_item({
-    predicate = function() return config.target_binary or model.state ~= "inactive" end,
+    predicate = function() return model.state ~= "inactive" end,
     name = "debugger:status",
     alignment = StatusView.Item.RIGHT,
+    priority = 8,
     command = function()
       if model.state == "inactive" then
         command.perform("debugger:start")
@@ -651,15 +652,17 @@ core.add_thread(function()
       end
     end
   })
-  item.on_draw = function(x, y, h, calc_only)
+  item.on_draw = function(x, y, h, hovered, calc_only)
     local color = {
       stopped = style.debugger.breakpoint,
       running = style.good,
       starting = style.warn
     }
-    local size = (h - style.padding.y * 2) / 2
+    local size = style.font:get_height() / 2
+    local tx = x + size + style.padding.x / 2
+    if calc_only then return tx - x + style.font:get_width(model.state) end
     renderer.draw_rect(x, y  + (h - size) / 2, size, size, color[model.state] or style.dim)
-    local nx = common.draw_text(style.font, style.text, model.state, "left", x + size + style.padding.x / 2, y, nil, h)
+    local nx = common.draw_text(style.font, style.text, model.state, "left", tx, y, nil, h)
     return nx - x
   end
 end)
@@ -853,6 +856,14 @@ if has_build then
   -- overwrite the build plugins' "play" toolbar button to activate the debugger, if this is a debug build.
   build.build_bar_view.toolbar_commands[2] = { symbol = '"', command = "debugger:start-or-continue"}
   build.build_bar_view.toolbar_commands[4] = { symbol = '$', command = "debugger:terminate"}
+  -- and add it to the target menu's actions, after Run
+  for i, row in ipairs(build.menu_actions) do
+    if row.command == "build:run-or-term-or-kill" then
+      table.insert(build.menu_actions, i + 1, { text = "Debug", command = "debugger:start-or-continue" })
+      table.insert(build.menu_actions, i + 2, { text = "Stop debugging", command = "debugger:terminate" })
+      break
+    end
+  end
 end
 
 return debugger
