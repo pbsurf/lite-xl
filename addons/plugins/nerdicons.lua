@@ -143,6 +143,46 @@ for _, v in pairs(known_filenames_icons) do
   v[1] = { common.color(v[1]) }
 end
 
+-- Icon colors are picked for dark themes. One with less than 3:1 contrast against
+-- the backgrounds icons are drawn on (active tab: background; inactive tabs and
+-- treeview: background2) is blended towards style.text until it has that.
+local function luminance(c)
+  local function linear(v)
+    v = v / 255
+    return v <= 0.03928 and v / 12.92 or ((v + 0.055) / 1.055) ^ 2.4
+  end
+  return 0.2126 * linear(c[1]) + 0.7152 * linear(c[2]) + 0.0722 * linear(c[3])
+end
+
+local function contrast(a, b)
+  local la, lb = luminance(a), luminance(b)
+  if la < lb then la, lb = lb, la end
+  return (la + 0.05) / (lb + 0.05)
+end
+
+local readable_cache = setmetatable({}, { __mode = "k" })
+local function readable(color)
+  local cached = readable_cache[color]
+  if cached and cached.background == style.background
+     and cached.background2 == style.background2 and cached.text == style.text then
+    return cached.color
+  end
+  local result = color
+  for t = 0.1, 1.05, 0.1 do
+    if math.min(contrast(result, style.background), contrast(result, style.background2)) >= 3 then
+      break
+    end
+    result = {}
+    for i = 1, 3 do result[i] = color[i] + (style.text[i] - color[i]) * math.min(t, 1) end
+    result[4] = color[4]
+  end
+  readable_cache[color] = {
+    background = style.background, background2 = style.background2, text = style.text,
+    color = result
+  }
+  return result
+end
+
 -- Override function to change default icons for dirs, special extensions and names
 local TreeView_get_item_icon = TreeView.get_item_icon
 function TreeView:get_item_icon(item, active, hovered)
@@ -168,7 +208,7 @@ function TreeView:get_item_icon(item, active, hovered)
       custom_icon = extension_icons[item.name:match("^.+(%..+)$")]
     end
     if custom_icon ~= nil then
-      color = custom_icon[1]
+      color = readable(custom_icon[1])
       icon = map[custom_icon[2]]
       font = icon_font
     end
