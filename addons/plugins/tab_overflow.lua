@@ -1,6 +1,6 @@
 -- mod-version:3
 -- Buttons for the tab bar while its tabs scroll: scroll_left and scroll_right, and
--- menu, which shows how many tabs are hidden and opens a menu of all the tabs in
+-- menu, which shows how many tabs there are and opens a menu of all the tabs in
 -- the split. config.tab_buttons chooses which show; tab-overflow:show opens the
 -- menu from the keyboard.
 local core = require "core"
@@ -66,14 +66,13 @@ local function show_menu(node, x, y)
   end
 end
 
--- "N ▾", N the number of hidden tabs
+-- "N ▾", N the number of tabs
 local function chevron_width()
   return style.icon_font:get_width("-")
 end
 
 Node.tab_buttons.menu = {
   on_click = function(node, x, y, w, h) show_menu(node, x + w, y + h) end,
-  -- room for the most digits the count can have, so it doesn't change with the count
   width = function(node)
     local digits = string.rep("0", #tostring(#node.views))
     return style.font:get_width(digits) + chevron_width() + style.padding.x * 2
@@ -82,8 +81,7 @@ Node.tab_buttons.menu = {
   draw = function(node, x, y, w, h, hovered)
     local color = (hovered or menu.node == node) and style.accent or style.text
     local cx = x + w - style.padding.x - chevron_width()
-    local hidden = #node.views - node:get_visible_tabs_number()
-    common.draw_text(style.font, color, tostring(hidden), "right", x, y, cx - x - style.padding.x / 4, h)
+    common.draw_text(style.font, color, tostring(#node.views), "right", x, y, cx - x - style.padding.x / 4, h)
     common.draw_text(style.icon_font, color, "-", nil, cx, y, 0, h)
   end,
 }
