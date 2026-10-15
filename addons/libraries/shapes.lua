@@ -1,4 +1,5 @@
--- Antialiased shapes drawn with renderer.draw_path.
+-- Antialiased shapes drawn with renderer.draw_path (added in pbsurf/lite-xl); on
+-- a lite-xl without it, each helper falls back to something drawn with draw_rect.
 local shapes = {}
 
 ---@class shapes.squiggle_options
@@ -17,6 +18,12 @@ local shapes = {}
 function shapes.squiggle(x, y, width, color, opts)
   if width <= 0 then return end
   opts = opts or {}
+  if not renderer.draw_path then
+    -- stock lite-xl (no draw_path): a straight underline
+    local t = math.max(1, math.floor(opts.thickness or SCALE))
+    renderer.draw_rect(x, math.floor(y - t / 2), width, t, color)
+    return
+  end
   local half = (opts.period or 4 * SCALE) / 2
   local h = (opts.height or 1.5 * SCALE) / 2
   local path = { "M", x, y + h }
