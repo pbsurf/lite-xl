@@ -1,0 +1,40 @@
+#!/bin/bash
+# Run lpm (lite-xl's plugin manager) for the editor scripts/run.sh builds and runs.
+#
+# This repo is an lpm repository (manifest.json, add-ons in addons/).  The first time
+# lpm runs for a user dir, this adds the checkout as its first repository, so our
+# add-ons win over upstream ones of the same id.  Install ours with --symlink, so the
+# user dir links back to addons/ and edits take effect on restart; install upstream
+# ones without it (a copy, which `lpm repo update` won't change underneath you):
+#
+#   scripts/lpm install --symlink lsp repl
+#   scripts/lpm install --no-install-optional bracketmatch search_ui
+#
+# lpm reads the mod-version from MOD_VERSION_MAJOR in start.lua, which only the
+# mod-version-4 line defines; for 2.1's MOD_VERSION = "3" it assumes 4, so
+# --mod-version=3 is passed.  lpm's settings (repositories, installed add-ons) are
+# per user dir, in <userdir>/lpm, and so is its staging dir: lpm moves an install
+# from there into the user dir, and across filesystems that move is a copy that
+# turns symlinks into files.  The repo cache is shared.
+#
+# Environment:
+#   LITE_BUILD    meson build dir (default: build/), as for run.sh
+#   LITE_USERDIR  user config dir (default: user/ next to this repo), as for run.sh
+#   LPM           lpm binary (default: lpm/lpm next to this repo, built from source:
+#                 lite-xl-plugin-manager v1.4.9, `./build.sh -DLPM_STATIC` there)
+set -e
+
+src=$(dirname "$(dirname "$(readlink -f "$0")")")
+top=$(dirname "$src")
+build=${LITE_BUILD:-$src/build}
+userdir=${LITE_USERDIR:-$top/user}
+lpm=${LPM:-$top/lpm/lpm}
+
+args=(--userdir="$userdir" --configdir="$userdir/lpm" --tmpdir="$userdir/lpm/tmp"
+      --cachedir="$top/tools/lpm-cache"
+      --datadir="$build/run/share/lite-xl" --binary="$build/run/bin/lite-xl" --mod-version=3)
+
+if [ ! -e "$userdir/lpm/settings.json" ]; then
+  "$lpm" repo add "$src" "${args[@]}" >&2
+fi
+exec "$lpm" "$@" "${args[@]}"
