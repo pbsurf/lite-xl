@@ -44,6 +44,9 @@ void ren_draw_rect(RenSurface *rs, RenRect rect, RenColor color);
 /* cmds: 'M' x y, 'L' x y, 'Q' cx cy x y, 'C' c1x c1y c2x c2y x y, 'Z' (coords in order);
 ** stroke_width <= 0 fills */
 void ren_draw_path(RenSurface *rs, const char *cmds, int ncmds, const float *coords, float stroke_width, RenColor color);
+/* fills the glyph's outline, scaled and centered to fit the rect */
+void ren_draw_glyph(RenSurface *rs, RenFont **fonts, unsigned codepoint, float x, float y, float w, float h, RenColor color);
+unsigned ren_utf8_codepoint(const char *text, size_t len);
 
 int ren_init(SDL_Window *win);
 void ren_resize_window(RenWindow *window_renderer);

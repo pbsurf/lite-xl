@@ -406,6 +406,31 @@ static int f_draw_path(lua_State *L) {
   return 0;
 }
 
+static int f_draw_glyph(lua_State *L) {
+  RenFont* fonts[FONT_FALLBACK_MAX];
+  font_retrieve(L, fonts, 1);
+
+  // stores a reference to this font to the reference table
+  lua_rawgeti(L, LUA_REGISTRYINDEX, RENDERER_FONT_REF);
+  if (lua_istable(L, -1))
+  {
+    lua_pushvalue(L, 1);
+    lua_pushboolean(L, 1);
+    lua_rawset(L, -3);
+  } else {
+    fprintf(stderr, "warning: failed to reference count fonts\n");
+  }
+  lua_pop(L, 1);
+
+  size_t len;
+  const char *text = luaL_checklstring(L, 2, &len);
+  float x = luaL_checknumber(L, 3), y = luaL_checknumber(L, 4);
+  float w = luaL_checknumber(L, 5), h = luaL_checknumber(L, 6);
+  RenColor color = checkcolor(L, 7, 255);
+  rencache_draw_glyph(&window_renderer, fonts, ren_utf8_codepoint(text, len), x, y, w, h, color);
+  return 0;
+}
+
 static const luaL_Reg lib[] = {
   { "show_debug",         f_show_debug         },
   { "get_size",           f_get_size           },
@@ -415,6 +440,7 @@ static const luaL_Reg lib[] = {
   { "draw_rect",          f_draw_rect          },
   { "draw_text",          f_draw_text          },
   { "draw_path",          f_draw_path          },
+  { "draw_glyph",         f_draw_glyph         },
   { NULL,                 NULL                 }
 };
 

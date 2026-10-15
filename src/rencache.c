@@ -34,7 +34,7 @@
 #define CMD_BUF_INIT_SIZE (1024 * 512)
 #define COMMAND_BARE_SIZE offsetof(Command, command)
 
-enum CommandType { SET_CLIP, DRAW_TEXT, DRAW_RECT, DRAW_PATH };
+enum CommandType { SET_CLIP, DRAW_TEXT, DRAW_RECT, DRAW_PATH, DRAW_GLYPH };
 
 typedef struct {
   enum CommandType type;
@@ -70,6 +70,14 @@ typedef struct {
   int ncmds, ncoords;
   float coords[];  /* followed by the ncmds command chars */
 } DrawPathCommand;
+
+typedef struct {
+  RenRect rect;  /* bounding box */
+  RenColor color;
+  RenFont *fonts[FONT_FALLBACK_MAX];
+  unsigned codepoint;
+  float x, y, w, h;
+} DrawGlyphCommand;
 
 static unsigned cells_buf1[CELLS_X * CELLS_Y];
 static unsigned cells_buf2[CELLS_X * CELLS_Y];
@@ -250,6 +258,23 @@ void rencache_draw_path(RenWindow *window_renderer, const char *cmds, int ncmds,
 }
 
 
+void rencache_draw_glyph(RenWindow *window_renderer, RenFont **fonts, unsigned codepoint, float x, float y, float w, float h, RenColor color) {
+  if (w <= 0 || h <= 0 || color.a == 0) { return; }
+  /* pad for antialiasing */
+  int rx1 = (int)floorf(x - 1), ry1 = (int)floorf(y - 1);
+  RenRect rect = { rx1, ry1, (int)ceilf(x + w + 1) - rx1, (int)ceilf(y + h + 1) - ry1 };
+  if (!rects_overlap(last_clip_rect, rect)) { return; }
+  DrawGlyphCommand *cmd = push_command(window_renderer, DRAW_GLYPH, sizeof(DrawGlyphCommand));
+  if (cmd) {
+    cmd->rect = rect;
+    cmd->color = color;
+    memcpy(cmd->fonts, fonts, sizeof(RenFont*)*FONT_FALLBACK_MAX);
+    cmd->codepoint = codepoint;
+    cmd->x = x; cmd->y = y; cmd->w = w; cmd->h = h;
+  }
+}
+
+
 void rencache_invalidate(void) {
   memset(cells_prev, 0xff, sizeof(cells_buf1));
 }
@@ -350,6 +375,7 @@ void rencache_end_frame(RenWindow *window_renderer) {
       DrawRectCommand *rcmd = (DrawRectCommand*)&cmd->command;
       DrawTextCommand *tcmd = (DrawTextCommand*)&cmd->command;
       DrawPathCommand *pcmd = (DrawPathCommand*)&cmd->command;
+      DrawGlyphCommand *gcmd = (DrawGlyphCommand*)&cmd->command;
       switch (cmd->type) {
         case SET_CLIP:
           ren_set_clip_rect(window_renderer, intersect_rects(ccmd->rect, r));
@@ -364,6 +390,9 @@ void rencache_end_frame(RenWindow *window_renderer) {
         case DRAW_PATH:
           ren_draw_path(&rs, (const char*)(pcmd->coords + pcmd->ncoords), pcmd->ncmds,
                         pcmd->coords, pcmd->stroke_width, pcmd->color);
+          break;
+        case DRAW_GLYPH:
+          ren_draw_glyph(&rs, gcmd->fonts, gcmd->codepoint, gcmd->x, gcmd->y, gcmd->w, gcmd->h, gcmd->color);
           break;
       }
     }

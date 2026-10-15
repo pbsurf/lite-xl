@@ -159,6 +159,23 @@ function renderer.draw_rect(x, y, width, height, color) end
 function renderer.draw_path(path, color, stroke_width) end
 
 ---
+---Draw one glyph of a font as an antialiased shape fitted to a rectangle: its ink
+---box is scaled to fit (keeping its aspect ratio) and centered in the rectangle.
+---The font's size, hinting and synthesized bold/italic don't apply; the glyph is
+---drawn from its outline, so any size and fractional position work. In a font
+---group, the first font that has the glyph is used. Bitmap-only glyphs (e.g. color
+---emoji) are not drawn.
+---
+---@param font renderer.font|renderer.font[]
+---@param char string The glyph's character (the first one of the string).
+---@param x number
+---@param y number
+---@param width number
+---@param height number
+---@param color renderer.color
+function renderer.draw_glyph(font, char, x, y, width, height, color) end
+
+---
 ---Draw text and return the x coordinate where the text finished drawing.
 ---
 ---@param font renderer.font

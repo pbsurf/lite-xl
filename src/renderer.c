@@ -6,6 +6,7 @@
 #include <math.h>
 #include <ft2build.h>
 #include FT_FREETYPE_H
+#include FT_BBOX_H
 #include FT_LCD_FILTER_H
 #include FT_OUTLINE_H
 #include FT_STROKER_H
@@ -154,6 +155,12 @@ static const char* utf8_to_codepoint(const char *p, const char *endp, unsigned *
   }
   *dst = res;
   return (const char*)up + 1;
+}
+
+unsigned ren_utf8_codepoint(const char *text, size_t len) {
+  unsigned codepoint = 0;
+  if (len > 0) utf8_to_codepoint(text, text + len, &codepoint);
+  return codepoint;
 }
 
 static int font_set_load_options(RenFont* font) {
@@ -864,12 +871,37 @@ static FT_Error path_stroke_outline(const char *cmds, int ncmds, const float *co
   return 0;
 }
 
-void ren_draw_path(RenSurface *rs, const char *cmds, int ncmds, const float *coords, float stroke_width, RenColor color) {
-  if (color.a == 0 || ncmds == 0) return;
+// rasterizes the outline (26.6 surface pixels, raster y up) into the surface, then frees it
+static void path_render(RenSurface *rs, FT_Outline *outline, RenColor color) {
   PathTarget target = { rs->surface, SDL_GetPixelFormatDetails(rs->surface->format), {0}, color, false };
   SDL_GetSurfaceClipRect(rs->surface, &target.clip);
-  if (target.clip.w <= 0 || target.clip.h <= 0) return;
+  if (target.clip.w > 0 && target.clip.h > 0) {
+    FT_BBox cbox;
+    FT_Outline_Get_CBox(outline, &cbox);
+    target.transposed = cbox.xMax - cbox.xMin > cbox.yMax - cbox.yMin;
+    if (target.transposed) {
+      // (x, y) -> (-y, -x): raster x becomes surface y, raster y minus surface x
+      for (int i = 0; i < outline->n_points; i++) {
+        FT_Pos x = outline->points[i].x;
+        outline->points[i].x = -outline->points[i].y;
+        outline->points[i].y = -x;
+      }
+    }
+    FT_Raster_Params params = {0};
+    params.flags = FT_RASTER_FLAG_AA | FT_RASTER_FLAG_DIRECT | FT_RASTER_FLAG_CLIP;
+    params.gray_spans = path_spans;
+    params.user = &target;
+    SDL_Rect c = target.clip;
+    params.clip_box = target.transposed
+      ? (FT_BBox){ c.y, -(c.x + c.w), c.y + c.h, -c.x }
+      : (FT_BBox){ c.x, -(c.y + c.h), c.x + c.w, -c.y };
+    FT_Outline_Render(library, outline, &params);
+  }
+  FT_Outline_Done(library, outline);
+}
 
+void ren_draw_path(RenSurface *rs, const char *cmds, int ncmds, const float *coords, float stroke_width, RenColor color) {
+  if (color.a == 0 || ncmds == 0) return;
   FT_Outline outline;
   FT_Error err = stroke_width > 0
     ? path_stroke_outline(cmds, ncmds, coords, rs->scale, stroke_width, &outline)
@@ -878,27 +910,42 @@ void ren_draw_path(RenSurface *rs, const char *cmds, int ncmds, const float *coo
     fprintf(stderr, "ren_draw_path: %s\n", get_ft_error(err));
     return;
   }
-  FT_BBox cbox;
-  FT_Outline_Get_CBox(&outline, &cbox);
-  target.transposed = cbox.xMax - cbox.xMin > cbox.yMax - cbox.yMin;
-  if (target.transposed) {
-    // (x, y) -> (-y, -x): raster x becomes surface y, raster y minus surface x
-    for (int i = 0; i < outline.n_points; i++) {
-      FT_Pos x = outline.points[i].x;
-      outline.points[i].x = -outline.points[i].y;
-      outline.points[i].y = -x;
-    }
+  path_render(rs, &outline, color);
+}
+
+// The glyph's unhinted outline, scaled to fit its ink box in the rect (keeping its
+// aspect ratio) and centered there, filled like a path. The first font of the group
+// that has the glyph is used; synthesized bold/italic are not applied.
+void ren_draw_glyph(RenSurface *rs, RenFont **fonts, unsigned codepoint, float x, float y, float w, float h, RenColor color) {
+  if (color.a == 0 || w <= 0 || h <= 0) return;
+  FT_Face face = NULL;
+  FT_UInt index = 0;
+  for (int i = 0; i < FONT_FALLBACK_MAX && fonts[i] && !index; i++)
+    if ((index = FT_Get_Char_Index(fonts[i]->face, codepoint))) face = fonts[i]->face;
+  if (!index) return;
+  FT_Error err = FT_Load_Glyph(face, index, FT_LOAD_NO_SCALE | FT_LOAD_NO_HINTING | FT_LOAD_NO_BITMAP);
+  if (err || face->glyph->format != FT_GLYPH_FORMAT_OUTLINE) {
+    if (err) fprintf(stderr, "ren_draw_glyph: %s\n", get_ft_error(err));
+    return;
   }
-  FT_Raster_Params params = {0};
-  params.flags = FT_RASTER_FLAG_AA | FT_RASTER_FLAG_DIRECT | FT_RASTER_FLAG_CLIP;
-  params.gray_spans = path_spans;
-  params.user = &target;
-  SDL_Rect c = target.clip;
-  params.clip_box = target.transposed
-    ? (FT_BBox){ c.y, -(c.x + c.w), c.y + c.h, -c.x }
-    : (FT_BBox){ c.x, -(c.y + c.h), c.x + c.w, -c.y };
-  FT_Outline_Render(library, &outline, &params);
-  FT_Outline_Done(library, &outline);
+  FT_Outline *src = &face->glyph->outline;
+  FT_BBox b;
+  if (src->n_points == 0 || FT_Outline_Get_BBox(src, &b) || b.xMax <= b.xMin || b.yMax <= b.yMin) return;
+  FT_Outline outline;
+  if ((err = FT_Outline_New(library, src->n_points, src->n_contours, &outline))) {
+    fprintf(stderr, "ren_draw_glyph: %s\n", get_ft_error(err));
+    return;
+  }
+  FT_Outline_Copy(src, &outline);
+  // font units (y up) -> 26.6 surface pixels (raster y up = -surface y)
+  double s = fmin(w / (b.xMax - b.xMin), h / (b.yMax - b.yMin)) * rs->scale * 64;
+  double cx = (b.xMin + b.xMax) / 2.0, cy = (b.yMin + b.yMax) / 2.0;
+  double tx = (x + w / 2) * rs->scale * 64, ty = -(y + h / 2) * rs->scale * 64;
+  for (int i = 0; i < outline.n_points; i++) {
+    outline.points[i].x = lround((src->points[i].x - cx) * s + tx);
+    outline.points[i].y = lround((src->points[i].y - cy) * s + ty);
+  }
+  path_render(rs, &outline, color);
 }
 
 /*************** Window Management ****************/
