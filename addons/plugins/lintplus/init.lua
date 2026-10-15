@@ -15,14 +15,6 @@ local kind_priority = {
   error = 2,
 }
 
-local default_kind_pretty_names = {
-  info = "I",
-  hint = "H",
-  warning = "W",
-  error = "E",
-}
-
-
 --- IMPLEMENTATION ---
 
 
@@ -36,7 +28,6 @@ local syntax = require "core.syntax"
 
 local Doc = require "core.doc"
 local DocView = require "core.docview"
-local StatusView = require "core.statusview"
 
 local liteipc = require "plugins.lintplus.liteipc"
 local shapes = require "libraries.shapes"
@@ -684,11 +675,6 @@ local function table_add(t, d)
 end
 
 
-local function kind_pretty_name(kind)
-  return (config.kind_pretty_names or default_kind_pretty_names)[kind]
-end
-
-
 local function get_error_messages(doc, ordered)
   if not doc then return nil end
   local messages = lint.messages[core.project_absolute_path(doc.filename)]
@@ -709,22 +695,6 @@ local function get_error_messages(doc, ordered)
     )
   end
   return lines_info
-end
-
-
-local function get_current_error(doc)
-  local file_messages = get_error_messages(doc)
-  local line, message = math.huge, nil
-  for ln, messages in pairs(file_messages) do
-    local msg = messages[1]
-    if msg.kind == "error" and ln < line  then
-      line, message = ln, msg
-    end
-  end
-  if message ~= nil then
-    return line, message.kind, message.message
-  end
-  return nil, nil, nil
 end
 
 
@@ -775,91 +745,6 @@ local function goto_next_message()
     if line then
       doc:set_selection(line, 1, line, 1)
     end
-  end
-end
-
-
-local function get_status_view_items()
-  local doc = core.active_view.doc
-  local line1, _, line2, _ = doc:get_selection()
-  local file_messages = get_error_messages(doc)
-  if file_messages ~= nil then
-    if file_messages[line1] ~= nil and line1 == line2 then
-      local msg = file_messages[line1][1]
-      return {
-        kind_pretty_name(msg.kind), ": ",
-        style.text, msg.message,
-      }
-    else
-      local line, kind, message = get_current_error(doc)
-      if line ~= nil then
-        return {
-          "line ", tostring(line), " ", kind_pretty_name(kind), ": ",
-          style.text, message,
-        }
-      end
-    end
-  end
-  return {}
-end
-
-if StatusView["add_item"] then
-  core.status_view:add_item({
-    predicate = function()
-      local doc = core.active_view.doc
-      if
-        doc and doc.filename  -- skip new files
-        and
-        getmetatable(core.active_view) == DocView
-        and
-        (
-          lint.get_linter_for_doc(doc)
-          or
-          lint.messages[core.project_absolute_path(doc.filename)]
-        )
-      then
-        return true
-      end
-      return false
-    end,
-    name = "lint+:message",
-    alignment = StatusView.Item.LEFT,
-    get_item = get_status_view_items,
-    command = function()
-      local doc = core.active_view.doc
-      local line = get_current_error(doc)
-      if line ~= nil then
-        doc:set_selection(line, 1, line, 1)
-      end
-    end,
-    position = -1,
-    tooltip = "Lint+ error message",
-    separator = core.status_view.separator2
-  })
-else
-  local StatusView_get_items = StatusView.get_items
-  function StatusView:get_items()
-    local left, right = StatusView_get_items(self)
-    local doc = core.active_view.doc
-
-    if
-      doc and doc.filename  -- skip new files
-      and
-      getmetatable(core.active_view) == DocView
-      and
-      (
-        lint.get_linter_for_doc(doc)
-        or
-        lint.messages[core.project_absolute_path(doc.filename)]
-      )
-    then
-      local items = get_status_view_items()
-      if #items > 0 then
-        table.insert(left, {style.dim, self.separator2, table.unpack(items)})
-      end
-    end
-
-    return left, right
   end
 end
 

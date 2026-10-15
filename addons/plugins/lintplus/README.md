@@ -98,19 +98,10 @@ Available commands from the lite-xl commands palette (ctrl+shift+p):
 
 lint+ itself looks for the following configuration options:
 
-- `config.lint.kind_pretty_names`
-  - table:
-    - `info`: string = `"I"`
-    - `hint`: string = `"H"`
-    - `warning`: string = `"W"`
-    - `error`: string = `"E"`
-  - controls the prefix prepended to messages displayed on the status bar.
-    for example, setting `error` to `Error` will display `Error: …` or
-    `line 10 Error: …` instead of `E: …` or `line 10 E: …`.
 - `config.lint.inline_messages`
   - table:
-    - same keys as above
     - values are booleans
+  - keys: `info`, `hint`, `warning`, `error`
   - controls whether in-line messages are always displayed or only when the line is highlighted.
   - default is `true` (always display)
   - `false` instead of a table: never display in-line messages (e.g. when the
@@ -129,8 +120,8 @@ lint+ itself looks for the following configuration options:
     - `color`: renderer.color
 
 All options are unset (`nil`) by default, so eg. setting
-`config.lint.kind_pretty_names.hint` will *not* work because
-`config.lint.kind_pretty_names` does not exist.
+`config.lint.inline_messages.hint` will *not* work because
+`config.lint.inline_messages` does not exist.
 
 Individual plugins may also look for options in the `config.lint` table.
 Refer to each plugin's source code for more information.

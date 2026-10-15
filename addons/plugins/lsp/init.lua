@@ -2468,6 +2468,7 @@ core.status_view:add_item({
   end,
   command = "lsp:view-document-diagnostics",
   position = 1,
+  priority = 5,
   tooltip = "LSP Diagnostics",
   separator = core.status_view.separator2
 })
