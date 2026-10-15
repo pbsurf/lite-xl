@@ -144,6 +144,9 @@ int main(int argc, char **argv) {
   ** It also enables aero-snap on Windows apparently. */
   SDL_SetHint("SDL_BORDERLESS_RESIZABLE_STYLE", "1");
   SDL_SetHint(SDL_HINT_MOUSE_DOUBLE_CLICK_RADIUS, "4");
+  /* Touches come only as touch events, which core turns into taps and scrolling,
+  ** not also as mouse events (a drag would select text). */
+  SDL_SetHint(SDL_HINT_TOUCH_MOUSE_EVENTS, "0");
 
   const SDL_DisplayMode* dm = SDL_GetCurrentDisplayMode(SDL_GetPrimaryDisplay());
   window = SDL_CreateWindow(

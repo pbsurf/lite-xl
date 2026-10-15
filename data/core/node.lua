@@ -55,6 +55,8 @@ end
 function Node:on_mouse_moved(x, y, ...)
   if self.type == "leaf" then
     self.hovered.x, self.hovered.y = x, y
+    -- now, not at the next update: a tap moves and clicks in the same frame
+    self:tab_hovered_update(x, y)
     self.active_view:on_mouse_moved(x, y, ...)
   else
     self:propagate("on_mouse_moved", x, y, ...)
@@ -73,6 +75,8 @@ end
 
 function Node:on_mouse_left()
   if self.type == "leaf" then
+    self.hovered.x, self.hovered.y = -1, -1
+    self:tab_hovered_update(-1, -1)
     self.active_view:on_mouse_left()
   else
     self:propagate("on_mouse_left")

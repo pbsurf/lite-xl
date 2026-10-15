@@ -1282,6 +1282,12 @@ function core.on_event(type, ...)
     if not core.root_view:on_mouse_wheel(...) then
       did_keymap = keymap.on_mouse_wheel(...)
     end
+  elseif type == "touchpressed" then
+    core.root_view:on_touch_pressed(...)
+  elseif type == "touchmoved" then
+    core.root_view:on_touch_moved(...)
+  elseif type == "touchreleased" then
+    core.root_view:on_touch_released(...)
   elseif type == "resized" then
     core.window_mode = system.get_window_mode()
   elseif type == "minimized" or type == "maximized" or type == "restored" then
@@ -1313,13 +1319,14 @@ function core.step()
   -- handle events
   local did_keymap = false
 
-  for type, a,b,c,d in system.poll_event do
+  -- e: touchmoved's finger id, the only event with five values
+  for type, a,b,c,d,e in system.poll_event do
     if type == "textinput" and did_keymap then
       did_keymap = false
     elseif type == "mousemoved" then
       core.try(core.on_event, type, a, b, c, d)
     else
-      local _, res = core.try(core.on_event, type, a, b, c, d)
+      local _, res = core.try(core.on_event, type, a, b, c, d, e)
       did_keymap = res or did_keymap
     end
     core.redraw = true

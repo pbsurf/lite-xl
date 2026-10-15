@@ -253,6 +253,8 @@ end
 ---@param dx number
 ---@param dy number
 function RootView:on_mouse_moved(x, y, dx, dy)
+  -- the system can move the pointer along with a finger (VMware does)
+  if self.touch then return end
   if core.active_view == core.nag_view then
     core.request_cursor("arrow")
     core.active_view:on_mouse_moved(x, y, dx, dy)
@@ -345,6 +347,76 @@ function RootView:on_file_dropped(filename, x, y)
     end
   end
   return true
+end
+
+
+-- Touch, one finger at a time (others are ignored): a tap clicks, as the left
+-- mouse button (quick taps in one place count as double and triple clicks); a
+-- drag scrolls what's under the finger, a tab bar's tabs or the view, locked to
+-- one axis when it starts mostly along it.
+local TOUCH_DRAG_DISTANCE = 8   -- moving less than this (scaled) is still a tap
+local TAP_INTERVAL = 0.4        -- seconds between taps of a double tap
+
+function RootView:on_touch_pressed(x, y, id)
+  if self.touch then return end
+  self.touch = { id = id, x = x, y = y }
+  -- no hover effects from touch (a tap's click moves the mouse there itself)
+  self.root_node:on_mouse_left()
+end
+
+
+local function start_touch_scroll(self, t, x, y)
+  t.scrolling = true
+  t.node = self.root_node:get_child_overlapping_point(t.x, t.y)
+  t.on_tabs = t.node:should_show_tabs()
+    and t.y < t.node.position.y + t.node:get_tab_bar_height()
+  local dx, dy = math.abs(x - t.x), math.abs(y - t.y)
+  t.lock_x = t.on_tabs or dx > dy * 2   -- horizontal only
+  t.lock_y = not t.on_tabs and dy > dx * 2
+end
+
+
+function RootView:on_touch_moved(x, y, dx, dy, id)
+  local t = self.touch
+  if not t or t.id ~= id then return end
+  if not t.scrolling then
+    if common.distance(x, y, t.x, t.y) < TOUCH_DRAG_DISTANCE * SCALE then return end
+    start_touch_scroll(self, t, x, y)
+    dx, dy = x - t.x, y - t.y   -- include the movement before it counted as a drag
+  end
+  if t.lock_y then dx = 0 end
+  if t.lock_x then dy = 0 end
+  local node = t.node
+  if t.on_tabs then
+    node:scroll_tabs_freely(-dx / node.tab_width)
+    node.tab_shift = node.tab_scroll * node.tab_width   -- follow the finger, no animation
+  else
+    local view = node.active_view
+    view.scroll.to.x = view.scroll.to.x - dx
+    view.scroll.to.y = view.scroll.to.y - dy
+    view:clamp_scroll_position()
+    view.scroll.x, view.scroll.y = view.scroll.to.x, view.scroll.to.y
+  end
+  core.redraw = true
+end
+
+
+function RootView:on_touch_released(x, y, id)
+  local t = self.touch
+  if not t or t.id ~= id then return end
+  self.touch = nil
+  if t.scrolling then return end
+  local now, last = system.get_time(), self.last_tap
+  local clicks = 1
+  if last and now - last.time < TAP_INTERVAL
+     and common.distance(x, y, last.x, last.y) < TOUCH_DRAG_DISTANCE * SCALE then
+    clicks = last.clicks % 3 + 1
+  end
+  self.last_tap = { time = now, x = x, y = y, clicks = clicks }
+  -- through core.on_event, so it goes where a real click would (keymap included)
+  core.on_event("mousemoved", x, y, 0, 0)
+  core.on_event("mousepressed", "left", x, y, clicks)
+  core.on_event("mousereleased", "left", x, y)
 end
 
 
