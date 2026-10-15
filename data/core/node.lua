@@ -17,7 +17,7 @@ local Node = Object:extend()
 ---@field active? fun(node: core.node): boolean While false: dim, ignoring clicks
 ---@field width? fun(node: core.node): number Default: 3 icon widths. Called while
 ---working out how many tabs fit, so it can't depend on that (get_max_tabs,
----get_visible_tabs_number, tabs_overflow).
+---tabs_overflow, get_tab_area_width, target_tab_width, get_visible_tabs_number).
 
 ---Tab bar buttons by name; config.tab_buttons chooses which show, in which order.
 ---@type table<string, core.node.tab_button>
@@ -37,8 +37,10 @@ function Node:new(type)
   self.hovered = {x = -1, y = -1 }
   self.hovered_close = 0
   self.hovered_tab_button = 0
+  -- tab_scroll: how far the tabs are scrolled, in tabs (fractional while scrolled
+  -- freely); tab_shift (pixels) and tab_width animate towards it and target_tab_width()
+  self.tab_scroll = 0
   self.tab_shift = 0
-  self.tab_offset = 1
   self.tab_width = style.tab_width
   self.move_towards = View.move_towards
 end
@@ -118,8 +120,10 @@ end
 function Node:remove_view(root, view)
   if #self.views > 1 then
     local idx = self:get_view_idx(view)
-    if idx < self.tab_offset then
-      self.tab_offset = self.tab_offset - 1
+    if idx <= self.tab_scroll then
+      -- a tab left of the view: keep the same tabs in view
+      self.tab_scroll = math.max(0, self.tab_scroll - 1)
+      self.tab_shift = math.max(0, self.tab_shift - self.tab_width)
     end
     table.remove(self.views, idx)
     if self.active_view == view then
@@ -297,19 +301,57 @@ function Node:tabs_overflow()
 end
 
 
+---The width of the tab bar left for tabs, left of the buttons.
+function Node:get_tab_area_width()
+  if self:tabs_overflow() then
+    return self.size.x - self:get_tab_buttons_width()
+  end
+  return self.size.x
+end
+
+
+function Node:target_tab_width()
+  local n = math.min(#self.views, self:get_max_tabs())
+  return math.min(style.tab_width, self:get_tab_area_width() / n)
+end
+
+
+---How many tabs fit in the tab area (can be fractional).
+function Node:get_tab_area_tabs()
+  return self:get_tab_area_width() / self:target_tab_width()
+end
+
+
+function Node:get_max_tab_scroll()
+  return math.max(0, #self.views - self:get_tab_area_tabs())
+end
+
+
+---How many tabs are fully in view, once the tabs have finished scrolling.
 function Node:get_visible_tabs_number()
-  return math.min(#self.views - self.tab_offset + 1, self:get_max_tabs())
+  local first = math.ceil(self.tab_scroll - 1e-6)
+  local after_last = math.floor(self.tab_scroll + self:get_tab_area_tabs() + 1e-6)
+  return math.max(0, math.min(#self.views, after_last) - first)
+end
+
+
+---The first and last tab at least partly in view, where the tabs are drawn now.
+function Node:get_drawn_tabs_range()
+  local first = math.floor(self.tab_shift / self.tab_width) + 1
+  local last = math.ceil((self.tab_shift + self:get_tab_area_width()) / self.tab_width)
+  return math.max(1, first), math.min(#self.views, last)
 end
 
 
 function Node:get_tab_overlapping_point(px, py)
   if not self:should_show_tabs() then return nil end
-  local tabs_number = self:get_visible_tabs_number()
-  local x1, y1, w, h = self:get_tab_rect(self.tab_offset)
-  local x2, y2 = self:get_tab_rect(self.tab_offset + tabs_number)
-  if px >= x1 and py >= y1 and px < x2 and py < y1 + h then
-    return math.floor((px - x1) / w) + self.tab_offset
+  local x0, y0 = self.position.x, self.position.y
+  if px < x0 or px >= x0 + self:get_tab_area_width()
+     or py < y0 or py >= y0 + self:get_tab_bar_height() then
+    return nil
   end
+  local idx = math.floor((px - x0 + self.tab_shift) / self.tab_width) + 1
+  if idx >= 1 and idx <= #self.views then return idx end
 end
 
 
@@ -398,12 +440,11 @@ function Node:get_tab_button_rect(i)
 end
 
 
+---The tab's rect where it's drawn now; it can be partly or wholly outside the tab
+---area (get_tab_area_width), which drawing clips to.
 function Node:get_tab_rect(idx)
-  local maxw = self.size.x
-  local x0 = self.position.x
-  local x1 = x0 + common.clamp(self.tab_width * (idx - 1) - self.tab_shift, 0, maxw)
-  local x2 = x0 + common.clamp(self.tab_width * idx - self.tab_shift, 0, maxw)
-  return x1, self.position.y, x2 - x1, self:get_tab_bar_height()
+  local x = self.position.x + self.tab_width * (idx - 1) - self.tab_shift
+  return x, self.position.y, self.tab_width, self:get_tab_bar_height()
 end
 
 
@@ -497,51 +538,44 @@ function Node:update_layout()
 end
 
 
+---Scrolls the active tab into view, by as little as needed, unless the tabs were
+---scrolled freely (scroll_tabs_freely) since it became active.
 function Node:scroll_tabs_to_visible()
-  local index = self:get_view_idx(self.active_view)
-  if index then
-    local tabs_number = self:get_visible_tabs_number()
-    local max_tabs = self:get_max_tabs()
-    if self.tab_offset > index then
-      self.tab_offset = index
-    elseif self.tab_offset + tabs_number - 1 < index then
-      self.tab_offset = index - tabs_number + 1
-    elseif tabs_number < max_tabs and self.tab_offset > 1 then
-      self.tab_offset = math.max(1, #self.views - max_tabs + 1)
+  if self.free_scroll_view ~= self.active_view then
+    self.free_scroll_view = nil
+    local index = self:get_view_idx(self.active_view)
+    if index then
+      self.tab_scroll = common.clamp(self.tab_scroll, index - self:get_tab_area_tabs(), index - 1)
     end
   end
+  self.tab_scroll = common.clamp(self.tab_scroll, 0, self:get_max_tab_scroll())
 end
 
 
+---Scrolls the tabs by n tabs (negative: towards the first; can be fractional)
+---without changing the active tab, which can scroll out of view; they follow it
+---again once it changes.
+function Node:scroll_tabs_freely(n)
+  self.tab_scroll = common.clamp(self.tab_scroll + n, 0, self:get_max_tab_scroll())
+  self.free_scroll_view = self.active_view
+end
+
+
+---Scrolls the tabs by one tab, to a whole tab at the edge (dir 1: towards the
+---first, 2: towards the last), making the nearest tab in view active if the
+---active one would go out of view.
 function Node:scroll_tabs(dir)
-  local view_index = self:get_view_idx(self.active_view)
-  if dir == 1 then
-    if self.tab_offset > 1 then
-      self.tab_offset = self.tab_offset - 1
-      local last_index = self.tab_offset + self:get_visible_tabs_number() - 1
-      if view_index > last_index then
-        self:set_active_view(self.views[last_index])
-      end
-    end
-  elseif dir == 2 then
-    local tabs_number = self:get_visible_tabs_number()
-    if self.tab_offset + tabs_number - 1 < #self.views then
-      self.tab_offset = self.tab_offset + 1
-      local view_index = self:get_view_idx(self.active_view)
-      if view_index < self.tab_offset then
-        self:set_active_view(self.views[self.tab_offset])
-      end
-    end
+  local first = self.tab_scroll
+  first = dir == 1 and math.ceil(first - 1e-6) - 1 or math.floor(first + 1e-6) + 1
+  self.tab_scroll = common.clamp(first, 0, self:get_max_tab_scroll())
+  local index = self:get_view_idx(self.active_view)
+  local first_index = math.ceil(self.tab_scroll - 1e-6) + 1
+  local last_index = first_index + self:get_visible_tabs_number() - 1
+  if index < first_index then
+    self:set_active_view(self.views[first_index])
+  elseif index > last_index then
+    self:set_active_view(self.views[last_index])
   end
-end
-
-
-function Node:target_tab_width()
-  local w = self.size.x
-  if self:tabs_overflow() then
-    w = w - self:get_tab_buttons_width()
-  end
-  return math.min(style.tab_width, w / self:get_visible_tabs_number())
 end
 
 
@@ -553,7 +587,7 @@ function Node:update()
     end
     self:tab_hovered_update(self.hovered.x, self.hovered.y)
     local tab_width = self:target_tab_width()
-    self:move_towards("tab_shift", tab_width * (self.tab_offset - 1), nil, "tabs")
+    self:move_towards("tab_shift", self.tab_scroll * tab_width, nil, "tabs")
     self:move_towards("tab_width", tab_width, nil, "tabs")
   else
     self.a:update()
@@ -625,21 +659,22 @@ function Node:draw_tabs()
   core.push_clip_rect(x, y, self.size.x, h)
   renderer.draw_rect(x, y, self.size.x, h, style.background2)
   renderer.draw_rect(x, y + h - ds, self.size.x, ds, style.divider)
-  local tabs_number = self:get_visible_tabs_number()
 
-  for i = self.tab_offset, self.tab_offset + tabs_number - 1 do
+  core.push_clip_rect(x, y, self:get_tab_area_width(), h)
+  local first, last = self:get_drawn_tabs_range()
+  for i = first, last do
     local view = self.views[i]
     local x, y, w, h = self:get_tab_rect(i)
     self:draw_tab(view, view == self.active_view,
                   i == self.hovered_tab, i == self.hovered_close,
                   x, y, w, h)
   end
+  core.pop_clip_rect()
 
   if self:tabs_overflow() then
     for i, button in ipairs(self:get_tab_buttons()) do
       local bx, by, bw, bh = self:get_tab_button_rect(i)
       local hovered = self.hovered_tab_button == i
-      renderer.draw_rect(bx, by, bw, bh - ds, style.background2)
       if button.draw then
         button.draw(self, bx, by, bw, bh, hovered)
       else
@@ -696,7 +731,7 @@ function Node:close_all_docviews(keep_active)
         i = i + 1
       end
     end
-    self.tab_offset = 1
+    self.tab_scroll = 0
     if #self.views == 0 and self.is_primary_node then
       -- if we are not the primary view and we had the active view it doesn't
       -- matter to reattribute the active view because, within the close_all_docviews
@@ -809,14 +844,10 @@ end
 function Node:get_drag_overlay_tab_position(x, y, dragged_node, dragged_index)
   local tab_index = self:get_tab_overlapping_point(x, y)
   if not tab_index then
-    local first_tab_x = self:get_tab_rect(1)
-    if x < first_tab_x then
-      -- mouse before first visible tab
-      tab_index = self.tab_offset or 1
-    else
-      -- mouse after last visible tab
-      tab_index = self:get_visible_tabs_number() + (self.tab_offset - 1 or 0)
-    end
+    -- mouse after the last tab, or over the buttons: the last tab in view
+    local x0 = self.position.x
+    local area_x = math.min(x, x0 + self:get_tab_area_width() - 1)
+    tab_index = common.clamp(math.floor((area_x - x0 + self.tab_shift) / self.tab_width) + 1, 1, #self.views)
   end
   local tab_x, tab_y, tab_w, tab_h = self:get_tab_rect(tab_index)
   if x > tab_x + tab_w / 2 and tab_index <= #self.views then

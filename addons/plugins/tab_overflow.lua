@@ -17,14 +17,14 @@ local menu = ContextMenu()
 Node.tab_buttons.scroll_left = {
   icon = "<",
   on_click = function(node) node:scroll_tabs(1) end,
-  active = function(node) return node.tab_offset > 1 end,
+  active = function(node) return node.tab_scroll > 0 end,
 }
 
 Node.tab_buttons.scroll_right = {
   icon = ">",
   on_click = function(node) node:scroll_tabs(2) end,
   active = function(node)
-    return node.tab_offset + node:get_visible_tabs_number() - 1 < #node.views
+    return node.tab_scroll < node:get_max_tab_scroll()
   end,
 }
 

@@ -348,10 +348,16 @@ function RootView:on_file_dropped(filename, x, y)
 end
 
 
-function RootView:on_mouse_wheel(...)
+function RootView:on_mouse_wheel(dy, dx)
   local x, y = self.mouse.x, self.mouse.y
   local node = self.root_node:get_child_overlapping_point(x, y)
-  return node.active_view:on_mouse_wheel(...)
+  -- over a tab bar whose tabs scroll: one notch scrolls one tab
+  if node:should_show_tabs() and node:tabs_overflow()
+     and y < node.position.y + node:get_tab_bar_height() then
+    node:scroll_tabs_freely(-(dy + (dx or 0)))
+    return true
+  end
+  return node.active_view:on_mouse_wheel(dy, dx)
 end
 
 
