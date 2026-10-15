@@ -107,7 +107,7 @@ end
 local function get_plugin_directory()
   local paths = {
     USERDIR .. PATHSEP .. "plugins" .. PATHSEP .. "build",
-    EXTRADIR .. PATHSEP .. "plugins" .. PATHSEP .. "build"
+    DATADIR .. PATHSEP .. "plugins" .. PATHSEP .. "build"
   }
   for i, v in ipairs(paths) do if system.get_file_info(v) then return v end end
   return nil
