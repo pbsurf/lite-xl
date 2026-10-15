@@ -196,14 +196,16 @@ end
 -- Override function to draw icons in tabs titles if setting is enabled
 local Node_draw_tab_title = Node.draw_tab_title
 function Node:draw_tab_title(view, font, is_active, is_hovered, x, y, w, h)
-  if config.plugins.nerdicons.draw_tab_icons then
-    local padx = chevron_width + style.padding.x/2
-    local tx = x + padx/16 -- Space for icon
-    w = w + padx
-    Node_draw_tab_title(self, view, font, is_active, is_hovered, tx, y, w, h)
-    if (view == nil) or (view.doc == nil) then return end
+  if config.plugins.nerdicons.draw_tab_icons and view and view.doc then
+    -- Icon and title as one group: centered while the title fits, otherwise the icon
+    -- at the left and the title truncated in the space after it
     local item = { type = "file", name = view.doc:get_name() }
-    TreeView:draw_item_icon(item, false, is_hovered, x, y, w, h)
+    local icon, icon_font, color = TreeView:get_item_icon(item, false, is_hovered)
+    local icon_w = icon_font:get_width(icon) + style.padding.x / 2
+    local group_w = icon_w + font:get_width(view:get_name())
+    local ix = x + math.max(0, (w - group_w) / 2)
+    common.draw_text(icon_font, color, icon, nil, ix, y, 0, h)
+    Node_draw_tab_title(self, view, font, is_active, is_hovered, ix + icon_w, y, x + w - ix - icon_w, h)
   else
     Node_draw_tab_title(self, view, font, is_active, is_hovered, x, y, w, h)
   end
