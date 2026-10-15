@@ -16,6 +16,8 @@ local DIVIDER = {}
 ---@class core.contextmenu.item
 ---@field text string
 ---@field info string|nil If provided, this text is displayed on the right side of the menu.
+---Without it, the key binding of `command`, if any, is displayed there.
+---@field active boolean|nil If true, the text is drawn in the accent color (e.g. the current choice).
 ---@field command string|fun()
 
 ---A list of items with the same predicate.
@@ -66,7 +68,7 @@ end
 local function update_items_size(items, update_binding)
   local width, height = 0, 0
   for _, item in ipairs(items) do
-    if update_binding and item ~= DIVIDER then
+    if update_binding and item ~= DIVIDER and item.info == nil then
       item.info = keymap.get_binding(item.command)
     end
     local lw, lh = get_item_size(item)
@@ -283,7 +285,8 @@ function ContextMenu:draw_context_menu()
         renderer.draw_rect(x, y, w, h, style.selection)
       end
 
-      common.draw_text(style.font, style.text, item.text, "left", x + style.padding.x, y, w, h)
+      local color = item.active and style.accent or style.text
+      common.draw_text(style.font, color, item.text, "left", x + style.padding.x, y, w, h)
       if item.info then
         common.draw_text(style.font, style.dim, item.info, "right", x, y, w - style.padding.x, h)
       end

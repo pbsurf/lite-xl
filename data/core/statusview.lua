@@ -1,6 +1,7 @@
 local core = require "core"
 local common = require "core.common"
 local command = require "core.command"
+local keymap = require "core.keymap"
 local config = require "core.config"
 local style = require "core.style"
 local DocView = require "core.docview"
@@ -8,6 +9,8 @@ local CommandView = require "core.commandview"
 local LogView = require "core.logview"
 local View = require "core.view"
 local Object = require "core.object"
+local ContextMenu = require "core.contextmenu"
+local RootView = require "core.rootview"
 
 
 ---@alias core.statusview.styledtext table<integer, renderer.font|renderer.color|string>
@@ -25,14 +28,15 @@ local Object = require "core.object"
 ---@field tooltip core.statusview.styledtext
 ---@field left_width number
 ---@field right_width number
----@field r_left_width number
----@field r_right_width number
----@field left_xoffset number
----@field right_xoffset number
----@field dragged_panel '""' | core.statusview.position
----@field hovered_panel '""' | core.statusview.position
+---@field pressed_item core.statusview.item | nil @The item the mouse was pressed on.
+---@field menu core.statusview.menu
 ---@field hide_messages boolean
 local StatusView = View:extend()
+
+---The menu opened from an item, see `core.statusview.item.options.menu`.
+---@class core.statusview.menu : core.contextmenu
+---@field item core.statusview.item | nil @The item it was opened from.
+local StatusMenu = ContextMenu:extend()
 
 function StatusView:__tostring() return "StatusView" end
 
@@ -52,13 +56,17 @@ StatusView.separator2 = "   |   "
 ---@alias core.statusview.item.onclick fun(button: string, x: number, y: number)
 ---@alias core.statusview.item.get_item fun(self: core.statusview.item):core.statusview.styledtext?,core.statusview.styledtext?
 ---@alias core.statusview.item.ondraw fun(x, y, h, hovered: boolean, calc_only?: boolean):number
+---@alias core.statusview.item.tooltip fun(self: core.statusview.item):string
+---@alias core.statusview.item.menu fun(self: core.statusview.item):core.contextmenu.item[]
 
 ---@class core.statusview.item : core.object
 ---@field name string
 ---@field predicate core.statusview.item.predicate
 ---@field alignment core.statusview.item.alignment
----@field tooltip string
+---@field tooltip string | core.statusview.item.tooltip
+---@field priority number
 ---@field command string | nil @Command to perform when the item is clicked.
+---@field menu core.statusview.item.menu | nil @Rows of the menu a click opens.
 ---Function called when item is clicked and no command is set.
 ---@field on_click core.statusview.item.onclick | nil
 ---Custom drawing that when passed calc true should return the needed width for
@@ -97,7 +105,15 @@ function StatusViewItem:__tostring() return "StatusViewItem" end
 ---a value of -1 inserts the item at the end which is the default. A value
 ---of 1 will insert the item at the beggining.
 ---@field position? integer
----@field tooltip? string @Text displayed when mouse hovers the item.
+---Text displayed when mouse hovers the item, or a function returning it.
+---@field tooltip? string | core.statusview.item.tooltip
+---When the items don't fit in the status bar, those with the lowest priority
+---are left out (of equal ones, the furthest from their edge of the bar).
+---Defaults to 0.
+---@field priority? number
+---A function returning the rows of a menu to open above the item when it's
+---clicked (instead of `command`), as for `core.contextmenu`.
+---@field menu? core.statusview.item.menu
 ---@field visible boolean @Flag to show or hide the item
 ---The type of separator rendered to the right of the item if another item
 ---follows it.
@@ -123,6 +139,8 @@ function StatusViewItem:new(options)
   self.alignment = options.alignment or StatusView.Item.LEFT
   self.command = type(options.command) == "string" and options.command or nil
   self.tooltip = options.tooltip or ""
+  self.priority = options.priority or 0
+  self.menu = options.menu
   self.on_click = type(options.command) == "function" and options.command or nil
   self.on_draw = nil
   self.background_color = nil
@@ -181,12 +199,8 @@ function StatusView:new()
   self.pointer = {x = 0, y = 0}
   self.left_width = 0
   self.right_width = 0
-  self.r_left_width = 0
-  self.r_right_width = 0
-  self.left_xoffset = 0
-  self.right_xoffset = 0
-  self.dragged_panel = ""
-  self.hovered_panel = ""
+  self.pressed_item = nil
+  self.menu = StatusMenu()
   self.hide_messages = false
   self.visible = true
 
@@ -194,107 +208,90 @@ function StatusView:new()
   self:register_command_items()
 end
 
+---The cursor's line and column, counting a tab as `indent_size` columns.
+---@param dv core.docview
+---@return integer line, integer col
+local function get_position(dv)
+  local line, col = dv.doc:get_selection()
+  local _, indent_size = dv.doc:get_indent_info()
+  -- Calculating tabs when the doc is using the "hard" indent type.
+  local ntabs = 0
+  local last_idx = 0
+  while last_idx < col do
+    local s, e = string.find(dv.doc.lines[line], "\t", last_idx, true)
+    if s and s < col then
+      ntabs = ntabs + 1
+      last_idx = e + 1
+    else
+      break
+    end
+  end
+  return line, col + ntabs * (indent_size - 1)
+end
+
+
 ---The predefined status bar items displayed when a document view is active.
 function StatusView:register_docview_items()
-  if self:get_item("doc:file") then return end
-
-  self:add_item({
-    predicate = predicate_docview,
-    name = "doc:file",
-    alignment = StatusView.Item.LEFT,
-    get_item = function()
-      local dv = core.active_view
-      return {
-        dv.doc:is_dirty() and style.accent or style.text, style.icon_font, "f",
-        style.dim, style.font, self.separator2, style.text,
-        dv.doc.filename and style.text or style.dim, common.home_encode(dv.doc:get_name())
-      }
-    end
-  })
+  if self:get_item("doc:position") then return end
 
   self:add_item({
     predicate = predicate_docview,
     name = "doc:position",
     alignment = StatusView.Item.LEFT,
+    priority = 10,
     get_item = function()
-      local dv = core.active_view
-      local line, col = dv.doc:get_selection()
-      local _, indent_size = dv.doc:get_indent_info()
-      -- Calculating tabs when the doc is using the "hard" indent type.
-      local ntabs = 0
-      local last_idx = 0
-      while last_idx < col do
-        local s, e = string.find(dv.doc.lines[line], "\t", last_idx, true)
-        if s and s < col then
-          ntabs = ntabs + 1
-          last_idx = e + 1
-        else
-          break
-        end
-      end
-      col = col + ntabs * (indent_size - 1)
+      local line, col = get_position(core.active_view)
       return {
         style.text, line, ":",
         col > config.line_limit and style.accent or style.text, col,
-        style.text,
-        self.separator,
-        string.format("%.f%%", line / #dv.doc.lines * 100)
       }
     end,
     command = "doc:go-to-line",
-    tooltip = "line : column"
+    tooltip = function()
+      local dv = core.active_view
+      local line, col = get_position(dv)
+      return string.format("Line %d of %d (%.f%%), column %d",
+        line, #dv.doc.lines, line / #dv.doc.lines * 100, col)
+    end
   })
 
+  -- Indentation and line endings: shown when they differ from the defaults,
+  -- set from the menu
   self:add_item({
     predicate = predicate_docview,
-    name = "doc:indentation",
+    name = "doc:format",
     alignment = StatusView.Item.RIGHT,
+    priority = -10,
     get_item = function()
-      local dv = core.active_view
-      local indent_type, indent_size, indent_confirmed = dv.doc:get_indent_info()
-      local indent_label = (indent_type == "hard") and "tabs: " or "spaces: "
-      return {
-        style.text, indent_label, indent_size,
-        indent_confirmed and "" or "*"
-      }
-    end,
-    command = function(button, x, y)
-      if button == "left" then
-        command.perform "indent:set-file-indent-size"
-      elseif button == "right" then
-        command.perform "indent:set-file-indent-type"
+      local doc = core.active_view.doc
+      local indent_type, indent_size = doc:get_indent_info()
+      local t = { style.text, style.icon_font, "P", style.font }
+      if indent_type ~= config.tab_type or indent_size ~= config.indent_size then
+        table.insert(t, (indent_type == "hard" and "  tabs: " or "  spaces: ") .. indent_size)
       end
+      if doc.crlf then table.insert(t, "  CRLF") end
+      return t
     end,
-    separator = self.separator2
-  })
-
-  self:add_item({
-    predicate = predicate_docview,
-    name = "doc:lines",
-    alignment = StatusView.Item.RIGHT,
-    get_item = function()
-      local dv = core.active_view
+    tooltip = function()
+      local doc = core.active_view.doc
+      local indent_type, indent_size, indent_confirmed = doc:get_indent_info()
+      local indent = indent_type == "hard"
+        and string.format("tabs, %d wide", indent_size)
+        or string.format("%d spaces", indent_size)
+      return string.format("Indent: %s%s, line endings: %s", indent,
+        indent_confirmed and "" or " (default)", doc.crlf and "CRLF" or "LF")
+    end,
+    menu = function()
+      local doc = core.active_view.doc
+      local indent_type, indent_size = doc:get_indent_info()
       return {
-        style.text,
-        style.icon_font, "g",
-        style.font, style.dim, self.separator2,
-        style.text, #dv.doc.lines, " lines",
+        { text = "Indent size: " .. indent_size, command = "indent:set-file-indent-size" },
+        { text = "Indent type: " .. (indent_type == "hard" and "tabs" or "spaces"),
+          command = "indent:set-file-indent-type" },
+        { text = "Line endings: " .. (doc.crlf and "CRLF" or "LF"),
+          command = "doc:toggle-line-ending" },
       }
-    end,
-    separator = self.separator2
-  })
-
-  self:add_item({
-    predicate = predicate_docview,
-    name = "doc:line-ending",
-    alignment = StatusView.Item.RIGHT,
-    get_item = function()
-      local dv = core.active_view
-      return {
-        style.text, dv.doc.crlf and "CRLF" or "LF"
-      }
-    end,
-    command = "doc:toggle-line-ending"
+    end
   })
 end
 
@@ -597,8 +594,10 @@ end
 ---Draw the tooltip of a given status bar item.
 ---@param item core.statusview.item
 function StatusView:draw_item_tooltip(item)
+  local text = item.tooltip
+  if type(text) == "function" then text = text(item) end
+  if not text or text == "" then return end
   core.root_view:defer_draw(function()
-    local text = item.tooltip
     local w = style.font:get_width(text)
     local h = style.font:get_height()
     local x = self.pointer.x - (w / 2) - (style.padding.x * 2)
@@ -752,18 +751,44 @@ local function remove_spacing(self, styled_text)
 end
 
 
+---Positions the given items: left ones from the left edge of the status bar,
+---right ones up to its right edge, with separators between the items of a side.
+---@param self core.statusview
+---@param items core.statusview.item[]
+---@return core.statusview.item[] active_items The items and separators.
+---@return number left_width
+---@return number right_width
+local function layout_items(self, items)
+  local x = self:get_content_offset()
+  local active_items = {}
+  local width = { [StatusView.Item.LEFT] = 0, [StatusView.Item.RIGHT] = 0 }
+  for _, item in ipairs(items) do
+    local w = width[item.alignment]
+    if w > 0 then
+      local space = add_spacing(self, active_items, item.separator, item.alignment, w)
+      w = w + space.w
+    end
+    item.x = w
+    width[item.alignment] = w + item.w
+    table.insert(active_items, item)
+  end
+  local lw, rw = width[StatusView.Item.LEFT], width[StatusView.Item.RIGHT]
+  for _, item in ipairs(active_items) do
+    if item.alignment == StatusView.Item.LEFT then
+      item.x = x + item.x
+    else
+      item.x = x + self.size.x - rw - style.padding.x * 2 + item.x
+    end
+  end
+  return active_items, lw, rw
+end
+
+
 ---Set the active items that will be displayed on the left or right side
 ---of the status bar checking their predicates and performing positioning
----calculations for proper functioning of tooltips and clicks.
+---calculations for proper functioning of tooltips and clicks. Items that
+---don't fit are left out, by priority.
 function StatusView:update_active_items()
-  local x = self:get_content_offset()
-
-  local rx = x + self.size.x
-  local lx = x
-  local rw, lw = 0, 0
-
-  self.active_items = {}
-
   ---@type core.statusview.item[]
   local combined_items = {}
   table_add(combined_items, self.items)
@@ -773,10 +798,10 @@ function StatusView:update_active_items()
   merge_deprecated_items(combined_items, dleft, StatusView.Item.LEFT)
   merge_deprecated_items(combined_items, dright, StatusView.Item.RIGHT)
 
-  local lfirst, rfirst = true, true
-
-  -- calculate left and right width
+  -- measure the items to show
+  local items = {}
   for _, item in ipairs(combined_items) do
+    item.active = false
     item.cached_item = {}
     if item.visible and item:predicate() then
       local styled_text = type(item.get_item) == "function"
@@ -787,169 +812,75 @@ function StatusView:update_active_items()
       end
 
       if #styled_text > 0 or item.on_draw then
-        item.active = true
         local hovered = self.hovered_item == item
-        if item.alignment == StatusView.Item.LEFT then
-          if not lfirst then
-            local space = add_spacing(
-              self, self.active_items, item.separator, item.alignment, lx
-            )
-            lw = lw + space.w
-            lx = lx + space.w
-          else
-            lfirst = false
-          end
-          item.w = item.on_draw and
-            item.on_draw(lx, self.position.y, self.size.y, hovered, true)
-            or
-            draw_items(self, styled_text, 0, 0, text_width)
-          item.x = lx
-          lw = lw + item.w
-          lx = lx + item.w
-        else
-          if not rfirst then
-            local space = add_spacing(
-              self, self.active_items, item.separator, item.alignment, rx
-            )
-            rw = rw + space.w
-            rx = rx + space.w
-          else
-            rfirst = false
-          end
-          item.w = item.on_draw and
-            item.on_draw(rx, self.position.y, self.size.y, hovered, true)
-            or
-            draw_items(self, styled_text, 0, 0, text_width)
-          item.x = rx
-          rw = rw + item.w
-          rx = rx + item.w
-        end
+        item.w = item.on_draw and
+          item.on_draw(0, self.position.y, self.size.y, hovered, true)
+          or
+          draw_items(self, styled_text, 0, 0, text_width)
         item.cached_item = styled_text
-        table.insert(self.active_items, item)
-      else
-        item.active = false
+        table.insert(items, item)
       end
-    else
-      item.active = false
     end
   end
 
-  self.r_left_width, self.r_right_width = lw, rw
-
-  -- try to calc best size for left and right
-  if lw + rw + (style.padding.x * 4) > self.size.x then
-    if lw + (style.padding.x * 2) < self.size.x / 2 then
-      rw = self.size.x - lw  - (style.padding.x * 3)
-      if rw > self.r_right_width then
-        lw = lw + (rw - self.r_right_width)
-        rw = self.r_right_width
+  -- leave out items until the rest fit: the lowest priority first and, of
+  -- equal ones, the one furthest from its edge of the bar
+  local active_items, lw, rw = layout_items(self, items)
+  local function fits()
+    -- padding at both edges, and between the sides if both have items
+    local gap = (lw > 0 and rw > 0) and style.padding.x * 2 or 0
+    return lw + rw + gap + style.padding.x * 2 <= self.size.x
+  end
+  while #items > 0 and not fits() do
+    local drop, drop_distance
+    for i, item in ipairs(items) do
+      local distance = item.alignment == StatusView.Item.LEFT
+        and item.x + item.w
+        or self.size.x - item.x
+      if not drop or item.priority < items[drop].priority
+        or (item.priority == items[drop].priority and distance > drop_distance)
+      then
+        drop, drop_distance = i, distance
       end
-    elseif rw + (style.padding.x * 2) < self.size.x / 2 then
-      lw = self.size.x - rw  - (style.padding.x * 3)
-    else
-      lw = self.size.x / 2 - (style.padding.x + style.padding.x / 2)
-      rw = self.size.x / 2 - (style.padding.x + style.padding.x / 2)
     end
-    -- reposition left and right offsets when window is resized
-    if rw >= self.r_right_width then
-      self.right_xoffset = 0
-    elseif rw > self.right_xoffset + self.r_right_width then
-      self.right_xoffset = rw - self.r_right_width
-    end
-    if lw >= self.r_left_width then
-      self.left_xoffset = 0
-    elseif lw > self.left_xoffset + self.r_left_width then
-      self.left_xoffset = lw - self.r_left_width
-    end
-  else
-    self.left_xoffset = 0
-    self.right_xoffset = 0
+    table.remove(items, drop)
+    active_items, lw, rw = layout_items(self, items)
   end
 
+  for _, item in ipairs(items) do item.active = true end
+  self.active_items = active_items
   self.left_width, self.right_width = lw, rw
-
-  for _, item in ipairs(self.active_items) do
-    if item.alignment == StatusView.Item.RIGHT then
-      -- re-calculate x position now that we have the total width
-      item.x = item.x - rw - (style.padding.x * 2)
-    end
-  end
 end
 
 
----Drag the given panel if possible.
----@param panel core.statusview.position
----@param dx number
-function StatusView:drag_panel(panel, dx)
-  if panel == "left" and self.r_left_width > self.left_width then
-    local nonvisible_w = self.r_left_width - self.left_width
-    local new_offset = self.left_xoffset + dx
-    if new_offset >= 0 - nonvisible_w and new_offset <= 0 then
-      self.left_xoffset = new_offset
-    elseif dx < 0 then
-      self.left_xoffset = 0 - nonvisible_w
-    else
-      self.left_xoffset = 0
-    end
-  elseif panel == "right" and self.r_right_width > self.right_width then
-    local nonvisible_w = self.r_right_width - self.right_width
-    local new_offset = self.right_xoffset + dx
-    if new_offset >= 0 - nonvisible_w and new_offset <= 0 then
-      self.right_xoffset = new_offset
-    elseif dx < 0 then
-      self.right_xoffset = 0 - nonvisible_w
-    else
-      self.right_xoffset = 0
-    end
-  end
-end
-
-
----Return the currently hovered panel or empty string if none.
----@param x number
----@param y number
----@return string
-function StatusView:get_hovered_panel(x, y)
-  if y >= self.position.y and x <= self.left_width + style.padding.x then
-    return "left"
-  end
-  return "right"
-end
-
-
+---The area an active item takes on the screen.
 ---@param item core.statusview.item
 ---@return number x
 ---@return number w
 function StatusView:get_item_visible_area(item)
-  local item_ox = item.alignment == StatusView.Item.LEFT and
-    self.left_xoffset or self.right_xoffset
-
-  local item_x = item_ox + item.x + style.padding.x
-  local item_w = item.w
-
-  if item.alignment == StatusView.Item.LEFT then
-    if self.left_width - item_x > 0 and self.left_width - item_x < item.w then
-      item_w = (self.left_width + style.padding.x) - item_x
-    elseif self.left_width - item_x < 0 then
-      item_x = 0
-      item_w = 0
-    end
-  else
-    local rx = self.size.x - self.right_width - style.padding.x
-    if item_x < rx then
-      if item_x + item.w > rx then
-        item_x = rx
-        item_w = (item_x + item.w) - rx
-      else
-        item_x = 0
-        item_w = 0
-      end
-    end
-  end
-
-  return item_x, item_w
+  return item.x + style.padding.x, item.w
 end
 
+
+---Opens the item's menu above it.
+---@param item core.statusview.item
+function StatusView:show_menu(item)
+  local menu = self.menu
+  menu.itemset = {}
+  menu:register(nil, item.menu(item))
+  local x, w = self:get_item_visible_area(item)
+  if menu:show(x, self.position.y) then
+    local mw, mh = menu.items.width, menu.items.height
+    if item.alignment == StatusView.Item.RIGHT then x = x + w - mw end
+    menu.position.x = common.clamp(x, 0, self.size.x - mw)
+    menu.position.y = math.max(0, self.position.y - mh)
+    menu.height = mh
+    menu.item = item
+    for i, row in ipairs(menu.items) do
+      if row.active then menu.selected = i end
+    end
+  end
+end
 
 
 function StatusView:on_mouse_pressed(button, x, y, clicks)
@@ -961,18 +892,8 @@ function StatusView:on_mouse_pressed(button, x, y, clicks)
     not core.active_view:is(LogView)
   then
     command.perform "core:open-log"
-  else
-    if y >= self.position.y and button == "left" and clicks == 1 then
-      self.position.dx = x
-      if
-        self.r_left_width > self.left_width
-        or
-        self.r_right_width > self.right_width
-      then
-        self.dragged_panel = self:get_hovered_panel(x, y)
-        self.cursor = "hand"
-      end
-    end
+  elseif y >= self.position.y and self.hovered_item.active then
+    self.pressed_item = self.hovered_item
   end
   return true
 end
@@ -981,13 +902,6 @@ end
 function StatusView:on_mouse_moved(x, y, dx, dy)
   if not self.visible then return end
   StatusView.super.on_mouse_moved(self, x, y, dx, dy)
-
-  self.hovered_panel = self:get_hovered_panel(x, y)
-
-  if self.dragged_panel ~= "" then
-    self:drag_panel(self.dragged_panel, dx)
-    return
-  end
 
   if y < self.position.y or system.get_time() <= self.message_timeout then
     self.cursor = "arrow"
@@ -999,7 +913,7 @@ function StatusView:on_mouse_moved(x, y, dx, dy)
     if
       item.visible and item.active
       and
-      (item.command or item.on_click or item.tooltip ~= "")
+      (item.command or item.on_click or item.menu or item.tooltip ~= "")
     then
       local item_x, item_w = self:get_item_visible_area(item)
 
@@ -1009,7 +923,7 @@ function StatusView:on_mouse_moved(x, y, dx, dy)
         if self.hovered_item ~= item then
           self.hovered_item = item
         end
-        if item.command or item.on_click then
+        if item.command or item.on_click or item.menu then
           self.cursor = "hand"
         end
         return
@@ -1025,35 +939,20 @@ function StatusView:on_mouse_released(button, x, y)
   if not self.visible then return end
   StatusView.super.on_mouse_released(self, button, x, y)
 
-  if self.dragged_panel ~= "" then
-    self.dragged_panel = ""
-    self.cursor = "arrow"
-    if self.position.dx ~= x then
-      return
-    end
+  -- only a click that started on the item: not the release of the click that
+  -- closed its menu
+  local item = self.pressed_item
+  self.pressed_item = nil
+  if y < self.position.y or item ~= self.hovered_item or not item.active then
+    return
   end
 
-  if y < self.position.y or not self.hovered_item.active then return end
-
-  local item = self.hovered_item
-  local item_x, item_w = self:get_item_visible_area(item)
-
-  if x > item_x and (item_x + item_w) > x then
-    if item.command then
-      command.perform(item.command)
-    elseif item.on_click then
-      item.on_click(button, x, y)
-    end
-  end
-end
-
-
-function StatusView:on_mouse_wheel(y, x)
-  if not self.visible or self.hovered_panel == "" then return end
-  if x ~= 0 then
-    self:drag_panel(self.hovered_panel, x * self.left_width / 10)
-  else
-    self:drag_panel(self.hovered_panel, y * self.left_width / 10)
+  if item.menu then
+    if button == "left" then self:show_menu(item) end
+  elseif item.command then
+    command.perform(item.command)
+  elseif item.on_click then
+    item.on_click(button, x, y)
   end
 end
 
@@ -1066,7 +965,7 @@ function StatusView:update()
     return
   end
 
-  local height = style.font:get_height() + style.padding.y * 2;
+  local height = style.font:get_height() + style.padding.y;
 
   if self.size.y + 1 < height then
     self:move_towards(self.size, "y", height, nil, "statusbar")
@@ -1083,6 +982,7 @@ function StatusView:update()
   StatusView.super.update(self)
 
   self:update_active_items()
+  self.menu:update()
 end
 
 
@@ -1092,7 +992,7 @@ end
 ---@return boolean is_hovered
 ---@return renderer.color | nil color
 local function get_item_bg_color(self, item)
-  local hovered = self.hovered_item == item
+  local hovered = self.hovered_item == item or self.menu.item == item
 
   local item_bg = hovered
     and item.background_color_hover or item.background_color
@@ -1112,65 +1012,84 @@ function StatusView:draw()
     if self.tooltip_mode then
       self:draw_items(self.tooltip)
     end
-    if #self.active_items > 0 then
-      --- draw left pane
-      core.push_clip_rect(
-        0, self.position.y,
-        self.left_width + style.padding.x, self.size.y
-      )
-      for _, item in ipairs(self.active_items) do
-        local item_x = self.left_xoffset + item.x + style.padding.x
-        local hovered, item_bg = get_item_bg_color(self, item)
-        if item.alignment == StatusView.Item.LEFT and not self.tooltip_mode then
-          if type(item_bg) == "table" then
-            renderer.draw_rect(
-              item_x, self.position.y,
-              item.w, self.size.y, item_bg
-            )
-          end
-          if item.on_draw then
-            core.push_clip_rect(item_x, self.position.y, item.w, self.size.y)
-            item.on_draw(item_x, self.position.y, self.size.y, hovered)
-            core.pop_clip_rect()
-          else
-            self:draw_items(item.cached_item, false, item_x - style.padding.x)
-          end
+    for _, item in ipairs(self.active_items) do
+      local item_x = item.x + style.padding.x
+      local hovered, item_bg = get_item_bg_color(self, item)
+      if item.alignment == StatusView.Item.RIGHT or not self.tooltip_mode then
+        if type(item_bg) == "table" then
+          renderer.draw_rect(
+            item_x, self.position.y,
+            item.w, self.size.y, item_bg
+          )
         end
-      end
-      core.pop_clip_rect()
-
-      --- draw right pane
-      core.push_clip_rect(
-        self.size.x - (self.right_width + style.padding.x), self.position.y,
-        self.right_width + style.padding.x, self.size.y
-      )
-      for _, item in ipairs(self.active_items) do
-        local item_x = self.right_xoffset + item.x + style.padding.x
-        local hovered, item_bg = get_item_bg_color(self, item)
-        if item.alignment == StatusView.Item.RIGHT then
-          if type(item_bg) == "table" then
-            renderer.draw_rect(
-              item_x, self.position.y,
-              item.w, self.size.y, item_bg
-            )
-          end
-          if item.on_draw then
-            core.push_clip_rect(item_x, self.position.y, item.w, self.size.y)
-            item.on_draw(item_x, self.position.y, self.size.y, hovered)
-            core.pop_clip_rect()
-          else
-            self:draw_items(item.cached_item, false, item_x - style.padding.x)
-          end
+        if item.on_draw then
+          core.push_clip_rect(item_x, self.position.y, item.w, self.size.y)
+          item.on_draw(item_x, self.position.y, self.size.y, hovered)
+          core.pop_clip_rect()
+        else
+          self:draw_items(item.cached_item, false, item_x - style.padding.x)
         end
-      end
-      core.pop_clip_rect()
-
-      -- draw tooltip
-      if self.hovered_item.tooltip ~= "" and self.hovered_item.active then
-        self:draw_item_tooltip(self.hovered_item)
       end
     end
+
+    -- draw tooltip
+    if self.hovered_item.active and not self.menu.show_context_menu then
+      self:draw_item_tooltip(self.hovered_item)
+    end
+  end
+  self.menu:draw()
+end
+
+
+-- The menu opened from an item gets mouse events first while shown: a click
+-- anywhere closes it, choosing the row under the mouse, if any
+local root_on_mouse_pressed = RootView.on_mouse_pressed
+function RootView:on_mouse_pressed(button, x, y, clicks)
+  local menu = core.status_view and core.status_view.menu
+  if not (menu and menu.show_context_menu) then
+    return root_on_mouse_pressed(self, button, x, y, clicks)
+  end
+  local mx, my = menu.position.x, menu.position.y
+  if x < mx or x >= mx + menu.items.width or y < my or y >= my + menu.items.height then
+    menu.selected = -1
+  end
+  return menu:on_mouse_pressed(button, x, y, clicks)
+end
+
+local mouse_x, mouse_y = 0, 0
+local root_on_mouse_moved = RootView.on_mouse_moved
+function RootView:on_mouse_moved(x, y, ...)
+  mouse_x, mouse_y = x, y
+  local menu = core.status_view and core.status_view.menu
+  if menu and menu:on_mouse_moved(x, y, ...) then return end
+  return root_on_mouse_moved(self, x, y, ...)
+end
+
+function StatusMenu:hide()
+  StatusMenu.super.hide(self)
+  if self.item then
+    self.item = nil
+    -- the moves the menu took left the hover state where it was opened
+    root_on_mouse_moved(core.root_view, mouse_x, mouse_y, 0, 0)
   end
 end
+
+command.add(function()
+    return core.status_view and core.status_view.menu.show_context_menu == true,
+      core.status_view and core.status_view.menu
+  end, {
+  ["status-bar:menu-previous"] = function(menu) menu:focus_previous() end,
+  ["status-bar:menu-next"] = function(menu) menu:focus_next() end,
+  ["status-bar:menu-hide"] = function(menu) menu:hide() end,
+  ["status-bar:menu-select"] = function(menu) menu:call_selected_item() end,
+})
+
+keymap.add {
+  ["up"] = "status-bar:menu-previous",
+  ["down"] = "status-bar:menu-next",
+  ["escape"] = "status-bar:menu-hide",
+  ["return"] = "status-bar:menu-select",
+}
+
 
 return StatusView
