@@ -63,6 +63,14 @@
       "path": "addons/plugins/minimap.lua"
     },
     {
+      "id": "nerdicons",
+      "description": "File icons for TreeView and tabs from Nerd Font symbols (lite-xl-plugins 6e4aa64).",
+      "version": "1.2.4",
+      "mod_version": "3",
+      "path": "addons/plugins/nerdicons.lua",
+      "dependencies": { "font_symbols_nerdfont_mono_regular": {} }
+    },
+    {
       "id": "widget",
       "type": "library",
       "description": "Widget toolkit (lite-xl-widgets) that doesn't queue redraws when showing a visible widget.",
