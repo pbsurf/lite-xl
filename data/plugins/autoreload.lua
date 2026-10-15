@@ -24,11 +24,28 @@ local watch = dirwatch.new()
 local times = setmetatable({}, { __mode = "k" })
 local visible = setmetatable({}, { __mode = "k" })
 
-local function get_project_doc_watch(doc)
-  for _, v in ipairs(core.project_directories) do
-    if doc.abs_filename:find(v.name, 1, true) == 1 then return v.watch end
+-- Visible docs are watched through their directory, not the file itself: a file
+-- replaced by renaming another over it (how many editors and tools save) leaves a
+-- file watch on the old, deleted inode, reporting nothing then or later.
+local dir_watchers = {} -- directory -> number of watched docs in it
+local doc_dirs = setmetatable({}, { __mode = "k" }) -- doc -> its watched directory
+
+local function watch_doc(doc, watched)
+  local dir = doc_dirs[doc]
+  if dir and (not watched or dir ~= common.dirname(doc.abs_filename)) then
+    doc_dirs[doc] = nil
+    dir_watchers[dir] = dir_watchers[dir] - 1
+    if dir_watchers[dir] == 0 then
+      dir_watchers[dir] = nil
+      watch:watch(dir, false)
+    end
   end
-  return watch
+  if watched and not doc_dirs[doc] then
+    dir = common.dirname(doc.abs_filename)
+    doc_dirs[doc] = dir
+    dir_watchers[dir] = (dir_watchers[dir] or 0) + 1
+    if dir_watchers[dir] == 1 then watch:watch(dir, true) end
+  end
 end
 
 local function update_time(doc)
@@ -86,7 +103,7 @@ local function doc_changes_visiblity(doc, visibility)
   if doc and visible[doc] ~= visibility and doc.abs_filename then
     visible[doc] = visibility
     if visibility then check_prompt_reload(doc) end
-    get_project_doc_watch(doc):watch(doc.abs_filename, visibility)
+    watch_doc(doc, visibility)
   end
 end
 
@@ -144,8 +161,8 @@ end
 
 Doc.save = function(self, ...)
   local res = save(self, ...)
-  -- if starting with an unsaved document with a filename.
-  if not times[self] then get_project_doc_watch(self):watch(self.abs_filename, true) end
+  -- if starting with an unsaved document with a filename, or saved to another directory
+  if not times[self] or doc_dirs[self] then watch_doc(self, true) end
   update_time(self)
   return res
 end
