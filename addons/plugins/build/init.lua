@@ -10,6 +10,7 @@ local DocView = require "core.docview"
 local StatusView = require "core.statusview"
 local TreeView = config.plugins.treeview ~= false and require "plugins.treeview"
 local ToolbarView = require "plugins.toolbarview"
+local ContextMenu = require "core.contextmenu"
 
 
 local storage 
@@ -455,38 +456,127 @@ end
 
 
 ------------------ UI Elements
+---The binary's arguments as typed, "" if none.
+local function get_arguments_text()
+  local arguments = config.target_binary_arguments
+  return arguments and table.concat(build.escape_arguments(arguments), " ") or ""
+end
+
+---Records the arguments last used with the current target, for the menu.
+local function remember_arguments(text)
+  local previous = build.state.previous_arguments
+  for i = #previous, 1, -1 do
+    if previous[i][1] == build.state.target and previous[i][2] == text then table.remove(previous, i) end
+  end
+  table.insert(previous, { build.state.target, text })
+  if #previous > build.max_previous_arguments then table.remove(previous, 1) end
+  save_state()
+end
+
+local function edit_binary()
+  local arguments = get_arguments_text()
+  core.command_view:enter("Set Target Binary", {
+    text = config.target_binary .. (arguments ~= "" and " " .. arguments or ""),
+    submit = function(text)
+      local i = text:find(" ")
+      if i then
+        config.target_binary = text:sub(1, i-1)
+        config.target_binary_arguments = build.argument_string_to_table(text:sub(i+1))
+      else
+        config.target_binary = text
+        config.target_binary_arguments = nil
+      end
+      remember_arguments(i and text:sub(i+1))
+    end
+  })
+end
+
+---The actions at the end of the target menu; plugins may add to them. A row
+---is shown if its command is valid and its `when`, if any, returns true.
+build.menu_actions = {
+  { text = "Build", command = "build:build" },
+  { text = "Rebuild", command = "build:rebuild" },
+  { text = "Clean", command = "build:clean" },
+  { text = "Run", command = "build:run-or-term-or-kill", when = function() return not build.is_running() end },
+  { text = "Stop", command = "build:terminate" },
+}
+
+---The target menu's rows: targets, binary and recent arguments, actions.
+local function get_menu()
+  local rows = {}
+  local function add_group(group)
+    if #group == 0 then return end
+    if #rows > 0 then table.insert(rows, ContextMenu.DIVIDER) end
+    for _, row in ipairs(group) do table.insert(rows, row) end
+  end
+
+  local targets = {}
+  for i, target in ipairs(build.targets) do
+    table.insert(targets, {
+      text = target.name or "default",
+      info = target.backend and target.backend.id or "",
+      active = i == build.state.target,
+      command = function() build.set_target(i) end,
+    })
+  end
+  add_group(targets)
+
+  local binary = {}
+  if config.target_binary then
+    local arguments = get_arguments_text()
+    table.insert(binary, { text = "Binary: " .. config.target_binary, command = edit_binary })
+    -- the arguments used recently with this target, newest first
+    local seen = { [arguments] = true }
+    local previous = build.state.previous_arguments
+    for i = #previous, 1, -1 do
+      local text = previous[i][2]
+      if previous[i][1] == build.state.target and text and not seen[text] and #binary < 6 then
+        seen[text] = true
+        table.insert(binary, {
+          text = "Arguments: " .. text,
+          command = function()
+            config.target_binary_arguments = build.argument_string_to_table(text)
+            remember_arguments(text)
+          end,
+        })
+      end
+    end
+    if arguments ~= "" then
+      table.insert(binary, 2, { text = "Arguments: " .. arguments, info = "", active = true, command = edit_binary })
+    end
+  end
+  add_group(binary)
+
+  local actions = {}
+  for _, row in ipairs(build.menu_actions) do
+    if command.is_valid(row.command) and (not row.when or row.when()) then
+      table.insert(actions, { text = row.text, command = row.command })
+    end
+  end
+  add_group(actions)
+  return rows
+end
+
 core.status_view:add_item({
   predicate = function() return build.state.target and build.targets[build.state.target] and build.targets[build.state.target].backend end,
   name = "build:target",
-  alignemnt = StatusView.Item.RIGHT,
+  alignment = StatusView.Item.RIGHT,
   get_item = function()
-    local dv = core.active_view
+    local target = build.targets[build.state.target]
     return {
-      style.text, string.format("target: %s (%s)", build.targets[build.state.target].name or "default", build.targets[build.state.target].backend.id)
+      style.text, (target.name or "default") .. (get_arguments_text() ~= "" and "*" or "")
     }
   end,
-  command = function()
-     core.command_view:enter("Select Build Target", {
-      text = build.targets[build.state.target].name,
-      submit = function(text)
-        local has = false
-        for i,v in ipairs(build.targets) do
-          if text == v.name then
-            build.set_target(i)
-            has = true
-          end
-        end
-        if not has then core.error("Can't find target " .. text) end
-      end,
-      suggest = function()
-        local names = {}
-        for i,v in ipairs(build.targets) do
-          table.insert(names, v.name)
-        end
-        return names
-      end
-    })
-  end
+  tooltip = function()
+    local target = build.targets[build.state.target]
+    local text = string.format("Target: %s (%s)", target.name or "default", target.backend.id)
+    if config.target_binary then
+      local arguments = get_arguments_text()
+      text = text .. ", binary: " .. config.target_binary .. (arguments ~= "" and " " .. arguments or "")
+    end
+    return text
+  end,
+  menu = get_menu,
 })
 
 local doc_view_draw_line_gutter = DocView.draw_line_gutter
@@ -672,35 +762,6 @@ build.build_bar_node = TreeView and TreeView.node.b:split("up", build.build_bar_
 
 
 
-core.status_view:add_item({
-  predicate = function() return config.target_binary end,
-  name = "build:binary",
-  alignment = StatusView.Item.RIGHT,
-  get_item = function()
-    local dv = core.active_view
-    return {
-      style.text, config.target_binary .. (config.target_binary_arguments and "*" or "")
-    }
-  end,
-  command = function()
-     core.command_view:enter("Set Target Binary", {
-      text = config.target_binary .. (config.target_binary_arguments and (" " .. table.concat(build.escape_arguments(config.target_binary_arguments), " ")) or ""),
-      submit = function(text)
-        local i = text:find(" ")
-        if i then
-          config.target_binary = text:sub(1, i-1)
-          config.target_binary_arguments = build.argument_string_to_table(text:sub(i+1))
-        else
-          config.target_binary = text
-          config.target_binary_arguments = nil
-        end
-        table.insert(build.state.previous_arguments, { build.state.target, i and text:sub(i+1) })
-        if #build.state.previous_arguments > build.max_previous_arguments then table.remove(build.state.previous_arguments, 1) end
-        save_state()
-      end
-    })
-  end
-})
 
 command.add(function(x, y)
   return core.active_view and core.active_view:is(BuildMessageView) and build.message_view.visible and (y == nil or y <= build.message_view.position.y + style.padding.y * 2 + style.build.font:get_height())
