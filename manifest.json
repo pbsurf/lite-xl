@@ -1,0 +1,90 @@
+{
+  "addons": [
+    {
+      "id": "lsp",
+      "name": "Language Server Protocol",
+      "description": "LSP client (lite-xl-lsp d1432ae) with our changes: squiggly diagnostics, diagnostics in hover popups, mouse_hover_mode.",
+      "version": "0.10",
+      "mod_version": "3",
+      "path": "addons/plugins/lsp",
+      "dependencies": { "widget": {}, "lintplus": {} }
+    },
+    {
+      "id": "lintplus",
+      "name": "Lint+",
+      "description": "Linting plugin (lintplus 1aa6d2d) with squiggly underlines.",
+      "version": "0.7",
+      "mod_version": "3",
+      "path": "addons/plugins/lintplus",
+      "dependencies": { "shapes": {} }
+    },
+    {
+      "id": "build",
+      "description": "Build plugin (lite-xl-ide 50c1b40) with a task backend; toolbar font scales with SCALE.",
+      "version": "0.2",
+      "mod_version": "3",
+      "path": "addons/plugins/build",
+      "dependencies": { "json": {} }
+    },
+    {
+      "id": "debugger",
+      "description": "Debugger (lite-xl-ide 50c1b40) with a breakpoint column and glyph markers.",
+      "version": "0.2",
+      "mod_version": "3",
+      "path": "addons/plugins/debugger",
+      "dependencies": { "build": {}, "json": {} }
+    },
+    {
+      "id": "repl",
+      "description": "Evaluate Lua in a running lite-xl; used by scripts/lxeval.",
+      "version": "0.1",
+      "mod_version": "3",
+      "path": "addons/plugins/repl.lua"
+    },
+    {
+      "id": "language_yaml",
+      "description": "Syntax for YAML, with block scalars, YAML 1.2 booleans and null, one-character keys.",
+      "version": "0.1",
+      "mod_version": "3",
+      "path": "addons/plugins/language_yaml.lua"
+    },
+    {
+      "id": "tab_switcher",
+      "description": "Switch tabs from a list; show_list option to switch without it.",
+      "version": "0.3",
+      "mod_version": "3",
+      "path": "addons/plugins/tab_switcher.lua"
+    },
+    {
+      "id": "minimap",
+      "description": "Minimap, following our scrollbar's paging on track clicks.",
+      "version": "0.4",
+      "mod_version": "3",
+      "path": "addons/plugins/minimap.lua"
+    },
+    {
+      "id": "widget",
+      "type": "library",
+      "description": "Widget toolkit (lite-xl-widgets) that doesn't queue redraws when showing a visible widget.",
+      "version": "0.2.1",
+      "mod_version": "3",
+      "path": "addons/libraries/widget"
+    },
+    {
+      "id": "shapes",
+      "type": "library",
+      "description": "Antialiased shape helpers (squiggle) using renderer.draw_path.",
+      "version": "0.1",
+      "mod_version": "3",
+      "path": "addons/libraries/shapes.lua"
+    },
+    {
+      "id": "qtcreator",
+      "type": "color",
+      "description": "Light theme matching Qt Creator's.",
+      "version": "0.1",
+      "mod_version": "3",
+      "path": "addons/colors/qtcreator.lua"
+    }
+  ]
+}
