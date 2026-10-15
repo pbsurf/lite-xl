@@ -292,8 +292,8 @@ function build.set_target(target)
   local arguments = ""
   for i = #build.state.previous_arguments, 1, -1 do
     local v = build.state.previous_arguments[i]
-    if v[1] == build.state.target then
-      arguments = v[2]
+    if v[1] == target then
+      arguments = v[2] or ""
       break
     end
   end
