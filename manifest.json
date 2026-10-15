@@ -63,6 +63,13 @@
       "path": "addons/plugins/minimap.lua"
     },
     {
+      "id": "tab_overflow",
+      "description": "Tab bar buttons for when tabs scroll: scroll left/right, and a menu of all tabs.",
+      "version": "0.1",
+      "mod_version": "3",
+      "path": "addons/plugins/tab_overflow.lua"
+    },
+    {
       "id": "nerdicons",
       "description": "File icons for TreeView and tabs from Nerd Font symbols (lite-xl-plugins 6e4aa64); tab icons no longer cover truncated titles.",
       "version": "1.2.4",

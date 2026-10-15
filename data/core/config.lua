@@ -25,7 +25,14 @@ config.symbol_pattern = "[%a_][%w_]*"
 config.non_word_chars = " \t\n/\\()\"':,.;<>~!@#$%^&*|+=[]{}`?-"
 config.undo_merge_timeout = 0.3
 config.max_undos = 10000
-config.max_tabs = 8
+-- Tabs scroll once a split has more than max_tabs, or they would get narrower than
+-- min_tab_width (pixels at scale 1); 0 disables either limit
+config.max_tabs = 0
+config.min_tab_width = 120
+-- Buttons at the right end of the tab bar while its tabs scroll, left to right;
+-- names nothing registered in Node.tab_buttons are skipped (the tab_overflow
+-- add-on registers "scroll_left", "scroll_right" and "menu")
+config.tab_buttons = { "menu" }
 config.always_show_tabs = true
 -- Possible values: false, true, "no_selection"
 config.highlight_current_line = true

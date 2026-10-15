@@ -9,6 +9,20 @@ local View = require "core.view"
 ---@class core.node : core.object
 local Node = Object:extend()
 
+---A button at the right end of the tab bar, shown while the node's tabs scroll.
+---@class core.node.tab_button
+---@field icon? string Glyph in style.icon_font, drawn centered
+---@field draw? fun(node: core.node, x: number, y: number, w: number, h: number, hovered: boolean) Drawing instead of icon
+---@field on_click fun(node: core.node, x: number, y: number, w: number, h: number)
+---@field active? fun(node: core.node): boolean While false: dim, ignoring clicks
+---@field width? fun(node: core.node): number Default: 3 icon widths. Called while
+---working out how many tabs fit, so it can't depend on that (get_max_tabs,
+---get_visible_tabs_number, tabs_overflow).
+
+---Tab bar buttons by name; config.tab_buttons chooses which show, in which order.
+---@type table<string, core.node.tab_button>
+Node.tab_buttons = {}
+
 function Node:__tostring() return "Node" end
 
 function Node:new(type)
@@ -22,6 +36,7 @@ function Node:new(type)
   end
   self.hovered = {x = -1, y = -1 }
   self.hovered_close = 0
+  self.hovered_tab_button = 0
   self.tab_shift = 0
   self.tab_offset = 1
   self.tab_width = style.tab_width
@@ -218,12 +233,8 @@ function Node:get_children(t)
 end
 
 
--- return the width including the padding space and separately
--- the padding space itself
-local function get_scroll_button_width()
-  local w = style.icon_font:get_width(">")
-  local pad = w
-  return w + 2 * pad, pad
+local function get_tab_button_width(node, button)
+  return button.width and button.width(node) or style.icon_font:get_width(">") * 3
 end
 
 
@@ -245,8 +256,49 @@ function Node:get_divider_overlapping_point(px, py)
 end
 
 
+---The tab bar buttons config.tab_buttons names, as registered in Node.tab_buttons.
+---@return core.node.tab_button[]
+function Node:get_tab_buttons()
+  local buttons = {}
+  for _, name in ipairs(config.tab_buttons) do
+    local button = Node.tab_buttons[name]
+    if button then table.insert(buttons, button) end
+  end
+  return buttons
+end
+
+
+---How many tabs the node shows at once: all of them, unless that breaks
+---config.max_tabs or config.min_tab_width; then as many as fit beside the buttons.
+function Node:get_max_tabs()
+  local n = #self.views
+  local min_w = config.min_tab_width * SCALE
+  local max = config.max_tabs > 0 and config.max_tabs or n
+  if n <= max and n * min_w <= self.size.x then return n end
+  if min_w > 0 then
+    local w = self.size.x - self:get_tab_buttons_width()
+    max = math.min(max, math.floor(w / min_w))
+  end
+  return math.max(1, max)
+end
+
+
+function Node:get_tab_buttons_width()
+  local w = 0
+  for _, button in ipairs(self:get_tab_buttons()) do
+    w = w + get_tab_button_width(self, button)
+  end
+  return w
+end
+
+
+function Node:tabs_overflow()
+  return #self.views > self:get_max_tabs()
+end
+
+
 function Node:get_visible_tabs_number()
-  return math.min(#self.views - self.tab_offset + 1, config.max_tabs)
+  return math.min(#self.views - self.tab_offset + 1, self:get_max_tabs())
 end
 
 
@@ -281,13 +333,21 @@ local function close_button_location(x, w)
 end
 
 
-function Node:get_scroll_button_index(px, py)
-  if #self.views == 1 then return end
-  for i = 1, 2 do
-    local x, y, w, h = self:get_scroll_button_rect(i)
+function Node:get_tab_button_index(px, py)
+  if not self:should_show_tabs() or not self:tabs_overflow() then return end
+  for i = 1, #self:get_tab_buttons() do
+    local x, y, w, h = self:get_tab_button_rect(i)
     if px >= x and px < x + w and py >= y and py < y + h then
       return i
     end
+  end
+end
+
+
+function Node:click_tab_button(i)
+  local button = self:get_tab_buttons()[i]
+  if button and (not button.active or button.active(self)) then
+    button.on_click(self, self:get_tab_button_rect(i))
   end
 end
 
@@ -296,7 +356,7 @@ function Node:tab_hovered_update(px, py)
   local tab_index = self:get_tab_overlapping_point(px, py)
   self.hovered_tab = tab_index
   self.hovered_close = 0
-  self.hovered_scroll_button = 0
+  self.hovered_tab_button = 0
   if tab_index then
     local x, y, w, h = self:get_tab_rect(tab_index)
     local cx, cw = close_button_location(x, w)
@@ -304,7 +364,7 @@ function Node:tab_hovered_update(px, py)
       self.hovered_close = tab_index
     end
   else
-    self.hovered_scroll_button = self:get_scroll_button_index(px, py) or 0
+    self.hovered_tab_button = self:get_tab_button_index(px, py) or 0
   end
 end
 
@@ -322,11 +382,19 @@ function Node:get_child_overlapping_point(x, y)
 end
 
 
-function Node:get_scroll_button_rect(index)
-  local w, pad = get_scroll_button_width()
-  local h = style.font:get_height() + style.padding.y * 2
-  local x = self.position.x + (index == 1 and self.size.x - w * 2 or self.size.x - w)
-  return x, self.position.y, w, h, pad
+function Node:get_tab_bar_height()
+  return style.font:get_height() + style.padding.y * 2
+end
+
+
+---The i-th of the tab bar buttons, which are right-aligned in the tab bar.
+function Node:get_tab_button_rect(i)
+  local buttons = self:get_tab_buttons()
+  local x = self.position.x + self.size.x
+  for j = #buttons, i, -1 do
+    x = x - get_tab_button_width(self, buttons[j])
+  end
+  return x, self.position.y, get_tab_button_width(self, buttons[i]), self:get_tab_bar_height()
 end
 
 
@@ -335,8 +403,7 @@ function Node:get_tab_rect(idx)
   local x0 = self.position.x
   local x1 = x0 + common.clamp(self.tab_width * (idx - 1) - self.tab_shift, 0, maxw)
   local x2 = x0 + common.clamp(self.tab_width * idx - self.tab_shift, 0, maxw)
-  local h = style.font:get_height() + style.padding.y * 2
-  return x1, self.position.y, x2 - x1, h
+  return x1, self.position.y, x2 - x1, self:get_tab_bar_height()
 end
 
 
@@ -434,12 +501,13 @@ function Node:scroll_tabs_to_visible()
   local index = self:get_view_idx(self.active_view)
   if index then
     local tabs_number = self:get_visible_tabs_number()
+    local max_tabs = self:get_max_tabs()
     if self.tab_offset > index then
       self.tab_offset = index
     elseif self.tab_offset + tabs_number - 1 < index then
       self.tab_offset = index - tabs_number + 1
-    elseif tabs_number < config.max_tabs and self.tab_offset > 1 then
-      self.tab_offset = #self.views - config.max_tabs + 1
+    elseif tabs_number < max_tabs and self.tab_offset > 1 then
+      self.tab_offset = math.max(1, #self.views - max_tabs + 1)
     end
   end
 end
@@ -469,12 +537,11 @@ end
 
 
 function Node:target_tab_width()
-  local n = self:get_visible_tabs_number()
   local w = self.size.x
-  if #self.views > n then
-    w = self.size.x - get_scroll_button_width() * 2
+  if self:tabs_overflow() then
+    w = w - self:get_tab_buttons_width()
   end
-  return common.clamp(style.tab_width, w / config.max_tabs, w / n)
+  return math.min(style.tab_width, w / self:get_visible_tabs_number())
 end
 
 
@@ -551,8 +618,8 @@ function Node:draw_tab(view, is_active, is_hovered, is_close_hovered, x, y, w, h
 end
 
 function Node:draw_tabs()
-  local _, y, w, h, scroll_padding = self:get_scroll_button_rect(1)
-  local x = self.position.x
+  local x, y = self.position.x, self.position.y
+  local h = self:get_tab_bar_height()
   local ds = style.divider_size
   local dots_width = style.font:get_width("…")
   core.push_clip_rect(x, y, self.size.x, h)
@@ -568,16 +635,19 @@ function Node:draw_tabs()
                   x, y, w, h)
   end
 
-  if #self.views > tabs_number then
-    local _, pad = get_scroll_button_width()
-    local xrb, yrb, wrb, hrb = self:get_scroll_button_rect(1)
-    renderer.draw_rect(xrb + pad, yrb, wrb * 2, hrb, style.background2)
-    local left_button_style = (self.hovered_scroll_button == 1 and self.tab_offset > 1) and style.text or style.dim
-    common.draw_text(style.icon_font, left_button_style, "<", nil, xrb + scroll_padding, yrb, 0, h)
-
-    xrb, yrb, wrb = self:get_scroll_button_rect(2)
-    local right_button_style = (self.hovered_scroll_button == 2 and #self.views > self.tab_offset + tabs_number - 1) and style.text or style.dim
-    common.draw_text(style.icon_font, right_button_style, ">", nil, xrb + scroll_padding, yrb, 0, h)
+  if self:tabs_overflow() then
+    for i, button in ipairs(self:get_tab_buttons()) do
+      local bx, by, bw, bh = self:get_tab_button_rect(i)
+      local hovered = self.hovered_tab_button == i
+      renderer.draw_rect(bx, by, bw, bh - ds, style.background2)
+      if button.draw then
+        button.draw(self, bx, by, bw, bh, hovered)
+      else
+        local active = not button.active or button.active(self)
+        local color = not active and style.dim or hovered and style.accent or style.text
+        common.draw_text(style.icon_font, color, button.icon, "center", bx, by, bw, bh)
+      end
+    end
   end
 
   core.pop_clip_rect()
@@ -710,7 +780,7 @@ end
 function Node:get_split_type(mouse_x, mouse_y)
   local x, y = self.position.x, self.position.y
   local w, h = self.size.x, self.size.y
-  local _, _, _, tab_h = self:get_scroll_button_rect(1)
+  local tab_h = self:get_tab_bar_height()
   y = y + tab_h
   h = h - tab_h
 

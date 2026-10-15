@@ -141,8 +141,8 @@ function RootView:on_mouse_pressed(button, x, y, clicks)
     self.dragged_divider = div
     return true
   end
-  if node.hovered_scroll_button > 0 then
-    node:scroll_tabs(node.hovered_scroll_button)
+  if node.hovered_tab_button > 0 then
+    node:click_tab_button(node.hovered_tab_button)
     return true
   end
   local idx = node:get_tab_overlapping_point(x, y)
@@ -297,7 +297,7 @@ function RootView:on_mouse_moved(x, y, dx, dy)
 
   local div = self.root_node:get_divider_overlapping_point(x, y)
   local tab_index = self.overlapping_node and self.overlapping_node:get_tab_overlapping_point(x, y)
-  if self.overlapping_node and self.overlapping_node:get_scroll_button_index(x, y) then
+  if self.overlapping_node and self.overlapping_node:get_tab_button_index(x, y) then
     core.request_cursor("arrow")
   elseif div and (self.overlapping_node and not self.overlapping_node.active_view:scrollbar_overlaps_point(x, y)) then
     core.request_cursor(div.type == "hsplit" and "sizeh" or "sizev")
@@ -431,7 +431,7 @@ function RootView:update_drag_overlay()
   if not (self.dragged_node and self.dragged_node.dragging) then return end
   local over = self.root_node:get_child_overlapping_point(self.mouse.x, self.mouse.y)
   if over and not over.locked then
-    local _, _, _, tab_h = over:get_scroll_button_rect(1)
+    local tab_h = over:get_tab_bar_height()
     local x, y = over.position.x, over.position.y
     local w, h = over.size.x, over.size.y
     local split_type = over:get_split_type(self.mouse.x, self.mouse.y)
