@@ -361,6 +361,14 @@ local function draw_suggestions_box(self)
   local h = math.ceil(self.suggestions_height)
   local rx, ry, rw, rh = self.position.x, self.position.y - h - dh, self.size.x, h
 
+  if #self.suggestions > 0 then
+    -- docked on the command view: the shadow shows only above, on what's behind,
+    -- without the usual downward offset (which would hide most of it)
+    core.push_clip_rect(rx, 0, rw, ry + rh)
+    common.draw_popup_shadow(rx, ry - 3 * SCALE, rw, rh)
+    core.pop_clip_rect()
+  end
+
   core.push_clip_rect(rx, ry, rw, rh)
   -- draw suggestions background
   if #self.suggestions > 0 then
