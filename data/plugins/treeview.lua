@@ -6,6 +6,7 @@ local config = require "core.config"
 local keymap = require "core.keymap"
 local style = require "core.style"
 local View = require "core.view"
+local DocView = require "core.docview"
 local ContextMenu = require "core.contextmenu"
 local RootView = require "core.rootview"
 local CommandView = require "core.commandview"
@@ -477,6 +478,13 @@ end
 
 -- init
 local view = TreeView()
+
+-- A doc's icon is its file's, as the tree shows it (plugins such as nerdicons
+-- override get_item_icon on this instance, the module's value)
+function DocView:get_icon(hovered)
+  return view:get_item_icon({ type = "file", name = self.doc:get_name() }, false, hovered)
+end
+
 local node = core.root_view:get_active_node()
 view.node = node:split("left", view, {x = true}, true)
 

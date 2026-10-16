@@ -106,6 +106,14 @@ function View:get_name_style(font)
   return font
 end
 
+---The icon drawn with this view's name in tab lists (and in tabs by an icon
+---plugin such as nerdicons), or nil for none.
+---@param hovered? boolean
+---@return string? icon, renderer.font? font, renderer.color? color
+function View:get_icon(hovered)
+  return nil
+end
+
 ---Whether this view is transient, like a preview tab: it isn't restored with the
 ---workspace.
 ---@return boolean
