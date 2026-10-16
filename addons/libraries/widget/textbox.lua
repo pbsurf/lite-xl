@@ -77,6 +77,17 @@ function TextView:draw_line_highlight()
   -- no-op function to disable this functionality
 end
 
+-- the placeholder is the doc's text while shown: draw it dimmed, so it
+-- doesn't look typed
+function TextView:draw_line_text(line, x, y)
+  if not (self.textbox and self.textbox.placeholder_active) then
+    return TextView.super.draw_line_text(self, line, x, y)
+  end
+  local text = self.doc.lines[line]:gsub("\n$", "")
+  renderer.draw_text(self:get_font(), text, x, y + self:get_line_text_y_offset(), style.dim)
+  return self:get_line_height()
+end
+
 -- Overwrite this function just to disable the core.push_clip_rect
 function TextView:draw()
   self:draw_background(style.background)
@@ -113,6 +124,7 @@ function TextBox:new(parent, text, placeholder)
   TextBox.super.new(self, parent)
   self.type_name = "widget.textbox"
   self.textview = TextView()
+  self.textview.textbox = self
   self.textview.name = parent.name
   self.size.x = 200 + (style.padding.x * 2)
   self.textview.size.x = self.size.x
