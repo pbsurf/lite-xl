@@ -6,6 +6,11 @@ local command = {}
 ---@type table<string, string>
 command.keywords = {}
 
+---Commands that exist only for key bindings (e.g. sending a key to a terminal), set
+---to true here: `core:find-command` and menus don't list them.
+---@type table<string, boolean>
+command.hidden = {}
+
 ---A predicate function accepts arguments from `command.perform()` and evaluates to a boolean. </br>
 ---If the function returns true, then the function associated with the command is executed.
 ---

@@ -297,8 +297,8 @@ local function binding(name)
   return best
 end
 
----Commands no menu has, of prefixes not hidden, and not bound to a mouse
----action; sorted.
+---Commands no menu has, not hidden (by prefix, pattern or command.hidden), and not
+---bound to a mouse action; sorted.
 local function unplaced_commands()
   local placed = {}
   local function mark(rows)
@@ -321,6 +321,7 @@ local function unplaced_commands()
   for name in pairs(command.map) do
     local b = keymap.get_binding(name) or ""
     if not placed[name] and not hidden[name:match("^[^:]+")] and not hidden_command(name)
+       and not command.hidden[name]
        and not b:match("click$") and not b:match("wheel") then
       table.insert(res, name)
     end

@@ -65,7 +65,10 @@ command.add(nil, {
   end,
 
   ["core:find-command"] = function()
-    local commands = command.get_all_valid()
+    local commands = {}
+    for _, name in ipairs(command.get_all_valid()) do
+      if not command.hidden[name] then table.insert(commands, name) end
+    end
     core.command_view:enter("Do Command", {
       submit = function(text, item)
         if item then
