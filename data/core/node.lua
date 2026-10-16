@@ -517,11 +517,11 @@ local function calc_split_sizes(self, x, y, x1, x2, y1, y2)
   local n = x1 and x1 + ds or (x2 and self.size[x] - x2 or math.floor(self.size[x] * self.divider))
   self.a.position[x] = self.position[x]
   self.a.position[y] = self.position[y]
-  self.a.size[x] = n - ds
+  self.a.size[x] = math.max(n - ds, 0)
   self.a.size[y] = self.size[y]
   self.b.position[x] = self.position[x] + n
   self.b.position[y] = self.position[y]
-  self.b.size[x] = self.size[x] - n
+  self.b.size[x] = math.max(self.size[x] - n, 0)
   self.b.size[y] = self.size[y]
 end
 
