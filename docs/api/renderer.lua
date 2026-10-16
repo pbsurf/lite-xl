@@ -66,6 +66,22 @@ function renderer.font:copy(size, options) end
 function renderer.font:set_tab_size(chars) end
 
 ---
+---Set extra space after each character, as a fraction of the font size
+---(like CSS `letter-spacing` in em; negative tightens), e.g. -0.125 for 3 px
+---less per character at 24 px. It scales with `set_size` and is kept by `copy`.
+---As text drawn this frame uses the font's current spacing, set it on a font
+---of its own (a `copy`) rather than on one shared with other views.
+---
+---@param em number
+function renderer.font:set_letter_spacing(em) end
+
+---
+---Get the letter spacing set with `set_letter_spacing`.
+---
+---@return number em
+function renderer.font:get_letter_spacing() end
+
+---
 ---Get the width in pixels of the given text when
 ---rendered with this font.
 ---

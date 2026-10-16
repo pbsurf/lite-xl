@@ -120,6 +120,7 @@ typedef struct RenFont {
   int scale;
 #endif
   float size, space_advance;
+  float letter_spacing, letter_spacing_px; // extra advance per character: em, and in pixels at this size
   unsigned short baseline, height, tab_size;
   unsigned short underline_thickness;
   ERenFontAntialiasing antialiasing;
@@ -461,6 +462,7 @@ static int font_set_face_metrics(RenFont *font, FT_Face face) {
   if ((err = FT_Load_Char(face, ' ', (font_set_load_options(font) | FT_LOAD_BITMAP_METRICS_ONLY | FT_LOAD_NO_HINTING) & ~FT_LOAD_FORCE_AUTOHINT)) != 0)
     return err;
   font->space_advance = face->glyph->advance.x / 64.0f;
+  font->letter_spacing_px = font->letter_spacing * pixel_size;
   return 0;
 }
 
@@ -512,7 +514,12 @@ RenFont* ren_font_copy(RenWindow *window_renderer, RenFont* font, float size, ER
   hinting = hinting == -1 ? font->hinting : hinting;
   style = style == -1 ? font->style : style;
 
-  return ren_font_load(window_renderer, font->path, size, antialiasing, hinting, style); // SDL_SetError() will be called appropriately
+  RenFont *copy = ren_font_load(window_renderer, font->path, size, antialiasing, hinting, style); // SDL_SetError() will be called appropriately
+  if (copy && font->letter_spacing != 0) {
+    copy->letter_spacing = font->letter_spacing;
+    font_set_face_metrics(copy, copy->face);
+  }
+  return copy;
 }
 
 const char* ren_font_get_path(RenFont *font) {
@@ -533,6 +540,17 @@ void ren_font_group_set_tab_size(RenFont **fonts, int n) {
   for (int j = 0; j < FONT_FALLBACK_MAX && fonts[j]; ++j) {
     fonts[j]->tab_size = n;
   }
+}
+
+void ren_font_group_set_letter_spacing(RenFont **fonts, float em) {
+  for (int j = 0; j < FONT_FALLBACK_MAX && fonts[j]; ++j) {
+    fonts[j]->letter_spacing = em;
+    font_set_face_metrics(fonts[j], fonts[j]->face);
+  }
+}
+
+float ren_font_group_get_letter_spacing(RenFont **fonts) {
+  return fonts[0]->letter_spacing;
 }
 
 int ren_font_group_get_tab_size(RenFont **fonts) {
@@ -561,9 +579,9 @@ int ren_font_group_get_height(RenFont **fonts) {
 }
 
 // some fonts provide xadvance for whitespaces (e.g. Unifont), which we need to ignore
-#define FONT_GET_XADVANCE(F, C, M) (is_whitespace((C)) || !(M) || !(M)->xadvance \
+#define FONT_GET_XADVANCE(F, C, M) ((is_whitespace((C)) || !(M) || !(M)->xadvance \
   ? (F)->space_advance * (float) ((C) == '\t' ? (F)->tab_size : 1) \
-  : (M)->xadvance)
+  : (M)->xadvance) + (F)->letter_spacing_px)
 
 double ren_font_group_get_width(RenWindow *window_renderer, RenFont **fonts, const char *text, size_t len, int *x_offset) {
   double width = 0;

@@ -190,6 +190,18 @@ static int f_font_set_tab_size(lua_State *L) {
   return 0;
 }
 
+static int f_font_set_letter_spacing(lua_State *L) {
+  RenFont* fonts[FONT_FALLBACK_MAX]; font_retrieve(L, fonts, 1);
+  ren_font_group_set_letter_spacing(fonts, luaL_checknumber(L, 2));
+  return 0;
+}
+
+static int f_font_get_letter_spacing(lua_State *L) {
+  RenFont* fonts[FONT_FALLBACK_MAX]; font_retrieve(L, fonts, 1);
+  lua_pushnumber(L, ren_font_group_get_letter_spacing(fonts));
+  return 1;
+}
+
 static int f_font_gc(lua_State *L) {
   if (lua_istable(L, 1)) return 0; // do not run if its FontGroup
   RenFont** self = luaL_checkudata(L, 1, API_TYPE_FONT);
@@ -460,6 +472,8 @@ static const luaL_Reg fontLib[] = {
   { "copy",               f_font_copy               },
   { "group",              f_font_group              },
   { "set_tab_size",       f_font_set_tab_size       },
+  { "set_letter_spacing", f_font_set_letter_spacing },
+  { "get_letter_spacing", f_font_get_letter_spacing },
   { "get_width",          f_font_get_width          },
   { "get_height",         f_font_get_height         },
   { "get_size",           f_font_get_size           },
