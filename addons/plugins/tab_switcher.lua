@@ -100,6 +100,7 @@ function tab_switcher.get_tab_list(base_node)
     if v:is(DocView) then
       table.insert(list, setmetatable({
         text = v:get_name(),
+        font = v:get_name_style(core.command_view:get_font()),
         view = v
       }, mt))
     end

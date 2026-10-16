@@ -44,7 +44,7 @@ local function show_menu(node, x, y)
     local icon, icon_font, icon_color = get_icon(view)
     if icon then icon_w = math.max(icon_w, icon_font:get_width(icon)) end
     table.insert(items, {
-      text = view:get_name(),
+      text = view:get_name(), font = view:get_name_style(style.font),
       icon = icon, icon_font = icon_font, icon_color = icon_color,
       active = view == node.active_view,
       command = function()
@@ -100,7 +100,7 @@ function menu:draw_context_menu()
       common.draw_text(item.icon_font, item.icon_color, item.icon, nil, tx, y, 0, h)
     end
     local color = item.active and style.accent or style.text
-    common.draw_text(style.font, color, item.text, "left", tx + self.icon_w, y, w, h)
+    common.draw_text(item.font, color, item.text, "left", tx + self.icon_w, y, w, h)
   end
 end
 
