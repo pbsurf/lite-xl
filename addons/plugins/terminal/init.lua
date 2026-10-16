@@ -50,6 +50,8 @@ local default_config = {
   -- more compact (e.g. -0.125: 3 px less per character at 24 px). Applied to a copy
   -- of the font, so editors sharing it are unaffected.
   letter_spacing = 0,
+  -- extra height of each row, as a fraction of the font size (text is centered in it)
+  line_spacing = 0,
   -- space between the edges of the view and the text, in pixels at scale 1 (multiplied
   -- by SCALE when used, so it follows the scale plugin); x is left and right
   padding = { x = 7, y = 0 },
@@ -338,6 +340,13 @@ function TerminalView:get_padding()
 end
 
 
+-- row height: the font's, plus line_spacing rounded to whole pixels
+function TerminalView:get_line_height()
+  local font = self.options.font
+  return font:get_height() + math.floor(self.options.line_spacing * font:get_size() + 0.5)
+end
+
+
 function TerminalView:update()
   if self.options.font ~= self.base_font and self.options.font:get_size() ~= self.base_font:get_size() then
     self.options.font:set_size(self.base_font:get_size())
@@ -349,7 +358,7 @@ function TerminalView:update()
   if (self.last_font_size and self.last_font_size ~= self.options.font:get_size()) or self.size.x > 0 and self.size.y > 0 and not self.terminal or self.last_size.x ~= self.size.x or self.last_size.y ~= self.size.y then
     local padding_x, padding_y = self:get_padding()
     self.columns = math.max(math.floor((self.size.x - padding_x*2) / self.options.font:get_width("W")), 1)
-    self.lines = math.max(math.floor((self.size.y - padding_y*2) / self.options.font:get_height()), 1)
+    self.lines = math.max(math.floor((self.size.y - padding_y*2) / self:get_line_height()), 1)
     if self.lines > 0 and self.columns > 0 then
       if not self.terminal then
         self:spawn()
@@ -392,7 +401,7 @@ function TerminalView:update()
         core.redraw = true
       end
       local scrollback, total_scrollback = self.terminal:scrollback()
-      local lh = self.options.font:get_height()
+      local lh = self:get_line_height()
       -- 0 should be if we're at max scrollback. 1 should be if we're at 0 scrollback.
       self.v_scrollbar:set_size(self.position.x, self.position.y, self.size.x, self.size.y, self:get_scrollable_size())
       self.v_scrollbar:set_percent(1.0 - (scrollback / total_scrollback))
@@ -451,7 +460,8 @@ function TerminalView:draw()
     local padding_x, padding_y = self:get_padding()
 
     local y = self.position.y + padding_y
-    local lh = self.options.font:get_height()
+    local lh = self:get_line_height()
+    local text_y = math.floor((lh - self.options.font:get_height()) / 2)
     core.redraw = self:shift_selection_update() or core.redraw
     local cursor_x, cursor_y, mode = self.terminal:cursor()
 
@@ -534,7 +544,7 @@ function TerminalView:draw()
             if background and background ~= self.options.background then
               renderer.draw_rect(x, y, (text:ulen() or #text)*space_width, lh, background)
             end
-            x = renderer.draw_text(font, text, x, y, foreground)
+            x = renderer.draw_text(font, text, x, y + text_y, foreground)
           end
         end
         offset = offset + length
@@ -550,7 +560,7 @@ function TerminalView:convert_coordinates(x, y)
   local padding_x, padding_y = self:get_padding()
   local col_exact = math.floor((x - self.position.x - padding_x) / w)
   local col_approx = common.round((x - self.position.x - padding_x) / w)
-  local row = math.floor((y - self.position.y - padding_y) / self.options.font:get_height())
+  local row = math.floor((y - self.position.y - padding_y) / self:get_line_height())
   return math.max(0, col_exact), math.max(0, row), math.max(0, col_approx)
 end
 
@@ -682,7 +692,7 @@ end
 
 function TerminalView:get_scrollable_size()
   if not self.terminal then return self.size.y end
-  local lh = self.options.font:get_height()
+  local lh = self:get_line_height()
   local _, total_scrollback = self.terminal:scrollback()
   return total_scrollback * lh + self.size.y
 end
