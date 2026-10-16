@@ -132,8 +132,13 @@ insensitive:set_tooltip("Case insensitive search")
 insensitive:set_checked(true)
 
 ---@type widget.checkbox
+local wholeword = CheckBox(widget, "Whole Word")
+wholeword:set_position(10, insensitive:get_bottom() + 10)
+wholeword:set_tooltip("Match whole words only")
+
+---@type widget.checkbox
 local patterncheck = CheckBox(widget, "Pattern")
-patterncheck:set_position(10, insensitive:get_bottom() + 10)
+patterncheck:set_position(10, wholeword:get_bottom() + 10)
 patterncheck:set_tooltip("Treat search text as a lua pattern")
 
 ---@type widget.checkbox
@@ -174,6 +179,29 @@ statusline:set_position(0, scope:get_bottom() + 10)
 local status = Label(widget, "")
 status:set_position(10, statusline:get_bottom() + 10)
 
+-- at a match's start or end: unless the match's own character there isn't a
+-- word character, the one beyond it mustn't be one
+local word_boundary = "(?:(?<!\\w)|(?!\\w))"
+
+---The text to search for and how, from the find box and checkboxes. Whole
+---word searches are regex searches: the text (escaped, unless Regex) between
+---word boundaries.
+---@return string text
+---@return boolean use_pattern
+---@return boolean use_regex
+local function search_query()
+  local text = findtext:get_text()
+  local use_pattern, use_regex = patterncheck:is_checked(), regexcheck:is_checked()
+  if wholeword:is_checked() and text ~= "" then
+    if not use_regex then text = text:gsub("[^%w%s\128-\255]", "\\%0") end
+    text = word_boundary .. "(?:" .. text .. ")" .. word_boundary
+    use_pattern, use_regex = false, true
+  end
+  return text, use_pattern, use_regex
+end
+
+local get_matcher
+
 --------------------------------------------------------------------------------
 -- Helper class to keep track of amount of matches and display on status label
 --------------------------------------------------------------------------------
@@ -210,68 +238,16 @@ function Results:find(text, doc, force)
   self.text = text
   self.doc = doc
 
-  local search_func
-
-  -- regex search
-  if regexcheck:is_checked() then
-    local regex_find_offsets = regex.match
-    if regex.find_offsets then
-      regex_find_offsets = regex.find_offsets
-    end
-    local pattern = regex.compile(
-      findtext:get_text(),
-      insensitive:is_checked() and "im" or "m"
-    )
-    if not pattern then return end
-    search_func = function(line_text)
-      ---@cast line_text string
-      local results = nil
-      local offsets = {regex_find_offsets(pattern, line_text)}
-      if offsets[1] then
-        results = {}
-        for i=1, #offsets, 2 do
-          table.insert(results, offsets[i])
-        end
-      end
-      return results
-    end
-  -- plain or pattern search
-  else
-    local no_case = insensitive:is_checked()
-    local is_plain = not patterncheck:is_checked()
-    if is_plain and no_case then
-      text = text:ulower()
-    end
-    search_func = function(line_text)
-      ---@cast line_text string
-      if is_plain and no_case then
-        line_text = line_text:ulower()
-      end
-      local results = nil
-      local col1, col2 = line_text:find(text, 1, is_plain)
-      if col1 then
-        results = {}
-        table.insert(results, col1)
-        while col1 do
-          col1, col2 = line_text:find(text, col2+1, is_plain)
-          if col1 then
-            table.insert(results, col1)
-          end
-        end
-      end
-      return results
-    end
-  end
+  -- the matches Highlight All marks, so the count agrees with them
+  local match = get_matcher()
+  if not match then return end
 
   self.prev_search_id = core.add_thread(function()
     self.matches = {}
     local lines_count = #doc.lines
     for i=1, lines_count do
-      local offsets = search_func(doc.lines[i])
-      if offsets then
-        for _, col in ipairs(offsets) do
-          table.insert(self.matches, {line = i, col = col})
-        end
+      for _, m in ipairs(match(doc.lines[i])) do
+        table.insert(self.matches, {line = i, col = m[1]})
       end
       if i % 100 == 0 then
         coroutine.yield()
@@ -442,14 +418,21 @@ end
 local function project_search()
   if findtext:get_text() == "" then return end
   remember_find()
-  if not regexcheck:is_checked() then
+  local query, _, use_regex = search_query()
+  if not use_regex then
     projectsearch.search_plain(
-      findtext:get_text(), filepicker:get_path(), insensitive:is_checked()
+      query, filepicker:get_path(), insensitive:is_checked()
     )
   else
-    projectsearch.search_regex(
-      findtext:get_text(), filepicker:get_path(), insensitive:is_checked()
+    local rv = projectsearch.search_regex(
+      query, filepicker:get_path(), insensitive:is_checked()
     )
+    -- the query is only shown (also after a refresh): show what was typed,
+    -- not the whole word regex
+    if rv then
+      rv.query = findtext:get_text()
+      rv.search_args[2] = rv.query
+    end
   end
   command.perform "search-replace:hide"
 end
@@ -474,15 +457,16 @@ local function find(reverse)
     col = ccol2
   end
 
+  local query, use_pattern, use_regex = search_query()
   local opt = {
     wrap = true,
     no_case = insensitive:is_checked(),
-    pattern = patterncheck:is_checked(),
-    regex = regexcheck:is_checked(),
+    pattern = use_pattern,
+    regex = use_regex,
     reverse = reverse
   }
 
-  if opt.regex and not regex.compile(findtext:get_text()) then
+  if opt.regex and not regex.compile(query) then
     return
   end
 
@@ -490,7 +474,7 @@ local function find(reverse)
 
   core.try(function()
     local line1, col1, line2, col2 = search.find(
-      doc, line, col, findtext:get_text(), opt
+      doc, line, col, query, opt
     )
 
     local current_text = doc:get_text(
@@ -532,14 +516,18 @@ local function find_replace()
     end
   end
 
-  local old = findtext:get_text()
+  local old, use_pattern, use_regex = search_query()
   local new = replacetext:get_text()
   remember_find()
   remember_replace()
+  -- a plain whole word search became a regex; keep its replacement literal
+  if use_regex and not regexcheck:is_checked() then
+    new = new:gsub("\\", "\\\\"):gsub("%$", "$$")
+  end
 
   local results = doc:replace(function(text)
-    if not regexcheck:is_checked() then
-      if not patterncheck:is_checked() then
+    if not use_regex then
+      if not use_pattern then
         return text:gsub(old:gsub("%W", "%%%1"), new:gsub("%%", "%%%%"), nil)
       else
         return text:gsub(old, new)
@@ -711,9 +699,18 @@ function insensitive:on_checked(checked)
   Results:clear()
 end
 
+-- whole word applies to plain and regex searches, not Lua patterns
+function wholeword:on_checked(checked)
+  if checked then
+    patterncheck:set_checked(false)
+  end
+  Results:clear()
+end
+
 function patterncheck:on_checked(checked)
   if checked then
     regexcheck:set_checked(false)
+    wholeword:set_checked(false)
   end
   Results:clear()
 end
@@ -758,11 +755,9 @@ end
 -- A function returning a line's matches as a list of { col1, col2 (exclusive) }
 -- for the current search text and options; nil if there's nothing to find
 local matcher_key, matcher = nil, nil
-local function get_matcher()
-  local text = findtext:get_text()
+function get_matcher()
+  local text, use_pattern, use_regex = search_query()
   local no_case = insensitive:is_checked()
-  local use_pattern = patterncheck:is_checked()
-  local use_regex = regexcheck:is_checked()
   local key = table.concat({ text, tostring(no_case), tostring(use_pattern),
     tostring(use_regex) }, "\0")
   if key == matcher_key then return matcher end
@@ -893,15 +888,16 @@ local function update_right_positioning(self)
   end
 
   insensitive:set_position(10, line_options:get_bottom() + 10)
+  wholeword:set_position(10, insensitive:get_bottom() + 10)
   if scope:get_selected() == 1 then
-    patterncheck:set_position(10, insensitive:get_bottom() + 10)
+    patterncheck:set_position(10, wholeword:get_bottom() + 10)
     regexcheck:set_position(10, patterncheck:get_bottom() + 10)
     replaceinselection:set_position(10, regexcheck:get_bottom() + 10)
     highlightall:set_position(10,
       (replace_shown and replaceinselection or regexcheck):get_bottom() + 10)
     scope:set_position(10, highlightall:get_bottom() + 10)
   else
-    regexcheck:set_position(10, insensitive:get_bottom() + 10)
+    regexcheck:set_position(10, wholeword:get_bottom() + 10)
     scope:set_position(10, regexcheck:get_bottom() + 10)
   end
 
@@ -943,7 +939,8 @@ local function update_bottom_positioning(self)
     local right = replace_shown and replaceinselection:get_position().x or self.size.x
     regexcheck:set_position(right - 10 - regexcheck:get_width(), 10)
     patterncheck:set_position(regexcheck:get_position().x - 10  - patterncheck:get_width(), 10)
-    insensitive:set_position(patterncheck:get_position().x - 10 - insensitive:get_width(), 10)
+    wholeword:set_position(patterncheck:get_position().x - 10 - wholeword:get_width(), 10)
+    insensitive:set_position(wholeword:get_position().x - 10 - insensitive:get_width(), 10)
     highlightall:set_position(insensitive:get_position().x - 10 - highlightall:get_width(), 10)
     line:set_position(0, status:get_bottom() + 10)
   else
@@ -952,7 +949,8 @@ local function update_bottom_positioning(self)
     label:set_label("Find in Directory")
     label:set_position(10, 10)
     regexcheck:set_position(self.size.x - regexcheck:get_width() - 10, 10)
-    insensitive:set_position(regexcheck:get_position().x - 10 - insensitive:get_width(), 10)
+    wholeword:set_position(regexcheck:get_position().x - 10 - wholeword:get_width(), 10)
+    insensitive:set_position(wholeword:get_position().x - 10 - insensitive:get_width(), 10)
     line:set_position(0, label:get_bottom() + 10)
   end
 
