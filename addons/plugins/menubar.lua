@@ -494,8 +494,9 @@ end
 function Dropdown:draw_context_menu()
   if not self.items then return end
   local bx, by, bw, bh = self.position.x, self.position.y, self.items.width, self.height
-  renderer.draw_rect(bx - 1, by - 1, bw + 2, bh + 2, style.divider)
-  renderer.draw_rect(bx, by, bw, bh, style.background3)
+  local border = style.divider_size
+  renderer.draw_rect(bx - border, by - border, bw + border * 2, bh + border * 2, style.popup_border)
+  renderer.draw_rect(bx, by, bw, bh, style.popup_background)
   for i, item, x, y, w, h in self:each_item() do
     if item == ContextMenu.DIVIDER then
       renderer.draw_rect(x, y + 5 * SCALE, w, 1, style.divider)
@@ -526,7 +527,7 @@ local function draw_bar()
     local title = config.plugins.menubar.menus[i].title
     local color = style.text
     if i == state.open or i == state.hovered then
-      renderer.draw_rect(r.x, 0, r.w, h - 1, i == state.open and style.background3 or style.line_highlight)
+      renderer.draw_rect(r.x, 0, r.w, h - 1, i == state.open and style.popup_background or style.line_highlight)
       if i == state.open then color = style.accent end
     end
     local tx = r.x + style.padding.x

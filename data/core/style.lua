@@ -49,4 +49,16 @@ style.syntax_fonts = setmetatable({}, syntax_fallback_mt)
 
 style.log = {}
 
+-- Popups (menus, tooltips, completion and hover lists) float over both the
+-- editor and the panels, so a color scheme may give them their own colors:
+-- style.popup_background and style.popup_border (drawn style.divider_size
+-- wide). Without them, background3 and divider are used.
+local popup_fallbacks = { popup_background = "background3", popup_border = "divider" }
+setmetatable(style, {
+  __index = function(t, k)
+    local fallback = popup_fallbacks[k]
+    if fallback then return rawget(t, fallback) end
+  end
+})
+
 return style

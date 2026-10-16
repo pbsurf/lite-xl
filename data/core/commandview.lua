@@ -364,8 +364,8 @@ local function draw_suggestions_box(self)
   core.push_clip_rect(rx, ry, rw, rh)
   -- draw suggestions background
   if #self.suggestions > 0 then
-    renderer.draw_rect(rx, ry, rw, rh, style.background3)
-    renderer.draw_rect(rx, ry - dh, rw, dh, style.divider)
+    renderer.draw_rect(rx, ry, rw, rh, style.popup_background)
+    renderer.draw_rect(rx, ry - dh, rw, dh, style.popup_border)
     local y = self.position.y - self.selection_offset - dh
     renderer.draw_rect(rx, y, rw, lh, style.line_highlight)
   end

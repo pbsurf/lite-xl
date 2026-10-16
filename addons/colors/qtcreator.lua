@@ -10,6 +10,10 @@ style.text = { common.color "#404040" }
 style.accent = { common.color "#fc1785" }
 style.dim = { common.color "#b0b0b0" }
 style.divider = { common.color "#e8e8e8" }
+-- popups: white with a clear border, so they stand out from the panels (#f2f2f2)
+-- and, by the border, from the editor (#ffffff)
+style.popup_background = { common.color "#ffffff" }
+style.popup_border = { common.color "#b4b4b4" }
 style.scrollbar = { common.color "#d0d0d0" }
 style.scrollbar2 = { common.color "#b0b0b0" }
 -- summer doesn't set this, so it would keep default's dark track

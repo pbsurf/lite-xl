@@ -16,7 +16,6 @@ config.plugins.treeview = common.merge({
 }, config.plugins.treeview)
 
 local tooltip_offset = style.font:get_height()
-local tooltip_border = 1
 local tooltip_delay = 0.5
 local tooltip_alpha = 255
 local tooltip_alpha_rate = 1
@@ -274,10 +273,11 @@ function TreeView:draw_tooltip()
     x = x - w -- span left instead
   end
 
-  local bx, by = x - tooltip_border, y - tooltip_border
-  local bw, bh = w + 2 * tooltip_border, h + 2 * tooltip_border
-  renderer.draw_rect(bx, by, bw, bh, replace_alpha(style.text, self.tooltip.alpha))
-  renderer.draw_rect(x, y, w, h, replace_alpha(style.background2, self.tooltip.alpha))
+  local border = style.divider_size
+  local bx, by = x - border, y - border
+  local bw, bh = w + 2 * border, h + 2 * border
+  renderer.draw_rect(bx, by, bw, bh, replace_alpha(style.popup_border, self.tooltip.alpha))
+  renderer.draw_rect(x, y, w, h, replace_alpha(style.popup_background, self.tooltip.alpha))
   common.draw_text(style.font, replace_alpha(style.text, self.tooltip.alpha), text, "center", x, y, w, h)
 end
 

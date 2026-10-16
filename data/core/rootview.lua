@@ -662,8 +662,9 @@ function RootView:draw_tab_tooltip()
     local h = font:get_height() + style.padding.y
     local x = common.clamp(math.max(tx, tt.node.position.x), 0, self.size.x - w - 1)
     local y = ty + th + 1
-    renderer.draw_rect(x - 1, y - 1, w + 2, h + 2, style.divider)
-    renderer.draw_rect(x, y, w, h, style.background3)
+    local bw = style.divider_size
+    renderer.draw_rect(x - bw, y - bw, w + bw * 2, h + bw * 2, style.popup_border)
+    renderer.draw_rect(x, y, w, h, style.popup_background)
     local tx = x + style.padding.x
     local ty = y + (h - font:get_height()) / 2
     if project_part then

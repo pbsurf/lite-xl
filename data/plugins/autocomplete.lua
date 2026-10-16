@@ -427,12 +427,20 @@ local function draw_description_box(text, av, sx, sy, sw, sh)
   local height = #lines * font:get_height()
 
   -- draw background rect
+  local bw = style.divider_size
+  renderer.draw_rect(
+    x - bw,
+    sy - bw,
+    width + style.padding.x * 2 + bw * 2,
+    height + style.padding.y * 2 + bw * 2,
+    style.popup_border
+  )
   renderer.draw_rect(
     x,
     sy,
     width + style.padding.x * 2,
     height + style.padding.y * 2,
-    style.background3
+    style.popup_background
   )
 
   -- draw text
@@ -454,7 +462,9 @@ local function draw_suggestions_box(av)
 
   -- draw background rect
   local rx, ry, rw, rh = get_suggestions_rect(av)
-  renderer.draw_rect(rx, ry, rw, rh, style.background3)
+  local bw = style.divider_size
+  renderer.draw_rect(rx - bw, ry - bw, rw + bw * 2, rh + bw * 2, style.popup_border)
+  renderer.draw_rect(rx, ry, rw, rh, style.popup_background)
 
   -- draw text
   local font = av:get_font()
@@ -480,7 +490,7 @@ local function draw_suggestions_box(av)
     if x_adv > rx + rw - info_size then
       local ellipsis_size = font:get_width("…")
       local ell_x = rx + rw - info_size - ellipsis_size
-      renderer.draw_rect(ell_x, y, ellipsis_size, lh, style.background3)
+      renderer.draw_rect(ell_x, y, ellipsis_size, lh, style.popup_background)
       common.draw_text(font, color, "…", "left", ell_x, y, ellipsis_size, lh)
     end
     if s.info then
@@ -499,8 +509,8 @@ local function draw_suggestions_box(av)
     end
   end
 
-  renderer.draw_rect(rx, y, rw, 2, style.caret)
-  renderer.draw_rect(rx, y+2, rw, lh, style.background)
+  renderer.draw_rect(rx, y, rw, bw, style.popup_border)
+  renderer.draw_rect(rx, y+bw, rw, lh, style.background)
   common.draw_text(
     style.font,
     style.accent,

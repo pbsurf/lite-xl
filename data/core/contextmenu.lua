@@ -7,7 +7,6 @@ local style = require "core.style"
 local Object = require "core.object"
 local View = require "core.view"
 
-local border_width = 1
 local divider_width = 1
 local divider_padding = 5
 local DIVIDER = {}
@@ -267,15 +266,16 @@ end
 function ContextMenu:draw_context_menu()
   if not self.items then return end
   local bx, by, bw, bh = self.position.x, self.position.y, self.items.width, self.height
+  local border_width = style.divider_size
 
   renderer.draw_rect(
     bx - border_width,
     by - border_width,
     bw + (border_width * 2),
     bh + (border_width * 2),
-    style.divider
+    style.popup_border
   )
-  renderer.draw_rect(bx, by, bw, bh, style.background3)
+  renderer.draw_rect(bx, by, bw, bh, style.popup_background)
 
   for i, item, x, y, w, h in self:each_item() do
     if item == DIVIDER then

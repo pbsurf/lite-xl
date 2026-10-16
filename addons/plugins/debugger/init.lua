@@ -365,7 +365,7 @@ function DocView:draw()
     local x, y = self.last_moved_time[1], self.last_moved_time[2]
     local w, h = style.font:get_width(self.watch_hover_value) + style.padding.x*2, style.font:get_height() + style.padding.y * 2
     renderer.draw_rect(x, y, w, h, style.accent)
-    renderer.draw_rect(x+1, y+1, w-2, h-2, style.background3)
+    renderer.draw_rect(x+1, y+1, w-2, h-2, style.popup_background)
     renderer.draw_text(style.font, self.watch_hover_value, x + style.padding.x, y + style.padding.y, style.text)
   end
 end
