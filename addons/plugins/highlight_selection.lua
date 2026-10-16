@@ -2,7 +2,8 @@
 -- Marks the other occurrences of the selected text in the document's views
 -- (DocView line marks, under the selection and the text). Only a selection on
 -- one line, not just whitespace, is looked for, case-sensitively; a selection
--- that is a whole word only matches whole words.
+-- that is a whole word only matches whole words. With several selections, only
+-- when they all hold the same text (as after select-add-next, not a block).
 --
 -- Color: style.selection_match, else the selection color at half its alpha.
 local core = require "core"
@@ -61,6 +62,15 @@ local function is_whole_word(text, col1, col2)
 end
 
 
+-- Whether all of the doc's selections hold the same text
+local function same_text(doc, text)
+  for _, l1, c1, l2, c2 in doc:get_selections(true) do
+    if l1 ~= l2 or doc.lines[l1]:sub(c1, c2 - 1) ~= text then return false end
+  end
+  return true
+end
+
+
 -- What to look for in a doc: the text of its last selection, and whether
 -- matches must be whole words; cached until the doc or its selections change
 local cache = setmetatable({}, { __mode = "k" })
@@ -68,8 +78,8 @@ local cache = setmetatable({}, { __mode = "k" })
 local function get_needle(doc)
   local conf = config.plugins.highlight_selection
   local line1, col1, line2, col2 = doc:get_selection(true)
-  local key = table.concat({ doc:get_change_id(), line1, col1, line2, col2,
-    tostring(conf.whole_word), conf.min_length, #doc.selections }, ",")
+  local key = table.concat({ doc:get_change_id(), tostring(conf.whole_word),
+    conf.min_length, table.concat(doc.selections, ",") }, ",")
   local cached = cache[doc]
   if cached and cached.key == key then return cached.needle end
 
@@ -77,7 +87,7 @@ local function get_needle(doc)
   if line1 == line2 and col2 - col1 >= conf.min_length then
     local line_text = doc.lines[line1]
     local text = line_text:sub(col1, col2 - 1)
-    if text:find("%S") then
+    if text:find("%S") and same_text(doc, text) then
       needle = {
         text = text,
         whole_word = conf.whole_word and is_whole_word(line_text, col1, col2)
