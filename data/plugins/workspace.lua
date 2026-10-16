@@ -126,7 +126,9 @@ local function load_view(t)
     end
     return dv
   end
-  return require(t.module)()
+  -- skip views of plugins no longer loaded, rather than failing the whole restore
+  local ok, view_class = pcall(require, t.module)
+  if ok then return view_class() end
 end
 
 
