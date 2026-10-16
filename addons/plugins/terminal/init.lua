@@ -271,6 +271,9 @@ function TerminalView:new(options)
   options = common.merge(common.merge({}, config.plugins.terminal), options)
   self.size.y = options.drawer_height
   self.options = options
+  -- each view resizes its bold font to match its font, and views can have different
+  -- fonts (the debugger's terminal), so each needs its own copy
+  self.options.bold_font = self.options.bold_font:copy(self.options.font:get_size())
   self.options.environment = common.merge(options.environment, {})
   for k,v in pairs(self.options.environment) do
     self.options.environment[k] = type(v) == "function" and v() or v
@@ -318,7 +321,8 @@ end
 
 
 function TerminalView:update()
-  if self.last_font_size and self.last_font_size ~= self.options.font:get_size() then
+  -- also catches a font resized before the first update (the scale plugin at startup)
+  if self.options.bold_font:get_size() ~= self.options.font:get_size() then
     self.options.bold_font:set_size(self.options.font:get_size())
   end
   if (self.last_font_size and self.last_font_size ~= self.options.font:get_size()) or self.size.x > 0 and self.size.y > 0 and not self.terminal or self.last_size.x ~= self.size.x or self.last_size.y ~= self.size.y then
