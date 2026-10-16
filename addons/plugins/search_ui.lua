@@ -408,8 +408,40 @@ local function toggle_scope(idx, not_set)
   end
 end
 
+--------------------------------------------------------------------------------
+-- History: core's core.previous_find and core.previous_replace (newest first,
+-- saved in the session, also offered by core's find), stepped through with
+-- up/down in the boxes
+--------------------------------------------------------------------------------
+local max_history = 100
+
+-- position while stepping through a box's history: 0 is the text being edited,
+-- kept in draft
+local history_pos = { [findtext] = { idx = 0 }, [replacetext] = { idx = 0 } }
+local stepping = false
+
+local function add_history(list, text)
+  if text == "" then return end
+  for i = #list, 1, -1 do
+    if list[i] == text then table.remove(list, i) end
+  end
+  table.insert(list, 1, text)
+  for i = #list, max_history + 1, -1 do list[i] = nil end
+end
+
+local function remember_find()
+  add_history(core.previous_find, findtext:get_text())
+  history_pos[findtext].idx = 0
+end
+
+local function remember_replace()
+  add_history(core.previous_replace, replacetext:get_text())
+  history_pos[replacetext].idx = 0
+end
+
 local function project_search()
   if findtext:get_text() == "" then return end
+  remember_find()
   if not regexcheck:is_checked() then
     projectsearch.search_plain(
       findtext:get_text(), filepicker:get_path(), insensitive:is_checked()
@@ -481,6 +513,8 @@ local function find(reverse)
       end
       doc_view:scroll_to_line(line1, true)
       Results:find(text, doc)
+    else
+      Results:clear()
     end
   end)
 end
@@ -500,6 +534,8 @@ local function find_replace()
 
   local old = findtext:get_text()
   local new = replacetext:get_text()
+  remember_find()
+  remember_replace()
 
   local results = doc:replace(function(text)
     if not regexcheck:is_checked() then
@@ -522,6 +558,28 @@ local function find_replace()
   end
 
   status:set_label(string.format("Total Replaced: %d", n))
+end
+
+---Show an older (dir 1) or newer (dir -1) history entry in a box; newer than
+---the newest is the text that was being edited.
+---@param box widget.textbox
+---@param dir integer
+local function step_history(box, dir)
+  local pos = history_pos[box]
+  local list = box == findtext and core.previous_find or core.previous_replace
+  local current = box:get_text()
+  if pos.idx == 0 then pos.draft = current end
+  local idx = pos.idx
+  repeat idx = idx + dir until idx <= 0 or idx > #list or list[idx] ~= current
+  if idx > #list then return end
+  idx = math.max(idx, 0)
+  if idx == pos.idx then return end
+  pos.idx = idx
+  stepping, find_enabled = true, false
+  box:set_text(idx == 0 and pos.draft or list[idx])
+  stepping, find_enabled = false, true
+  box.textview.doc:set_selection(1, math.huge)
+  if box == findtext and scope:get_selected() == 1 then find(false) end
 end
 
 local inside_node = false
@@ -627,6 +685,7 @@ local function show_find(av, toggle)
       end
     end
   else
+    if #Results.matches > 0 then remember_find() end
     widget:swap_active_child()
     if view_is_open(doc_view) then
       core.set_active_view(doc_view)
@@ -638,9 +697,14 @@ end
 -- Widgets event overrides
 --------------------------------------------------------------------------------
 function findtext:on_change(text)
+  if not stepping then history_pos[findtext].idx = 0 end
   if scope:get_selected() == 1 then
     find(false)
   end
+end
+
+function replacetext:on_change(text)
+  if not stepping then history_pos[replacetext].idx = 0 end
 end
 
 function insensitive:on_checked(checked)
@@ -668,8 +732,8 @@ function scope:on_selected(idx)
   end
 end
 
-function findnext:on_click() find(false) end
-function findprev:on_click() find(true) end
+function findnext:on_click() remember_find() find(false) end
+function findprev:on_click() remember_find() find(true) end
 function findproject:on_click() project_search() end
 function replace:on_click() find_replace() end
 function togglereplace:on_click() set_replace_shown(not replace_shown) end
@@ -998,6 +1062,8 @@ command.add(
 
 command.add(function() return widget:is_visible() and not core.active_view:is(CommandView) end, {
   ["search-replace:hide"] = function()
+    -- typed and found, then closed: worth keeping, unlike a search that failed
+    if #Results.matches > 0 then remember_find() end
     widget:swap_active_child()
     if config.plugins.search_ui.position == "right" then
       widget:hide_animated(false, true)
@@ -1016,10 +1082,12 @@ command.add(function() return widget:is_visible() and not core.active_view:is(Co
   end,
 
   ["search-replace:next"] = function()
+    remember_find()
     find(false)
   end,
 
   ["search-replace:previous"] = function()
+    remember_find()
     find(true)
   end,
 
@@ -1047,6 +1115,17 @@ end, {
   ["search-replace:show-replace"] = function()
     set_replace_shown(true)
   end
+})
+
+command.add(function()
+  local av = core.active_view
+  if widget:is_visible() and (av == findtext.textview or av == replacetext.textview) then
+    return true, av.textbox
+  end
+  return false
+end, {
+  ["search-replace:previous-history"] = function(box) step_history(box, 1) end,
+  ["search-replace:next-history"] = function(box) step_history(box, -1) end
 })
 
 command.add(
@@ -1077,6 +1156,7 @@ command.add(
               math.min(col1, col2)
             )
           end
+          remember_find()
           find(false)
         else
           find_replace()
@@ -1120,6 +1200,7 @@ command.map["find-replace:repeat-find"].perform = function(...)
     or
     (config.plugins.search_ui.replace_core_find and findtext:get_text() ~= "")
   then
+    remember_find()
     find(false)
     return
   end
@@ -1133,6 +1214,7 @@ command.map["find-replace:previous-find"].perform = function(...)
     or
     (config.plugins.search_ui.replace_core_find and findtext:get_text() ~= "")
   then
+    remember_find()
     find(true)
     return
   end
@@ -1176,7 +1258,9 @@ keymap.add {
   ["ctrl+shift+i"] = "search-replace:toggle-regex",
   ["ctrl+alt+i"] = "search-replace:toggle-in-selection",
   ["ctrl+f"] = "search-replace:file-search",
-  ["ctrl+r"] = "search-replace:show-replace"
+  ["ctrl+r"] = "search-replace:show-replace",
+  ["up"] = "search-replace:previous-history",
+  ["down"] = "search-replace:next-history"
 }
 
 
