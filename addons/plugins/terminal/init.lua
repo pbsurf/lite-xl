@@ -50,8 +50,9 @@ local default_config = {
   -- more compact (e.g. -0.125: 3 px less per character at 24 px). Applied to a copy
   -- of the font, so editors sharing it are unaffected.
   letter_spacing = 0,
-  -- padding around the edges of the terminal
-  padding = { x = 0, y = 0 },
+  -- space between the edges of the view and the text, in pixels at scale 1 (multiplied
+  -- by SCALE when used, so it follows the scale plugin); x is left and right
+  padding = { x = 7, y = 0 },
   -- default background color if not explicitly set by the shell
   background = style.background or { common.color "#000000" },
   -- default text color if not explicitly by the shell
@@ -331,6 +332,12 @@ function TerminalView:spawn()
 end
 
 
+function TerminalView:get_padding()
+  local padding = self.options.padding
+  return (padding.x or 0) * SCALE, (padding.y or 0) * SCALE
+end
+
+
 function TerminalView:update()
   if self.options.font ~= self.base_font and self.options.font:get_size() ~= self.base_font:get_size() then
     self.options.font:set_size(self.base_font:get_size())
@@ -340,8 +347,9 @@ function TerminalView:update()
     self.options.bold_font:set_size(self.options.font:get_size())
   end
   if (self.last_font_size and self.last_font_size ~= self.options.font:get_size()) or self.size.x > 0 and self.size.y > 0 and not self.terminal or self.last_size.x ~= self.size.x or self.last_size.y ~= self.size.y then
-    self.columns = math.max(math.floor((self.size.x - self.options.padding.x*2) / self.options.font:get_width("W")), 1)
-    self.lines = math.max(math.floor((self.size.y - self.options.padding.y*2) / self.options.font:get_height()), 1)
+    local padding_x, padding_y = self:get_padding()
+    self.columns = math.max(math.floor((self.size.x - padding_x*2) / self.options.font:get_width("W")), 1)
+    self.lines = math.max(math.floor((self.size.y - padding_y*2) / self.options.font:get_height()), 1)
     if self.lines > 0 and self.columns > 0 then
       if not self.terminal then
         self:spawn()
@@ -440,8 +448,9 @@ function TerminalView:draw()
   TerminalView.super.draw_background(self, self.options.background)
   if self.terminal then
     local space_width = self.options.font:get_width(" ")
+    local padding_x, padding_y = self:get_padding()
 
-    local y = self.position.y + self.options.padding.y
+    local y = self.position.y + padding_y
     local lh = self.options.font:get_height()
     core.redraw = self:shift_selection_update() or core.redraw
     local cursor_x, cursor_y, mode = self.terminal:cursor()
@@ -449,7 +458,7 @@ function TerminalView:draw()
 
     local selection = self:sorted_selection()
     for line_idx, line in ipairs(self.terminal:lines()) do
-      local x = self.position.x + self.options.padding.x
+      local x = self.position.x + padding_x
       local should_draw_cursor = false
       if mode ~= "hidden" and core.active_view == self and line_idx - 1 == cursor_y and self.terminal:scrollback() == 0 then
         if mode == "blinking" then
@@ -538,9 +547,10 @@ end
 
 function TerminalView:convert_coordinates(x, y)
   local w = self.options.font:get_width(" ")
-  local col_exact = math.floor((x - self.position.x - self.options.padding.x) / w)
-  local col_approx = common.round((x - self.position.x - self.options.padding.x) / w)
-  local row = math.floor((y - self.position.y - self.options.padding.y) / self.options.font:get_height())
+  local padding_x, padding_y = self:get_padding()
+  local col_exact = math.floor((x - self.position.x - padding_x) / w)
+  local col_approx = common.round((x - self.position.x - padding_x) / w)
+  local row = math.floor((y - self.position.y - padding_y) / self.options.font:get_height())
   return math.max(0, col_exact), math.max(0, row), math.max(0, col_approx)
 end
 
