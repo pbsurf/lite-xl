@@ -394,10 +394,14 @@ function DocView:on_mouse_moved(x, y, ...)
     local l1, c1 = self:resolve_screen_position(x, y)
     local l2, c2, snap_type = table.unpack(self.mouse_selecting)
     if snap_type == "block" then
+      -- each line's columns are found from the x positions of the anchor and the
+      -- mouse, so a short line (or tabs) under the mouse doesn't skew the block
+      local ox = self:get_line_screen_position(1)
+      local ax, mx = self:get_col_x_offset(l2, c2), x - ox
       if l1 > l2 then l1, l2 = l2, l1 end
       self.doc.selections = { }
       for i = l1, l2 do
-        self.doc:set_selections(i - l1 + 1, i, math.min(c1, #self.doc.lines[i]), i, math.min(c2, #self.doc.lines[i]))
+        self.doc:set_selections(i - l1 + 1, i, self:get_x_offset_col(i, mx), i, self:get_x_offset_col(i, ax))
       end
     else
       if snap_type then
