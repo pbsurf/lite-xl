@@ -84,6 +84,14 @@
       "path": "addons/plugins/highlight_selection.lua"
     },
     {
+      "id": "search_ui",
+      "description": "Search and replace interface using Widgets (lite-xl-plugins 6e4aa64).",
+      "version": "0.1",
+      "mod_version": "3",
+      "path": "addons/plugins/search_ui.lua",
+      "dependencies": { "widget": {} }
+    },
+    {
       "id": "nerdicons",
       "description": "File icons for TreeView and tabs from Nerd Font symbols (lite-xl-plugins 6e4aa64); tab icons no longer cover truncated titles; icon colors adjusted for contrast.",
       "version": "1.2.4",
