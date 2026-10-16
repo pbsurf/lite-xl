@@ -21,6 +21,9 @@ config.plugins.autocomplete = common.merge({
   max_symbols = 4000,
   -- Font size of the description box
   desc_font_size = 12,
+  -- Open the popup with symbols from open documents and syntaxes while typing;
+  -- when false, only completions a plugin provides (e.g. LSP) open automatically
+  symbols_on_typing = true,
   -- The config specification used by gui generators
   config_spec = {
     name = "Autocomplete",
@@ -67,6 +70,14 @@ config.plugins.autocomplete = common.merge({
       type = "number",
       default = 12,
       min = 8
+    },
+    {
+      label = "Symbols While Typing",
+      description = "Show symbols from open documents and syntaxes while typing. "
+        .. "When off, only completions from plugins like LSP pop up automatically.",
+      path = "symbols_on_typing",
+      type = "toggle",
+      default = true
     }
   }
 }, config.plugins.autocomplete)
@@ -216,6 +227,9 @@ local suggestions_offset = 1
 local suggestions_idx = 1
 local suggestions = {}
 local last_line, last_col
+-- symbols were asked for with autocomplete:open-symbols: keep showing them
+-- while typing the symbol, whatever symbols_on_typing and min_len say
+local symbols_requested = false
 
 
 local function reset_suggestions()
@@ -224,6 +238,7 @@ local function reset_suggestions()
   suggestions = {}
 
   triggered_manually = false
+  symbols_requested = false
 
   local doc = core.active_view.doc
   if autocomplete.on_close then
@@ -533,7 +548,10 @@ local function show_autocomplete()
     -- update partial symbol and suggestions
     partial = get_partial_symbol()
 
-    if #partial >= config.plugins.autocomplete.min_len or triggered_manually then
+    -- partial is still updated when symbols aren't shown: LSP's can_complete uses it
+    local min_len = config.plugins.autocomplete.min_len
+    if triggered_manually or (symbols_requested and #partial > 0)
+        or (config.plugins.autocomplete.symbols_on_typing and #partial >= min_len) then
       update_suggestions()
 
       if not triggered_manually then
@@ -665,6 +683,19 @@ local function predicate()
   return active_docview and #suggestions > 0, active_docview
 end
 
+command.add(get_active_view, {
+  -- symbols on demand, e.g. when symbols_on_typing is off (lsp:complete takes
+  -- ctrl+space first where a language server is open)
+  ["autocomplete:open-symbols"] = function()
+    local av = get_active_view()
+    reset_suggestions()
+    symbols_requested = true
+    partial = get_partial_symbol()
+    last_line, last_col = av.doc:get_selection()
+    update_suggestions()
+  end,
+})
+
 command.add(predicate, {
   ["autocomplete:complete"] = function(dv)
     local doc = dv.doc
@@ -737,6 +768,7 @@ keymap.add {
   ["up"]     = "autocomplete:previous",
   ["down"]   = "autocomplete:next",
   ["escape"] = "autocomplete:cancel",
+  ["ctrl+space"] = "autocomplete:open-symbols",
 }
 
 
