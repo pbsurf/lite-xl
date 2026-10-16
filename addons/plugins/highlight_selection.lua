@@ -114,13 +114,16 @@ function DocView:get_line_marks(line)
     color = { s[1], s[2], s[3], (s[4] or 255) / 2 }
   end
   local text = self.doc.lines[line]
-  local col = 1
+  -- first in the list, drawn under other plugins' marks (e.g. search matches,
+  -- which usually include these)
+  local col, n = 1, 1
   while true do
     local s, e = text:find(needle.text, col, true)
     if not s then break end
     if (not needle.whole_word or is_whole_word(text, s, e + 1))
       and not is_selected(self.doc, line, s, e + 1) then
-      table.insert(marks, { s, e + 1, color })
+      table.insert(marks, n, { s, e + 1, color })
+      n = n + 1
     end
     col = e + 1
   end

@@ -9,6 +9,7 @@ local core = require "core"
 local config = require "core.config"
 local common = require "core.common"
 local command = require "core.command"
+local style = require "core.style"
 local keymap = require "core.keymap"
 local search = require "core.doc.search"
 local projectsearch = require "plugins.projectsearch"
@@ -26,9 +27,11 @@ local FilePicker = require "libraries.widget.filepicker"
 ---@class config.plugins.search_ui
 ---@field replace_core_find boolean
 ---@field position "right" | "bottom"
+---@field highlight_all boolean
 config.plugins.search_ui = common.merge({
   replace_core_find = true,
   position = "bottom",
+  highlight_all = true,
   config_spec = {
     name = "Search User Interface",
     {
@@ -49,6 +52,13 @@ config.plugins.search_ui = common.merge({
         { "Right", "right" },
         { "Bottom", "bottom" }
       }
+    },
+    {
+      label = "Highlight All",
+      description = "Mark every match in the file while the search pane is shown.",
+      path = "highlight_all",
+      type = "toggle",
+      default = true
     }
   }
 }, config.plugins.search_ui)
@@ -130,6 +140,12 @@ regexcheck:set_tooltip("Treat search text as a regular expression")
 local replaceinselection = CheckBox(widget, "Replace in Selection")
 replaceinselection:set_position(10, regexcheck:get_bottom() + 10)
 replaceinselection:set_tooltip("Perform replace only on selected text")
+
+---@type widget.checkbox
+local highlightall = CheckBox(widget, "Highlight All")
+highlightall:set_position(10, replaceinselection:get_bottom() + 10)
+highlightall:set_tooltip("Mark every match in the file")
+highlightall:set_checked(config.plugins.search_ui.highlight_all)
 
 ---@type widget.selectbox
 local scope = SelectBox(widget, "scope")
@@ -321,6 +337,7 @@ local function toggle_scope(idx, not_set)
     replace:show()
     patterncheck:show()
     replaceinselection:show()
+    highlightall:show()
     findproject:hide()
     filepicker:hide()
 
@@ -336,6 +353,7 @@ local function toggle_scope(idx, not_set)
     replace:hide()
     patterncheck:hide()
     replaceinselection:hide()
+    highlightall:hide()
     findproject:show()
     filepicker:show()
 
@@ -608,6 +626,99 @@ function findprev:on_click() find(true) end
 function findproject:on_click() project_search() end
 function replace:on_click() find_replace() end
 
+function highlightall:on_checked(checked)
+  config.plugins.search_ui.highlight_all = checked
+  core.redraw = true
+end
+
+--------------------------------------------------------------------------------
+-- Highlight all matches (DocView line marks)
+--------------------------------------------------------------------------------
+-- A function returning a line's matches as a list of { col1, col2 (exclusive) }
+-- for the current search text and options; nil if there's nothing to find
+local matcher_key, matcher = nil, nil
+local function get_matcher()
+  local text = findtext:get_text()
+  local no_case = insensitive:is_checked()
+  local use_pattern = patterncheck:is_checked()
+  local use_regex = regexcheck:is_checked()
+  local key = table.concat({ text, tostring(no_case), tostring(use_pattern),
+    tostring(use_regex) }, "\0")
+  if key == matcher_key then return matcher end
+  matcher_key, matcher = key, nil
+  if text == "" then return nil end
+
+  if use_regex then
+    local re = regex.compile(text, no_case and "im" or "m")
+    if not re then return nil end
+    matcher = function(line_text)
+      local found, col = {}, 1
+      while col <= #line_text do
+        local s, e = re:cmatch(line_text, col)
+        if not s then break end
+        if e > s then table.insert(found, { s, e }) end
+        col = math.max(e, s + 1)
+      end
+      return found
+    end
+  else
+    local plain = not use_pattern
+    -- lower-case without changing byte offsets (ulower may, for some text)
+    local function lower(str)
+      local lowered = str:ulower()
+      return #lowered == #str and lowered or str:lower()
+    end
+    if no_case and plain then text = lower(text) end
+    if use_pattern and not pcall(string.find, "", text) then return nil end
+    matcher = function(line_text)
+      if no_case and plain then line_text = lower(line_text) end
+      local found, col = {}, 1
+      while col <= #line_text do
+        local s, e = line_text:find(text, col, plain)
+        if not s then break end
+        if e >= s then table.insert(found, { s, e + 1 }) end
+        col = math.max(e + 1, s + 1)
+      end
+      return found
+    end
+  end
+  return matcher
+end
+
+local function is_selected(doc, line, col1, col2)
+  for _, l1, c1, l2, c2 in doc:get_selections(true) do
+    if l1 == line and l2 == line and c1 == col1 and c2 == col2 then
+      return true
+    end
+  end
+  return false
+end
+
+local get_line_marks = DocView.get_line_marks
+function DocView:get_line_marks(line)
+  local marks = get_line_marks(self, line)
+  if
+    not highlightall:is_checked() or not widget:is_visible()
+    or scope:get_selected() ~= 1 or self:is(CommandView)
+    or not doc_view or self.doc ~= doc_view.doc
+  then
+    return marks
+  end
+  local match = get_matcher()
+  if not match then return marks end
+  local color = style.search_match
+  if not color then
+    local a = style.accent
+    color = { a[1], a[2], a[3], 80 }
+  end
+  for _, m in ipairs(match(self.doc.lines[line])) do
+    if not is_selected(self.doc, line, m[1], m[2]) then
+      table.insert(marks, { m[1], m[2], color })
+    end
+  end
+  return marks
+end
+
 ---@param self widget
 local function update_size(self)
   if config.plugins.search_ui.position == "right" then
@@ -656,7 +767,8 @@ local function update_right_positioning(self)
     patterncheck:set_position(10, insensitive:get_bottom() + 10)
     regexcheck:set_position(10, patterncheck:get_bottom() + 10)
     replaceinselection:set_position(10, regexcheck:get_bottom() + 10)
-    scope:set_position(10, replaceinselection:get_bottom() + 10)
+    highlightall:set_position(10, replaceinselection:get_bottom() + 10)
+    scope:set_position(10, highlightall:get_bottom() + 10)
   else
     regexcheck:set_position(10, insensitive:get_bottom() + 10)
     scope:set_position(10, regexcheck:get_bottom() + 10)
@@ -700,6 +812,7 @@ local function update_bottom_positioning(self)
     regexcheck:set_position(replaceinselection:get_position().x - 10 - regexcheck:get_width(), 10)
     patterncheck:set_position(regexcheck:get_position().x - 10  - patterncheck:get_width(), 10)
     insensitive:set_position(patterncheck:get_position().x - 10 - insensitive:get_width(), 10)
+    highlightall:set_position(insensitive:get_position().x - 10 - highlightall:get_width(), 10)
     line:set_position(0, status:get_bottom() + 10)
   else
     label:show()
