@@ -273,11 +273,7 @@ function TreeView:draw_tooltip()
     x = x - w -- span left instead
   end
 
-  local border = style.divider_size
-  local bx, by = x - border, y - border
-  local bw, bh = w + 2 * border, h + 2 * border
-  renderer.draw_rect(bx, by, bw, bh, replace_alpha(style.popup_border, self.tooltip.alpha))
-  renderer.draw_rect(x, y, w, h, replace_alpha(style.popup_background, self.tooltip.alpha))
+  common.draw_popup_box(x, y, w, h, self.tooltip.alpha / 255)
   common.draw_text(style.font, replace_alpha(style.text, self.tooltip.alpha), text, "center", x, y, w, h)
 end
 

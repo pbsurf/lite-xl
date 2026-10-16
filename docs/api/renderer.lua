@@ -176,6 +176,20 @@ function renderer.draw_path(path, color, stroke_width) end
 function renderer.draw_glyph(font, char, x, y, width, height, color) end
 
 ---
+---Draw the shadow of a box: the box blurred with a Gaussian, reaching `blur`
+---beyond it (3 sigma), in the color (its alpha is the shadow's darkest). The
+---box inset by `blur` is left out: draw the box (or one offset from it by less
+---than `blur`) over it.
+---
+---@param x number
+---@param y number
+---@param width number
+---@param height number
+---@param blur number
+---@param color renderer.color
+function renderer.draw_shadow(x, y, width, height, blur, color) end
+
+---
 ---Draw text and return the x coordinate where the text finished drawing.
 ---
 ---@param font renderer.font

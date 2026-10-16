@@ -46,6 +46,9 @@ void ren_draw_rect(RenSurface *rs, RenRect rect, RenColor color);
 void ren_draw_path(RenSurface *rs, const char *cmds, int ncmds, const float *coords, float stroke_width, RenColor color);
 /* fills the glyph's outline, scaled and centered to fit the rect */
 void ren_draw_glyph(RenSurface *rs, RenFont **fonts, unsigned codepoint, float x, float y, float w, float h, RenColor color);
+/* the shadow of the box: it blurred, reaching blur beyond it (3 sigma); the box
+** inset by blur is left out, for a box drawn over it */
+void ren_draw_shadow(RenSurface *rs, float x, float y, float w, float h, float blur, RenColor color);
 unsigned ren_utf8_codepoint(const char *text, size_t len);
 
 int ren_init(SDL_Window *win);

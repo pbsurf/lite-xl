@@ -90,9 +90,7 @@ Node.tab_buttons.menu = {
 function menu:draw_context_menu()
   if not self.items then return end
   local bx, by, bw, bh = self.position.x, self.position.y, self.items.width, self.height
-  local border = style.divider_size
-  renderer.draw_rect(bx - border, by - border, bw + border * 2, bh + border * 2, style.popup_border)
-  renderer.draw_rect(bx, by, bw, bh, style.popup_background)
+  common.draw_popup_box(bx, by, bw, bh)
   for i, item, x, y, w, h in self:each_item() do
     if i == self.selected then
       renderer.draw_rect(x, y, w, h, style.selection)

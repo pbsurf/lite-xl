@@ -14,6 +14,7 @@ style.divider = { common.color "#e8e8e8" }
 -- and, by the border, from the editor (#ffffff)
 style.popup_background = { common.color "#ffffff" }
 style.popup_border = { common.color "#b4b4b4" }
+style.popup_shadow = { common.color "rgba(0, 0, 0, 0.35)" }
 style.scrollbar = { common.color "#d0d0d0" }
 style.scrollbar2 = { common.color "#b0b0b0" }
 -- summer doesn't set this, so it would keep default's dark track

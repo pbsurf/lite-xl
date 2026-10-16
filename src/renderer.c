@@ -913,6 +913,54 @@ void ren_draw_path(RenSurface *rs, const char *cmds, int ncmds, const float *coo
   path_render(rs, &outline, color);
 }
 
+// A box blurred with a Gaussian of sigma = blur / 3 has the closed form
+// A * Fx(x) * Fy(y), F the difference of two erf: one erf pair per column and per
+// row, then a multiply and a blend per pixel. Only the clip rect's part is drawn,
+// and the box inset by blur (fully shadowed, under the box drawn over it) is
+// skipped, so a popup's shadow costs about its perimeter times 2 * blur pixels.
+void ren_draw_shadow(RenSurface *rs, float x, float y, float w, float h, float blur, RenColor color) {
+  if (color.a == 0 || w <= 0 || h <= 0 || blur <= 0) return;
+  const int s = rs->scale;
+  x *= s; y *= s; w *= s; h *= s; blur *= s;
+  PathTarget t = { rs->surface, SDL_GetPixelFormatDetails(rs->surface->format), {0}, color, false };
+  SDL_GetSurfaceClipRect(rs->surface, &t.clip);
+  int x1 = (int)floorf(x - blur), x2 = (int)ceilf(x + w + blur);
+  int y1 = (int)floorf(y - blur), y2 = (int)ceilf(y + h + blur);
+  if (x1 < t.clip.x) x1 = t.clip.x;
+  if (y1 < t.clip.y) y1 = t.clip.y;
+  if (x2 > t.clip.x + t.clip.w) x2 = t.clip.x + t.clip.w;
+  if (y2 > t.clip.y + t.clip.h) y2 = t.clip.y + t.clip.h;
+  if (x1 >= x2 || y1 >= y2) return;
+  // the skipped inside, in pixels wholly within it
+  int hx1 = (int)ceilf(x + blur), hx2 = (int)floorf(x + w - blur);
+  int hy1 = (int)ceilf(y + blur), hy2 = (int)floorf(y + h - blur);
+  float *fx = malloc(sizeof(float) * ((x2 - x1) + (y2 - y1)));
+  if (!fx) return;
+  float *fy = fx + (x2 - x1);
+  const float k = 3.0f / (blur * sqrtf(2.0f));  // 1 / (sigma * sqrt(2))
+  for (int i = x1; i < x2; i++) {
+    float px = i + 0.5f;
+    fx[i - x1] = 0.5f * (erff((px - x) * k) - erff((px - x - w) * k));
+  }
+  for (int j = y1; j < y2; j++) {
+    float py = j + 0.5f;
+    fy[j - y1] = 0.5f * (erff((py - y) * k) - erff((py - y - h) * k));
+  }
+  const float amax = color.a * 255.0f;  // path_blend's alpha is 0..65025
+  SDL_Surface *surface = rs->surface;
+  for (int j = y1; j < y2; j++) {
+    uint32_t *row = (uint32_t*)((uint8_t*)surface->pixels + j * surface->pitch);
+    bool in_hole_rows = j >= hy1 && j < hy2;
+    float ay = fy[j - y1] * amax;
+    for (int i = x1; i < x2; i++) {
+      if (in_hole_rows && i >= hx1 && i < hx2) { i = hx2 - 1; continue; }
+      unsigned a = (unsigned)(fx[i - x1] * ay + 0.5f);
+      if (a > 0) path_blend(row + i, &t, a);
+    }
+  }
+  free(fx);
+}
+
 // The glyph's unhinted outline, scaled to fit its ink box in the rect (keeping its
 // aspect ratio) and centered there, filled like a path. The first font of the group
 // that has the glyph is used; synthesized bold/italic are not applied.

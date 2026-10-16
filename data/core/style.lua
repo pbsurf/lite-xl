@@ -52,7 +52,8 @@ style.log = {}
 -- Popups (menus, tooltips, completion and hover lists) float over both the
 -- editor and the panels, so a color scheme may give them their own colors:
 -- style.popup_background and style.popup_border (drawn style.divider_size
--- wide). Without them, background3 and divider are used.
+-- wide). Without them, background3 and divider are used. style.popup_shadow,
+-- if set, is the color of their shadow at its darkest (common.draw_popup_box).
 local popup_fallbacks = { popup_background = "background3", popup_border = "divider" }
 setmetatable(style, {
   __index = function(t, k)

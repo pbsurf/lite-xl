@@ -607,20 +607,11 @@ function StatusView:draw_item_tooltip(item)
       x = self.size.x - w - (style.padding.x * 3)
     end
 
-    local bw = style.divider_size
-    renderer.draw_rect(
-      x + style.padding.x - bw,
-      self.position.y - h - (style.padding.y * 2) - bw,
-      w + (style.padding.x * 2) + bw * 2,
-      h + (style.padding.y * 2) + bw * 2,
-      style.popup_border
-    )
-    renderer.draw_rect(
+    common.draw_popup_box(
       x + style.padding.x,
       self.position.y - h - (style.padding.y * 2),
       w + (style.padding.x * 2),
-      h + (style.padding.y * 2),
-      style.popup_background
+      h + (style.padding.y * 2)
     )
 
     renderer.draw_text(

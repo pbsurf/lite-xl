@@ -364,6 +364,48 @@ function common.draw_text(font, color, text, align, x,y,w,h)
 end
 
 
+local function faded(color, alpha)
+  if not alpha or alpha >= 1 then return color end
+  return { color[1], color[2], color[3], (color[4] or 255) * alpha }
+end
+
+
+---Draws the shadow of a popup's box (style.popup_shadow, if the color scheme
+---has one). common.draw_popup_box draws it too; draw it separately for popups
+---shown side by side, so neither one's shadow falls on the other.
+---@param x number
+---@param y number
+---@param w number
+---@param h number
+---@param alpha? number 0 to 1, multiplying the color's alpha (for fading in)
+function common.draw_popup_shadow(x, y, w, h, alpha)
+  local style = require "core.style"
+  if not style.popup_shadow then return end
+  local b = style.divider_size
+  -- light from above: offset down, so it shows most below the box
+  renderer.draw_shadow(x - b, y - b + 3 * SCALE, w + b * 2, h + b * 2, 14 * SCALE,
+    faded(style.popup_shadow, alpha))
+end
+
+
+---Draws a popup's box (menus, tooltips, completion lists): its shadow
+---(common.draw_popup_shadow), a border outside the box (style.popup_border,
+---style.divider_size wide) and the background (style.popup_background).
+---@param x number
+---@param y number
+---@param w number
+---@param h number
+---@param alpha? number 0 to 1, multiplying the colors' alpha (for fading in)
+---@param shadow? boolean false to leave out the shadow (drawn separately)
+function common.draw_popup_box(x, y, w, h, alpha, shadow)
+  local style = require "core.style"
+  if shadow ~= false then common.draw_popup_shadow(x, y, w, h, alpha) end
+  local b = style.divider_size
+  renderer.draw_rect(x - b, y - b, w + b * 2, h + b * 2, faded(style.popup_border, alpha))
+  renderer.draw_rect(x, y, w, h, faded(style.popup_background, alpha))
+end
+
+
 ---Prints the execution time of a function.
 ---
 ---The execution time and percentage of frame time

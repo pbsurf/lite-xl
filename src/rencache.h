@@ -9,6 +9,7 @@ void  rencache_show_debug(bool enable);
 void  rencache_set_clip_rect(RenWindow *window_renderer, RenRect rect);
 void  rencache_draw_rect(RenWindow *window_renderer, RenRect rect, RenColor color);
 void  rencache_draw_path(RenWindow *window_renderer, const char *cmds, int ncmds, const float *coords, int ncoords, float stroke_width, RenColor color);
+void  rencache_draw_shadow(RenWindow *window_renderer, float x, float y, float w, float h, float blur, RenColor color);
 void  rencache_draw_glyph(RenWindow *window_renderer, RenFont **fonts, unsigned codepoint, float x, float y, float w, float h, RenColor color);
 double rencache_draw_text(RenWindow *window_renderer, RenFont **font, const char *text, size_t len, double x, int y, RenColor color);
 void  rencache_invalidate(void);

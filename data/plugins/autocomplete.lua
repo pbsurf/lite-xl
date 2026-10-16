@@ -379,7 +379,8 @@ local previous_scale = SCALE
 local desc_font = style.code_font:copy(
   config.plugins.autocomplete.desc_font_size * SCALE
 )
-local function draw_description_box(text, av, sx, sy, sw, sh)
+-- the description box's position, size and lines, beside the suggestions box
+local function layout_description_box(text, av, sx, sy, sw)
   if previous_scale ~= SCALE then
     desc_font = style.code_font:copy(
       config.plugins.autocomplete.desc_font_size * SCALE
@@ -425,29 +426,23 @@ local function draw_description_box(text, av, sx, sy, sw, sh)
   end
 
   local height = #lines * font:get_height()
+  return {
+    x = x, y = sy,
+    w = width + style.padding.x * 2, h = height + style.padding.y * 2,
+    lines = lines, font = font
+  }
+end
 
-  -- draw background rect
-  local bw = style.divider_size
-  renderer.draw_rect(
-    x - bw,
-    sy - bw,
-    width + style.padding.x * 2 + bw * 2,
-    height + style.padding.y * 2 + bw * 2,
-    style.popup_border
-  )
-  renderer.draw_rect(
-    x,
-    sy,
-    width + style.padding.x * 2,
-    height + style.padding.y * 2,
-    style.popup_background
-  )
+-- its shadow is drawn with the suggestions box's
+local function draw_description_box(box)
+  common.draw_popup_box(box.x, box.y, box.w, box.h, nil, false)
 
-  -- draw text
-  for _, line in pairs(lines) do
+  local lh = box.font:get_height()
+  local y = box.y + style.padding.y
+  for _, line in pairs(box.lines) do
     common.draw_text(
-      font, style.text, line, "left",
-      x + style.padding.x, y, width, lh
+      box.font, style.text, line, "left",
+      box.x + style.padding.x, y, box.w - style.padding.x * 2, lh
     )
     y = y + lh
   end
@@ -463,8 +458,20 @@ local function draw_suggestions_box(av)
   -- draw background rect
   local rx, ry, rw, rh = get_suggestions_rect(av)
   local bw = style.divider_size
-  renderer.draw_rect(rx - bw, ry - bw, rw + bw * 2, rh + bw * 2, style.popup_border)
-  renderer.draw_rect(rx, ry, rw, rh, style.popup_background)
+
+  -- the selected suggestion's description, beside the box (onhover may fill it)
+  local selected = suggestions[suggestions_idx]
+  if selected and selected.onhover then
+    selected.onhover(suggestions_idx, selected)
+    selected.onhover = nil
+  end
+  local desc = selected and selected.desc and #selected.desc > 0
+    and layout_description_box(selected.desc, av, rx, ry, rw)
+
+  -- both boxes float at the same height: their shadows go under both
+  common.draw_popup_shadow(rx, ry, rw, rh)
+  if desc then common.draw_popup_shadow(desc.x, desc.y, desc.w, desc.h) end
+  common.draw_popup_box(rx, ry, rw, rh, nil, false)
 
   -- draw text
   local font = av:get_font()
@@ -498,15 +505,6 @@ local function draw_suggestions_box(av)
       common.draw_text(style.font, color, s.info, "right", rx, y, rw - style.padding.x, lh)
     end
     y = y + lh
-    if suggestions_idx == i then
-      if s.onhover then
-        s.onhover(suggestions_idx, s)
-        s.onhover = nil
-      end
-      if s.desc and #s.desc > 0 then
-        draw_description_box(s.desc, av, rx, ry, rw, rh)
-      end
-    end
   end
 
   renderer.draw_rect(rx, y, rw, bw, style.popup_border)
@@ -525,6 +523,8 @@ local function draw_suggestions_box(av)
     "right",
     rx, y, rw - style.padding.x, lh
   )
+
+  if desc then draw_description_box(desc) end
 end
 
 local function show_autocomplete()

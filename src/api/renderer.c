@@ -431,6 +431,15 @@ static int f_draw_glyph(lua_State *L) {
   return 0;
 }
 
+static int f_draw_shadow(lua_State *L) {
+  float x = luaL_checknumber(L, 1), y = luaL_checknumber(L, 2);
+  float w = luaL_checknumber(L, 3), h = luaL_checknumber(L, 4);
+  float blur = luaL_checknumber(L, 5);
+  RenColor color = checkcolor(L, 6, 255);
+  rencache_draw_shadow(&window_renderer, x, y, w, h, blur, color);
+  return 0;
+}
+
 static const luaL_Reg lib[] = {
   { "show_debug",         f_show_debug         },
   { "get_size",           f_get_size           },
@@ -441,6 +450,7 @@ static const luaL_Reg lib[] = {
   { "draw_text",          f_draw_text          },
   { "draw_path",          f_draw_path          },
   { "draw_glyph",         f_draw_glyph         },
+  { "draw_shadow",        f_draw_shadow        },
   { NULL,                 NULL                 }
 };
 

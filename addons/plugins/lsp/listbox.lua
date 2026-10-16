@@ -187,17 +187,7 @@ local function draw_listbox(av)
   -- draw background rect
   local rx, ry, rw, rh = get_suggestions_rect(av)
 
-  -- draw border
-  local border_width = style.divider_size
-  renderer.draw_rect(
-    rx - border_width,
-    ry - border_width,
-    rw + (border_width * 2),
-    rh + (border_width * 2),
-    style.popup_border
-  )
-
-  renderer.draw_rect(rx, ry, rw, rh, style.popup_background)
+  common.draw_popup_box(rx, ry, rw, rh)
 
   local padding_x = style.padding.x
   local padding_y = style.padding.y

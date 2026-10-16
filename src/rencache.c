@@ -34,7 +34,7 @@
 #define CMD_BUF_INIT_SIZE (1024 * 512)
 #define COMMAND_BARE_SIZE offsetof(Command, command)
 
-enum CommandType { SET_CLIP, DRAW_TEXT, DRAW_RECT, DRAW_PATH, DRAW_GLYPH };
+enum CommandType { SET_CLIP, DRAW_TEXT, DRAW_RECT, DRAW_PATH, DRAW_GLYPH, DRAW_SHADOW };
 
 typedef struct {
   enum CommandType type;
@@ -78,6 +78,12 @@ typedef struct {
   unsigned codepoint;
   float x, y, w, h;
 } DrawGlyphCommand;
+
+typedef struct {
+  RenRect rect;  /* bounding box */
+  RenColor color;
+  float x, y, w, h, blur;
+} DrawShadowCommand;
 
 static unsigned cells_buf1[CELLS_X * CELLS_Y];
 static unsigned cells_buf2[CELLS_X * CELLS_Y];
@@ -275,6 +281,20 @@ void rencache_draw_glyph(RenWindow *window_renderer, RenFont **fonts, unsigned c
 }
 
 
+void rencache_draw_shadow(RenWindow *window_renderer, float x, float y, float w, float h, float blur, RenColor color) {
+  if (w <= 0 || h <= 0 || blur <= 0 || color.a == 0) { return; }
+  int rx1 = (int)floorf(x - blur), ry1 = (int)floorf(y - blur);
+  RenRect rect = { rx1, ry1, (int)ceilf(x + w + blur) - rx1, (int)ceilf(y + h + blur) - ry1 };
+  if (!rects_overlap(last_clip_rect, rect)) { return; }
+  DrawShadowCommand *cmd = push_command(window_renderer, DRAW_SHADOW, sizeof(DrawShadowCommand));
+  if (cmd) {
+    cmd->rect = rect;
+    cmd->color = color;
+    cmd->x = x; cmd->y = y; cmd->w = w; cmd->h = h; cmd->blur = blur;
+  }
+}
+
+
 void rencache_invalidate(void) {
   memset(cells_prev, 0xff, sizeof(cells_buf1));
 }
@@ -376,6 +396,7 @@ void rencache_end_frame(RenWindow *window_renderer) {
       DrawTextCommand *tcmd = (DrawTextCommand*)&cmd->command;
       DrawPathCommand *pcmd = (DrawPathCommand*)&cmd->command;
       DrawGlyphCommand *gcmd = (DrawGlyphCommand*)&cmd->command;
+      DrawShadowCommand *scmd = (DrawShadowCommand*)&cmd->command;
       switch (cmd->type) {
         case SET_CLIP:
           ren_set_clip_rect(window_renderer, intersect_rects(ccmd->rect, r));
@@ -393,6 +414,9 @@ void rencache_end_frame(RenWindow *window_renderer) {
           break;
         case DRAW_GLYPH:
           ren_draw_glyph(&rs, gcmd->fonts, gcmd->codepoint, gcmd->x, gcmd->y, gcmd->w, gcmd->h, gcmd->color);
+          break;
+        case DRAW_SHADOW:
+          ren_draw_shadow(&rs, scmd->x, scmd->y, scmd->w, scmd->h, scmd->blur, scmd->color);
           break;
       }
     }
