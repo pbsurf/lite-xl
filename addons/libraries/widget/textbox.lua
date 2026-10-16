@@ -78,12 +78,21 @@ function TextView:draw_line_highlight()
 end
 
 -- the placeholder is the doc's text while shown: draw it dimmed, so it
--- doesn't look typed
+-- doesn't look typed; a focused empty box shows it too, behind the caret,
+-- until something is typed
 function TextView:draw_line_text(line, x, y)
-  if not (self.textbox and self.textbox.placeholder_active) then
+  local textbox = self.textbox
+  if not textbox then
     return TextView.super.draw_line_text(self, line, x, y)
   end
-  local text = self.doc.lines[line]:gsub("\n$", "")
+  local text
+  if textbox.placeholder_active then
+    text = self.doc.lines[line]:gsub("\n$", "")
+  elseif self.doc.lines[line] == "\n" and #self.doc.lines == 1 then
+    text = textbox.placeholder
+  else
+    return TextView.super.draw_line_text(self, line, x, y)
+  end
   renderer.draw_text(self:get_font(), text, x, y + self:get_line_text_y_offset(), style.dim)
   return self:get_line_height()
 end
