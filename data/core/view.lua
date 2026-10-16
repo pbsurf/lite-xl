@@ -106,6 +106,13 @@ function View:get_name_style(font)
   return font
 end
 
+---Whether this view is transient, like a preview tab: it isn't restored with the
+---workspace.
+---@return boolean
+function View:is_transient()
+  return false
+end
+
 
 ---@return number
 function View:get_scrollable_size()

@@ -138,7 +138,7 @@ local function save_node(node)
   if node.type == "leaf" then
     res.views = {}
     for _, view in ipairs(node.views) do
-      local t = save_view(view)
+      local t = not view:is_transient() and save_view(view)
       if t then
         table.insert(res.views, t)
         if node.active_view == view then
