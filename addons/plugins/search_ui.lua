@@ -88,12 +88,12 @@ togglereplace:set_icon("+")
 togglereplace:set_position(10, line:get_bottom() + 10)
 
 ---@type widget.textbox
-local findtext = TextBox(widget, "", "search...")
+local findtext = TextBox(widget, "", "search...  (↑↓ history)")
 findtext:set_position(10, line:get_bottom() + 10)
 findtext:set_tooltip("Text to search")
 
 ---@type widget.textbox
-local replacetext = TextBox(widget, "", "replacement...")
+local replacetext = TextBox(widget, "", "replacement...  (↑↓ history)")
 replacetext:set_position(10, findtext:get_bottom() + 10)
 replacetext:set_tooltip("Text to replace")
 
