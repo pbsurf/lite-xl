@@ -139,7 +139,7 @@ wholeword:set_tooltip("Match whole words only")
 ---@type widget.checkbox
 local patterncheck = CheckBox(widget, "Pattern")
 patterncheck:set_position(10, wholeword:get_bottom() + 10)
-patterncheck:set_tooltip("Treat search text as a lua pattern")
+patterncheck:set_tooltip("Treat search text as a lua pattern (always case sensitive)")
 
 ---@type widget.checkbox
 local regexcheck = CheckBox(widget, "Regex")
@@ -183,6 +183,11 @@ status:set_position(10, statusline:get_bottom() + 10)
 -- word character, the one beyond it mustn't be one
 local word_boundary = "(?:(?<!\\w)|(?!\\w))"
 
+-- plain text as a regex matching it
+local function escape_regex(text)
+  return (text:gsub("[^%w%s\128-\255]", "\\%0"))
+end
+
 ---The text to search for and how, from the find box and checkboxes. Whole
 ---word searches are regex searches: the text (escaped, unless Regex) between
 ---word boundaries.
@@ -193,7 +198,7 @@ local function search_query()
   local text = findtext:get_text()
   local use_pattern, use_regex = patterncheck:is_checked(), regexcheck:is_checked()
   if wholeword:is_checked() and text ~= "" then
-    if not use_regex then text = text:gsub("[^%w%s\128-\255]", "\\%0") end
+    if not use_regex then text = escape_regex(text) end
     text = word_boundary .. "(?:" .. text .. ")" .. word_boundary
     use_pattern, use_regex = false, true
   end
@@ -460,7 +465,8 @@ local function find(reverse)
   local query, use_pattern, use_regex = search_query()
   local opt = {
     wrap = true,
-    no_case = insensitive:is_checked(),
+    -- Lua patterns can't fold case (core would lowercase the pattern itself)
+    no_case = insensitive:is_checked() and not use_pattern,
     pattern = use_pattern,
     regex = use_regex,
     reverse = reverse
@@ -518,9 +524,14 @@ local function find_replace()
 
   local old, use_pattern, use_regex = search_query()
   local new = replacetext:get_text()
+  local no_case = insensitive:is_checked()
   remember_find()
   remember_replace()
-  -- a plain whole word search became a regex; keep its replacement literal
+  -- gsub can't ignore case: a plain case insensitive search becomes a regex
+  if no_case and not use_regex and not use_pattern then
+    old, use_regex = escape_regex(old), true
+  end
+  -- a plain search that became a regex: keep its replacement literal
   if use_regex and not regexcheck:is_checked() then
     new = new:gsub("\\", "\\\\"):gsub("%$", "$$")
   end
@@ -533,7 +544,7 @@ local function find_replace()
         return text:gsub(old, new)
       end
     end
-    local result, matches = regex.gsub(regex.compile(old, "m"), text, new)
+    local result, matches = regex.gsub(regex.compile(old, no_case and "im" or "m"), text, new)
     if type(matches) == "table" then
       return result, #matches
     end
