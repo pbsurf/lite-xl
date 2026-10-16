@@ -596,23 +596,54 @@ function DocView:draw_line_body(line, x, y)
     self:draw_line_highlight(x + self.scroll.x, y)
   end
 
-  -- draw selection if it overlaps this line
-  local lh = self:get_line_height()
-  for lidx, line1, col1, line2, col2 in self.doc:get_selections(true) do
-    if line >= line1 and line <= line2 then
-      local text = self.doc.lines[line]
-      if line1 ~= line then col1 = 1 end
-      if line2 ~= line then col2 = #text + 1 end
-      local x1 = x + self:get_col_x_offset(line, col1)
-      local x2 = x + self:get_col_x_offset(line, col2)
-      if x1 ~= x2 then
-        renderer.draw_rect(x1, y, x2 - x1, lh, style.selection)
-      end
-    end
-  end
+  self:draw_line_marks_and_selection(line, x, y)
 
   -- draw line's text
   return self:draw_line_text(line, x, y)
+end
+
+
+---Ranges of a line to mark with a background color (search matches,
+---occurrences of the selection, ...), drawn under the selection and the text.
+---Plugins wrap this and add theirs to the list the original returns.
+---@param line integer
+---@return { [1]: integer, [2]: integer, [3]: renderer.color }[] marks col1, col2 (exclusive), color
+function DocView:get_line_marks(line)
+  return {}
+end
+
+
+---Fills the background of columns col1 to col2 (exclusive) of a line.
+---@param line integer
+---@param col1 integer
+---@param col2 integer
+---@param x number the line's x, as passed to draw_line_body
+---@param y number the line's y, as passed to draw_line_body
+---@param color renderer.color
+function DocView:draw_line_range(line, col1, col2, x, y, color)
+  local x1 = x + self:get_col_x_offset(line, col1)
+  local x2 = x + self:get_col_x_offset(line, col2)
+  if x1 ~= x2 then
+    renderer.draw_rect(x1, y, x2 - x1, self:get_line_height(), color)
+  end
+end
+
+
+---Draws the line's marks (get_line_marks), then the selections overlapping it.
+---@param line integer
+---@param x number
+---@param y number
+function DocView:draw_line_marks_and_selection(line, x, y)
+  for _, mark in ipairs(self:get_line_marks(line)) do
+    self:draw_line_range(line, mark[1], mark[2], x, y, mark[3])
+  end
+  for lidx, line1, col1, line2, col2 in self.doc:get_selections(true) do
+    if line >= line1 and line <= line2 then
+      if line1 ~= line then col1 = 1 end
+      if line2 ~= line then col2 = #self.doc.lines[line] + 1 end
+      self:draw_line_range(line, col1, col2, x, y, style.selection)
+    end
+  end
 end
 
 

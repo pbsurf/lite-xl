@@ -481,32 +481,34 @@ function DocView:draw_line_text(line, x, y)
   return lh * count
 end
 
+-- a range may span several wrapped rows: fill its part of each
+local old_draw_line_range = DocView.draw_line_range
+function DocView:draw_line_range(line, col1, col2, x, y, color)
+  if not self.wrapped_settings then return old_draw_line_range(self, line, col1, col2, x, y, color) end
+  if col1 == col2 then return end
+  local lh = self:get_line_height()
+  local idx0 = get_line_idx_col_count(self, line)
+  local idx1 = get_line_idx_col_count(self, line, col1)
+  local idx2 = get_line_idx_col_count(self, line, col2)
+  local start = 0
+  for i = idx0, idx1 - 1 do start = start + get_idx_line_length(self, i, line) end
+  for i = idx1, idx2 do
+    local x1, x2 = x + (idx1 == i and self:get_col_x_offset(line, col1) or 0)
+    if idx2 == i then
+      x2 = x + self:get_col_x_offset(line, col2)
+    else
+      start = start + get_idx_line_length(self, i, line)
+      x2 = x + self:get_col_x_offset(line, start + 1, true)
+    end
+    renderer.draw_rect(x1, y + (i - idx0) * lh, x2 - x1, lh, color)
+  end
+end
+
 local old_draw_line_body = DocView.draw_line_body
 function DocView:draw_line_body(line, x, y)
   if not self.wrapped_settings then return old_draw_line_body(self, line, x, y) end
   local lh = self:get_line_height()
-  local idx0, _, count = get_line_idx_col_count(self, line)
-  for lidx, line1, col1, line2, col2 in self.doc:get_selections(true) do
-    if line >= line1 and line <= line2 then
-      if line1 ~= line then col1 = 1 end
-      if line2 ~= line then col2 = #self.doc.lines[line] + 1 end
-      if col1 ~= col2 then
-        local idx1, ncol1 = get_line_idx_col_count(self, line, col1)
-        local idx2, ncol2 = get_line_idx_col_count(self, line, col2)
-        local start = 0
-        for i = idx1, idx2 do
-          local x1, x2 = x + (idx1 == i and self:get_col_x_offset(line1, col1) or 0)
-          if idx2 == i then
-            x2 = x + self:get_col_x_offset(line, col2)
-          else
-            start = start + get_idx_line_length(self, i, line)
-            x2 = x + self:get_col_x_offset(line, start + 1, true)
-          end
-          renderer.draw_rect(x1, y + (i - idx0) * lh, x2 - x1, lh, style.selection)
-        end
-      end
-    end
-  end
+  local _, _, count = get_line_idx_col_count(self, line)
   local draw_highlight = nil
   for lidx, line1, col1, line2, col2 in self.doc:get_selections(true) do
     -- draw line highlight if caret is on this line
@@ -520,6 +522,7 @@ function DocView:draw_line_body(line, x, y)
       self:draw_line_highlight(x + self.scroll.x, y + lh * (i - 1))
     end
   end
+  self:draw_line_marks_and_selection(line, x, y)
   -- draw line's text
   return self:draw_line_text(line, x, y)
 end
