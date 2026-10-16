@@ -393,7 +393,7 @@ function DocView:on_mouse_moved(x, y, ...)
   elseif self.mouse_selecting then
     local l1, c1 = self:resolve_screen_position(x, y)
     local l2, c2, snap_type = table.unpack(self.mouse_selecting)
-    if keymap.modkeys["ctrl"] then
+    if snap_type == "block" then
       if l1 > l2 then l1, l2 = l2, l1 end
       self.doc.selections = { }
       for i = l1, l2 do

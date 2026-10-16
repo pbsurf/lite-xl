@@ -653,6 +653,11 @@ end, {
     set_cursor(dv, x, y, "lines")
   end,
 
+  -- dragging selects a rectangular block: one selection per line
+  ["doc:select-block"] = function(dv, x, y)
+    set_cursor(dv, x, y, "block")
+  end,
+
   ["doc:split-cursor"] = function(dv, x, y, clicks)
     local line, col = dv:resolve_screen_position(x, y)
     local removal_target = nil
@@ -666,7 +671,8 @@ end, {
     else
       dv.doc:add_selection(line, col, line, col)
     end
-    dv.mouse_selecting = { line, col, "set" }
+    -- as upstream, where dragging with ctrl held selected a block
+    dv.mouse_selecting = { line, col, "block" }
   end
 })
 
