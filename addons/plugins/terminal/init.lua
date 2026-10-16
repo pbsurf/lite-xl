@@ -1044,6 +1044,10 @@ for name in pairs(command.map) do
   if name:find("^terminal:") and not listed[name] then command.hidden[name] = true end
 end
 
+-- the workspace plugin saves a view whose class is a module, and recreates it by
+-- calling that module: so terminal tabs reopen (as new shells) with the project
+package.loaded["plugins.terminal.view"] = TerminalView
+
 return {
   class = TerminalView
 }
