@@ -82,6 +82,11 @@ label:set_position(10, 10)
 local line = Line(widget)
 line:set_position(0, label:get_bottom() + 10)
 
+---@type widget.button
+local togglereplace = Button(widget, "")
+togglereplace:set_icon("+")
+togglereplace:set_position(10, line:get_bottom() + 10)
+
 ---@type widget.textbox
 local findtext = TextBox(widget, "", "search...")
 findtext:set_position(10, line:get_bottom() + 10)
@@ -327,16 +332,57 @@ local function view_is_open(target_view)
   return found
 end
 
+local function set_shown(w, shown)
+  if shown then w:show() else w:hide() end
+end
+
+-- Whether the replace row (box, button, "Replace in Selection") is shown;
+-- find-replace:find hides it, find-replace:replace shows it, the chevron
+-- button left of the search box toggles it.
+local replace_shown = false
+
+local update_size
+
+local function set_replace_shown(shown)
+  local changed = shown ~= replace_shown
+  replace_shown = shown
+  togglereplace:set_icon(shown and "-" or "+")
+  local binding = keymap.get_binding("find-replace:replace")
+  togglereplace:set_tooltip((shown and "Hide Replace" or "Show Replace")
+    .. (binding and " (" .. binding .. ")" or ""))
+  if scope:get_selected() == 1 then
+    set_shown(replacetext, shown)
+    set_shown(replace, shown)
+    set_shown(replaceinselection, shown)
+  end
+  if not shown and widget.child_active == replacetext then
+    widget:swap_active_child(findtext)
+  end
+  -- fit the pane's height to what's shown: when hidden, the height it will
+  -- show at (prev_size, see Widget:hide); else once no animation is running
+  if changed and config.plugins.search_ui.position ~= "right"
+    and scope:get_selected() == 1
+  then
+    if not widget.visible and widget.prev_size.y > 0 then
+      local row = replacetext.size.y + 10
+      widget.prev_size.y = widget.prev_size.y + (shown and row or -row)
+    end
+    widget.relayout = true
+  end
+  core.redraw = true
+end
+
 local function toggle_scope(idx, not_set)
   if not not_set then scope:set_selected(idx) end
 
   if idx == 1 then
-    replacetext:show()
+    togglereplace:show()
+    set_shown(replacetext, replace_shown)
     findnext:show()
     findprev:show()
-    replace:show()
+    set_shown(replace, replace_shown)
     patterncheck:show()
-    replaceinselection:show()
+    set_shown(replaceinselection, replace_shown)
     highlightall:show()
     findproject:hide()
     filepicker:hide()
@@ -347,6 +393,7 @@ local function toggle_scope(idx, not_set)
       Results:clear()
     end
   else
+    togglereplace:hide()
     replacetext:hide()
     findnext:hide()
     findprev:hide()
@@ -625,6 +672,16 @@ function findnext:on_click() find(false) end
 function findprev:on_click() find(true) end
 function findproject:on_click() project_search() end
 function replace:on_click() find_replace() end
+function togglereplace:on_click() set_replace_shown(not replace_shown) end
+
+-- as wide for either chevron, so the search box doesn't move when toggled
+function togglereplace:update()
+  if not Button.update(self) then return false end
+  local icon_w = math.max(style.icon_font:get_width("+"), style.icon_font:get_width("-"))
+  self.size.x = self.padding.x * 2 - self.border.width * 2 + icon_w
+  return true
+end
+set_replace_shown(replace_shown)
 
 function highlightall:on_checked(checked)
   config.plugins.search_ui.highlight_all = checked
@@ -720,7 +777,7 @@ function DocView:get_line_marks(line)
 end
 
 ---@param self widget
-local function update_size(self)
+function update_size(self)
   if config.plugins.search_ui.position == "right" then
     if scope:get_selected() == 1 then
       if self.size.x < replace:get_right() + replace:get_width() / 2 then
@@ -746,16 +803,25 @@ local function update_right_positioning(self)
 
   label:set_position(10, 10)
   line:set_position(0, label:get_bottom() + 10)
-  findtext:set_position(10, line:get_bottom() + 10)
-  findtext.size.x = self.size.x - 20
+  local text_x = 10
+  if scope:get_selected() == 1 then
+    togglereplace:set_position(10, line:get_bottom() + 10)
+    text_x = togglereplace:get_right() + 5
+  end
+  findtext:set_position(text_x, line:get_bottom() + 10)
+  findtext.size.x = self.size.x - 10 - text_x
 
   if scope:get_selected() == 1 then
-    replacetext:set_position(10, findtext:get_bottom() + 10)
-    replacetext.size.x = self.size.x - 20
-    findprev:set_position(10, replacetext:get_bottom() + 10)
-    findnext:set_position(findprev:get_right() + 5, replacetext:get_bottom() + 10)
-    replace:set_position(findnext:get_right() + 5, replacetext:get_bottom() + 10)
-    line_options:set_position(0, replace:get_bottom() + 10)
+    local below = findtext
+    if replace_shown then
+      replacetext:set_position(text_x, findtext:get_bottom() + 10)
+      replacetext.size.x = findtext.size.x
+      below = replacetext
+    end
+    findprev:set_position(10, below:get_bottom() + 10)
+    findnext:set_position(findprev:get_right() + 5, below:get_bottom() + 10)
+    replace:set_position(findnext:get_right() + 5, below:get_bottom() + 10)
+    line_options:set_position(0, findnext:get_bottom() + 10)
   else
     findproject:set_position(10, findtext:get_bottom() + 10)
     replace:set_position(findproject:get_right() + 5, replacetext:get_bottom() + 10)
@@ -767,7 +833,8 @@ local function update_right_positioning(self)
     patterncheck:set_position(10, insensitive:get_bottom() + 10)
     regexcheck:set_position(10, patterncheck:get_bottom() + 10)
     replaceinselection:set_position(10, regexcheck:get_bottom() + 10)
-    highlightall:set_position(10, replaceinselection:get_bottom() + 10)
+    highlightall:set_position(10,
+      (replace_shown and replaceinselection or regexcheck):get_bottom() + 10)
     scope:set_position(10, highlightall:get_bottom() + 10)
   else
     regexcheck:set_position(10, insensitive:get_bottom() + 10)
@@ -809,7 +876,8 @@ local function update_bottom_positioning(self)
     status:show()
     status:set_position(10, 10)
     replaceinselection:set_position(self.size.x - replaceinselection:get_width() - 10, 10)
-    regexcheck:set_position(replaceinselection:get_position().x - 10 - regexcheck:get_width(), 10)
+    local right = replace_shown and replaceinselection:get_position().x or self.size.x
+    regexcheck:set_position(right - 10 - regexcheck:get_width(), 10)
     patterncheck:set_position(regexcheck:get_position().x - 10  - patterncheck:get_width(), 10)
     insensitive:set_position(patterncheck:get_position().x - 10 - insensitive:get_width(), 10)
     highlightall:set_position(insensitive:get_position().x - 10 - highlightall:get_width(), 10)
@@ -825,11 +893,13 @@ local function update_bottom_positioning(self)
   end
 
   if scope:get_selected() == 1 then
-    findtext:set_position(10, line:get_bottom() + 10)
-    findtext.size.x = self.size.x - 40 - findprev:get_width() - findnext:get_width()
+    togglereplace:set_position(10, line:get_bottom() + 10)
+    local text_x = togglereplace:get_right() + 10
+    findtext:set_position(text_x, line:get_bottom() + 10)
+    findtext.size.x = self.size.x - 30 - text_x - findprev:get_width() - findnext:get_width()
     findnext:set_position(self.size.x - 10 - findnext:get_width(), line:get_bottom() + 10)
     findprev:set_position(findnext:get_position().x - 10 - findprev:get_width(), line:get_bottom() + 10)
-    replacetext:set_position(10, findtext:get_bottom() + 10)
+    replacetext:set_position(text_x, findtext:get_bottom() + 10)
     replacetext.size.x = findtext.size.x
     replace:set_position(self.size.x - 15 - replace:get_width(), findtext:get_bottom() + 10)
     replace.size.x = findprev:get_width() + findnext:get_width() + 10
@@ -861,6 +931,12 @@ function widget:update()
       update_right_positioning(self)
     else
       update_bottom_positioning(self)
+    end
+    if self.relayout and #self.animations == 0 then
+      self.relayout = false
+      if config.plugins.search_ui.position ~= "right" then
+        self:set_size(nil, self:get_real_height() + 10)
+      end
     end
   end
 end
@@ -934,6 +1010,7 @@ command.add(function() return widget:is_visible() and not core.active_view:is(Co
   end,
 
   ["search-replace:file-search"] = function()
+    set_replace_shown(false)
     toggle_scope(1)
     command.perform "search-replace:show"
   end,
@@ -958,6 +1035,17 @@ command.add(function() return widget:is_visible() and not core.active_view:is(Co
 
   ["search-replace:toggle-in-selection"] = function()
     replaceinselection:set_checked(not replaceinselection:is_checked())
+  end
+})
+
+-- find-replace:replace (ctrl+r) only applies in a doc; in the pane's boxes,
+-- show the replace row
+command.add(function()
+  return widget:is_visible() and scope:get_selected() == 1
+    and (core.active_view == findtext.textview or core.active_view == replacetext.textview)
+end, {
+  ["search-replace:show-replace"] = function()
+    set_replace_shown(true)
   end
 })
 
@@ -1006,6 +1094,7 @@ command.add(
 local find_replace_find = command.map["find-replace:find"].perform
 command.map["find-replace:find"].perform = function(...)
   if config.plugins.search_ui.replace_core_find then
+    set_replace_shown(false)
     toggle_scope(1)
     command.perform "search-replace:show"
   else
@@ -1016,6 +1105,7 @@ end
 local find_replace_replace = command.map["find-replace:replace"].perform
 command.map["find-replace:replace"].perform = function(...)
   if config.plugins.search_ui.replace_core_find then
+    set_replace_shown(true)
     toggle_scope(1)
     command.perform "search-replace:show"
   else
@@ -1085,7 +1175,8 @@ keymap.add {
   ["ctrl+i"] = "search-replace:toggle-sensitivity",
   ["ctrl+shift+i"] = "search-replace:toggle-regex",
   ["ctrl+alt+i"] = "search-replace:toggle-in-selection",
-  ["ctrl+f"] = "search-replace:file-search"
+  ["ctrl+f"] = "search-replace:file-search",
+  ["ctrl+r"] = "search-replace:show-replace"
 }
 
 
