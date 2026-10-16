@@ -28,20 +28,12 @@ Node.tab_buttons.scroll_right = {
   end,
 }
 
----A doc's file icon, as the treeview (and an icon plugin like nerdicons) draws it.
----@return string? icon, renderer.font? font, renderer.color? color
-local function get_icon(view)
-  local TreeView = package.loaded["plugins.treeview"]
-  if not (TreeView and view.doc) then return end
-  return TreeView:get_item_icon({ type = "file", name = view.doc:get_name() }, false, false)
-end
-
 ---Shows the menu of the node's tabs, its top right corner at x, y.
 local function show_menu(node, x, y)
   local items = {}
   local icon_w = 0
   for _, view in ipairs(node.views) do
-    local icon, icon_font, icon_color = get_icon(view)
+    local icon, icon_font, icon_color = view:get_icon(false)
     if icon then icon_w = math.max(icon_w, icon_font:get_width(icon)) end
     table.insert(items, {
       text = view:get_name(), font = view:get_name_style(style.font),

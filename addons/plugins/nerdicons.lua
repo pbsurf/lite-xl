@@ -12,6 +12,7 @@ local config = require "core.config"
 local style = require "core.style"
 local TreeView = require "plugins.treeview"
 local Node = require "core.node"
+local View = require "core.view"
 
 local nerdfonts_symbols = require "libraries.font_symbols_nerdfont_mono_regular"
 
@@ -233,14 +234,25 @@ function TreeView:draw_item_chevron(item, active, hovered, x, y, w, h)
   return TreeView_draw_item_chevron(self, item, active, hovered, x, y, w, h)
 end
 
+-- Terminal views (terminal plugin, if loaded): a terminal icon
+local View_get_icon = View.get_icon
+function View:get_icon(hovered)
+  if getmetatable(self) == package.loaded["plugins.terminal.view"] then
+    return map["oct-terminal"], icon_font, hovered and style.accent or style.text
+  end
+  return View_get_icon(self, hovered)
+end
+
 -- Override function to draw icons in tabs titles if setting is enabled
 local Node_draw_tab_title = Node.draw_tab_title
 function Node:draw_tab_title(view, font, is_active, is_hovered, x, y, w, h)
-  if config.plugins.nerdicons.draw_tab_icons and view and view.doc then
+  local icon, icon_font, color
+  if config.plugins.nerdicons.draw_tab_icons and view then
+    icon, icon_font, color = view:get_icon(is_hovered)
+  end
+  if icon then
     -- Icon and title as one group: centered while the title fits, otherwise the icon
     -- at the left and the title truncated in the space after it
-    local item = { type = "file", name = view.doc:get_name() }
-    local icon, icon_font, color = TreeView:get_item_icon(item, false, is_hovered)
     local icon_w = icon_font:get_width(icon) + style.padding.x / 2
     local group_w = icon_w + font:get_width(view:get_name())
     local ix = x + math.max(0, (w - group_w) / 2)
