@@ -311,6 +311,17 @@ function StatusView:register_command_items()
         style.text, #core.docs, style.text, " / ",
         #core.project_files, " files"
       }
+    end,
+    tooltip = function()
+      local docs = string.format("%d open document%s", #core.docs,
+        #core.docs == 1 and "" or "s")
+      local n = core.project_files_number()
+      if n then
+        return string.format("%s, %d project files (what the file finder searches)",
+          docs, n)
+      end
+      return docs .. "; project too large to index: files are counted in expanded "
+        .. "folders only, and the file finder falls back to Open File"
     end
   })
 end
