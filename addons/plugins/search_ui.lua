@@ -745,12 +745,26 @@ function findproject:on_click() project_search() end
 function replace:on_click() find_replace() end
 function togglereplace:on_click() set_replace_shown(not replace_shown) end
 
+local function chevron_width()
+  return math.max(style.icon_font:get_width("+"), style.icon_font:get_width("-"))
+end
+
 -- as wide for either chevron, so the search box doesn't move when toggled
 function togglereplace:update()
   if not Button.update(self) then return false end
-  local icon_w = math.max(style.icon_font:get_width("+"), style.icon_font:get_width("-"))
-  self.size.x = self.padding.x * 2 - self.border.width * 2 + icon_w
+  self.size.x = self.padding.x * 2 - self.border.width * 2 + chevron_width()
   return true
+end
+
+-- the chevron centered: Button draws its icon at the left padding, and the
+-- right chevron is narrower than the down one
+function togglereplace:draw()
+  local padding_x = self.padding.x
+  self.padding.x = padding_x
+    + (chevron_width() - style.icon_font:get_width(self.icon.code)) / 2
+  local drawn = Button.draw(self)
+  self.padding.x = padding_x
+  return drawn
 end
 set_replace_shown(replace_shown)
 
