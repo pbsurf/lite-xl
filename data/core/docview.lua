@@ -100,16 +100,16 @@ end
 
 
 function DocView:get_name()
-  local post = self.doc:is_dirty() and "*" or ""
+  local pre = self.doc:is_dirty() and "* " or ""
   local name = self.doc:get_name()
-  return name:match("[^/%\\]*$") .. post
+  return pre .. name:match("[^/%\\]*$")
 end
 
 
 function DocView:get_filename()
   if self.doc.abs_filename then
-    local post = self.doc:is_dirty() and "*" or ""
-    return common.home_encode(self.doc.abs_filename) .. post
+    local pre = self.doc:is_dirty() and "* " or ""
+    return pre .. common.home_encode(self.doc.abs_filename)
   end
   return self:get_name()
 end
