@@ -126,14 +126,13 @@ local line_options = Line(widget)
 line_options:set_position(0, replace:get_bottom() + 10)
 
 ---@type widget.checkbox
-local insensitive = CheckBox(widget, "Insensitive")
-insensitive:set_position(10, line_options:get_bottom() + 10)
-insensitive:set_tooltip("Case insensitive search")
-insensitive:set_checked(true)
+local matchcase = CheckBox(widget, "Match Case")
+matchcase:set_position(10, line_options:get_bottom() + 10)
+matchcase:set_tooltip("Case sensitive search")
 
 ---@type widget.checkbox
 local wholeword = CheckBox(widget, "Whole Word")
-wholeword:set_position(10, insensitive:get_bottom() + 10)
+wholeword:set_position(10, matchcase:get_bottom() + 10)
 wholeword:set_tooltip("Match whole words only")
 
 ---@type widget.checkbox
@@ -426,11 +425,11 @@ local function project_search()
   local query, _, use_regex = search_query()
   if not use_regex then
     projectsearch.search_plain(
-      query, filepicker:get_path(), insensitive:is_checked()
+      query, filepicker:get_path(), not matchcase:is_checked()
     )
   else
     local rv = projectsearch.search_regex(
-      query, filepicker:get_path(), insensitive:is_checked()
+      query, filepicker:get_path(), not matchcase:is_checked()
     )
     -- the query is only shown (also after a refresh): show what was typed,
     -- not the whole word regex
@@ -466,7 +465,7 @@ local function find(reverse)
   local opt = {
     wrap = true,
     -- Lua patterns can't fold case (core would lowercase the pattern itself)
-    no_case = insensitive:is_checked() and not use_pattern,
+    no_case = not matchcase:is_checked() and not use_pattern,
     pattern = use_pattern,
     regex = use_regex,
     reverse = reverse
@@ -524,7 +523,7 @@ local function find_replace()
 
   local old, use_pattern, use_regex = search_query()
   local new = replacetext:get_text()
-  local no_case = insensitive:is_checked()
+  local no_case = not matchcase:is_checked()
   remember_find()
   remember_replace()
   -- gsub can't ignore case: a plain case insensitive search becomes a regex
@@ -657,9 +656,9 @@ local function show_find(av, toggle)
       local doc_text = doc_view.doc:get_text(
         table.unpack({ doc_view.doc:get_selection() })
       )
-      if insensitive:is_checked() then doc_text = doc_text:ulower() end
+      if not matchcase:is_checked() then doc_text = doc_text:ulower() end
       local current_text = findtext:get_text()
-      if insensitive:is_checked() then current_text = current_text:ulower() end
+      if not matchcase:is_checked() then current_text = current_text:ulower() end
       if doc_text and doc_text ~= "" and current_text ~= doc_text then
         local original_text = doc_view.doc:get_text(
           table.unpack({ doc_view.doc:get_selection() })
@@ -706,7 +705,7 @@ function replacetext:on_change(text)
   if not stepping then history_pos[replacetext].idx = 0 end
 end
 
-function insensitive:on_checked(checked)
+function matchcase:on_checked(checked)
   Results:clear()
 end
 
@@ -768,7 +767,7 @@ end
 local matcher_key, matcher = nil, nil
 function get_matcher()
   local text, use_pattern, use_regex = search_query()
-  local no_case = insensitive:is_checked()
+  local no_case = not matchcase:is_checked()
   local key = table.concat({ text, tostring(no_case), tostring(use_pattern),
     tostring(use_regex) }, "\0")
   if key == matcher_key then return matcher end
@@ -898,8 +897,8 @@ local function update_right_positioning(self)
     line_options:set_position(0, findproject:get_bottom() + 10)
   end
 
-  insensitive:set_position(10, line_options:get_bottom() + 10)
-  wholeword:set_position(10, insensitive:get_bottom() + 10)
+  matchcase:set_position(10, line_options:get_bottom() + 10)
+  wholeword:set_position(10, matchcase:get_bottom() + 10)
   if scope:get_selected() == 1 then
     patterncheck:set_position(10, wholeword:get_bottom() + 10)
     regexcheck:set_position(10, patterncheck:get_bottom() + 10)
@@ -951,8 +950,8 @@ local function update_bottom_positioning(self)
     regexcheck:set_position(right - 10 - regexcheck:get_width(), 10)
     patterncheck:set_position(regexcheck:get_position().x - 10  - patterncheck:get_width(), 10)
     wholeword:set_position(patterncheck:get_position().x - 10 - wholeword:get_width(), 10)
-    insensitive:set_position(wholeword:get_position().x - 10 - insensitive:get_width(), 10)
-    highlightall:set_position(insensitive:get_position().x - 10 - highlightall:get_width(), 10)
+    matchcase:set_position(wholeword:get_position().x - 10 - matchcase:get_width(), 10)
+    highlightall:set_position(matchcase:get_position().x - 10 - highlightall:get_width(), 10)
     line:set_position(0, status:get_bottom() + 10)
   else
     label:show()
@@ -961,7 +960,7 @@ local function update_bottom_positioning(self)
     label:set_position(10, 10)
     regexcheck:set_position(self.size.x - regexcheck:get_width() - 10, 10)
     wholeword:set_position(regexcheck:get_position().x - 10 - wholeword:get_width(), 10)
-    insensitive:set_position(wholeword:get_position().x - 10 - insensitive:get_width(), 10)
+    matchcase:set_position(wholeword:get_position().x - 10 - matchcase:get_width(), 10)
     line:set_position(0, label:get_bottom() + 10)
   end
 
@@ -1101,7 +1100,7 @@ command.add(function() return widget:is_visible() and not core.active_view:is(Co
   end,
 
   ["search-replace:toggle-sensitivity"] = function()
-    insensitive:set_checked(not insensitive:is_checked())
+    matchcase:set_checked(not matchcase:is_checked())
     Results:clear()
   end,
 
