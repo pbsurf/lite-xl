@@ -25,6 +25,49 @@ The repository with modified plugins is https://github.com/lite-xl/lite-xl-plugi
 The changes and differences between Lite XL and rxi/lite are listed in the
 [changelog].
 
+## This fork
+
+Lite XL 2.1 (plugin API mod-version 3) with our changes on top, merged from
+upstream's `release/v2.1.x`. Additions to the editor:
+
+* **Tab overflow:** tabs scroll when they don't fit, with scroll buttons and a menu
+  of all tabs at the end of the tab bar.
+* **Tab tooltips and menu:** hovering a tab shows the file's full path; right
+  clicking it offers close others / to the right / all and copy path.
+* **Popups** (context menus, tooltips, autocomplete, ...) share theme colors
+  (`style.popup_background`, `style.popup_border`) and can cast a soft shadow
+  (`style.popup_shadow`).
+* **Status bar:** items that don't fit are dropped by priority, and items can open
+  menus (e.g. indentation and line endings).
+* **Touch:** tap to click, drag to scroll.
+* **Block select:** `doc:select-block`, bound to a click (e.g.
+  `keymap.add { ["alt+1lclick"] = "doc:select-block" }`), selects a rectangle
+  while dragging.
+* **For plugins:** antialiased vector drawing (`renderer.draw_path`,
+  `renderer.draw_glyph`), and background marks on lines
+  (`DocView:get_line_marks`).
+
+### Add-ons
+
+`addons/` holds the add-ons we changed or wrote, as an [lpm] repository (listed in
+`manifest.json`, each entry saying what we changed). Ours:
+
+* **menubar:** a menu bar of commands, toggled by tapping Alt. Menus are
+  `config.plugins.menubar.menus`; commands from plugins not placed in a menu are
+  listed per plugin under Tools.
+* **highlight_selection:** marks the other occurrences of the selected text (whole
+  words only when a whole word is selected), in `style.selection_match`.
+* **search_ui** (imported, with our changes): a "Highlight All" option marking every
+  match in `style.search_match`; the replace row shows only when wanted (ctrl+r,
+  or the chevron left of the search box).
+* **shapes:** antialiased shape helpers (squiggly underlines) for plugins.
+* **qtcreator:** a light color theme matching Qt Creator's.
+
+Also imported with changes: lsp and lintplus (squiggly diagnostics, diagnostics in
+hover popups), build and debugger (from lite-xl-ide), tab_switcher, tab_overflow,
+minimap, nerdicons, language_yaml, the widget library, and repl (evaluates Lua in
+a running editor).
+
 ## Overview
 
 Lite XL is derived from [lite].
@@ -180,6 +223,7 @@ See the [licenses] file for details on licenses used by the required dependencie
 [Discord Badge Image]:        https://img.shields.io/discord/847122429742809208?label=discord&logo=discord
 [screenshot-dark]:            https://user-images.githubusercontent.com/433545/111063905-66943980-84b1-11eb-9040-3876f1133b20.png
 [lite]:                       https://github.com/rxi/lite
+[lpm]:                        https://github.com/lite-xl/lite-xl-plugin-manager
 [website]:                    https://lite-xl.com
 [build]:                      https://lite-xl.com/en/documentation/build
 [Get Lite XL]:                https://github.com/lite-xl/lite-xl/releases/latest
