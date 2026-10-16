@@ -38,4 +38,12 @@ ln -sfn "$build/start.lua" "$datadir/core/start.lua"
 : "${LITE_CLANGD:=$HOME/android-sdk/ndk/26.3.11579264/toolchains/llvm/prebuilt/linux-x86_64/bin/clangd}"
 export LITE_USERDIR LITE_CLANGD
 
+# Headless (SDL_VIDEO_DRIVER=offscreen), SDL backs the window surface with a GPU
+# renderer; on this VMware guest (vmwgfx) every presented frame then leaks a
+# window-sized buffer in the kernel (GiBs after a few hundred frames), invisible in
+# RSS. A plain software surface avoids the GPU entirely.
+if [ "$SDL_VIDEO_DRIVER" = offscreen ]; then
+  export SDL_FRAMEBUFFER_ACCELERATION=${SDL_FRAMEBUFFER_ACCELERATION:-0}
+fi
+
 exec "$prefix/bin/lite-xl" "$@"
