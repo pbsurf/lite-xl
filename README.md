@@ -44,7 +44,8 @@ upstream's `release/v2.1.x`. Additions to the editor:
   `keymap.add { ["alt+1lclick"] = "doc:select-block" }`), selects a rectangle
   while dragging.
 * **For plugins:** antialiased vector drawing (`renderer.draw_path`,
-  `renderer.draw_glyph`), background marks on lines
+  `renderer.draw_glyph`), per-font letter spacing (`font:set_letter_spacing`),
+  background marks on lines
   (`DocView:get_line_marks`), and `command.hidden` for commands that exist only
   for key bindings (not listed by Do Command or menus).
 
