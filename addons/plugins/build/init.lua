@@ -314,7 +314,7 @@ function build.set_targets(targets, type)
 end
 
 function build.can_build(target)
-  return target.build ~= false and (target.build or (target.backend.build and (not target.backend.can_build or target.backend.can_build(target))))
+  return target ~= nil and target.build ~= false and (target.build or (target.backend.build and (not target.backend.can_build or target.backend.can_build(target))))
 end
 
 function build.build(callback)
@@ -395,7 +395,7 @@ function build.execute_command(command)
 end
 
 function build.can_run(target)
-  return target.run ~= false and (target.run or (target.backend.run and (not target.backend.can_run or target.backend.can_run(target))))
+  return target ~= nil and target.run ~= false and (target.run or (target.backend.run and (not target.backend.can_run or target.backend.can_run(target))))
 end
 
 function build.run(arguments)
@@ -410,7 +410,7 @@ function build.run(arguments)
 end
 
 function build.can_clean(target)
-    return target.clean ~= false and (target.clean or (target.backend.clean and (not target.backend.can_clean or target.blackend.can_clean(target))))
+    return target ~= nil and target.clean ~= false and (target.clean or (target.backend.clean and (not target.backend.can_clean or target.backend.can_clean(target))))
 end
 
 function build.clean(callback)
