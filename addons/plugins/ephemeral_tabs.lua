@@ -25,10 +25,19 @@ function RootView:open_doc(doc)
   return docview
 end
 
-local Doc_get_name = DocView.get_name
-function DocView:get_name()
-  return self.doc and self.ephemeral and ("~ " .. Doc_get_name(self) .. " ~")
-          or Doc_get_name(self)
+-- Ephemeral tabs show their title in italic (a synthesized slant, same advances)
+local italic_fonts = setmetatable({}, { __mode = "k" })
+local function italic(font)
+  if not italic_fonts[font] then
+    italic_fonts[font] = font:copy(font:get_size(), { italic = true })
+  end
+  return italic_fonts[font]
+end
+
+local DocView_get_name_style = DocView.get_name_style
+function DocView:get_name_style(font)
+  font = DocView_get_name_style(self, font)
+  return self.ephemeral and italic(font) or font
 end
 
 -- Any change to the document makes the tab normal

@@ -93,7 +93,7 @@
     },
     {
       "id": "ephemeral_tabs",
-      "description": "Preview tabs (lite-xl-plugins 6e4aa64).",
+      "description": "Preview tabs (lite-xl-plugins 6e4aa64), marked by an italic name instead of ~ around it.",
       "version": "0.1",
       "mod_version": "3",
       "path": "addons/plugins/ephemeral_tabs.lua"
