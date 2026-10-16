@@ -100,6 +100,13 @@
       "dependencies": { "font_symbols_nerdfont_mono_regular": {} }
     },
     {
+      "id": "terminal",
+      "description": "Integrated terminal (lite-xl-terminal e1cd371); libterminal is built by lite-xl's meson build.",
+      "version": "1.10",
+      "mod_version": "3",
+      "path": "addons/plugins/terminal"
+    },
+    {
       "id": "widget",
       "type": "library",
       "description": "Widget toolkit (lite-xl-widgets) that doesn't queue redraws when showing a visible widget.",

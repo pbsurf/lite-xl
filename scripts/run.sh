@@ -38,6 +38,14 @@ ln -sfn "$build/start.lua" "$datadir/core/start.lua"
 : "${LITE_CLANGD:=$HOME/android-sdk/ndk/26.3.11579264/toolchains/llvm/prebuilt/linux-x86_64/bin/clangd}"
 export LITE_USERDIR LITE_CLANGD
 
+# Native modules of our add-ons (addons/meson.build) go next to the installed plugin,
+# where package.cpath finds them. lpm's --symlink install makes the plugin dir a
+# real dir of links to the files present at install time, so link the module there
+# rather than into addons/.
+if [ -d "$LITE_USERDIR/plugins/terminal" ]; then
+  ln -sf "$build"/addons/libterminal.*.so "$LITE_USERDIR/plugins/terminal/"
+fi
+
 # Headless (SDL_VIDEO_DRIVER=offscreen), SDL backs the window surface with a GPU
 # renderer; on this VMware guest (vmwgfx) every presented frame then leaks a
 # window-sized buffer in the kernel (GiBs after a few hundred frames), invisible in

@@ -129,5 +129,6 @@ configure_file(
 
 if not get_option('source-only')
     subdir('src')
+    subdir('addons')
     subdir('scripts')
 endif

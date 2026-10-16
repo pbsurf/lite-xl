@@ -60,6 +60,9 @@ upstream's `release/v2.1.x`. Additions to the editor:
 * **search_ui** (imported, with our changes): a "Highlight All" option marking every
   match in `style.search_match`; the replace row shows only when wanted (ctrl+r,
   or the chevron left of the search box).
+* **terminal** (imported from lite-xl-terminal, with our changes): an integrated
+  terminal, as a drawer (shift+alt+t) or a tab (ctrl+shift+\`). Its C module is
+  built by our meson build and linked into the user dir by `scripts/run.sh`.
 * **shapes:** antialiased shape helpers (squiggly underlines) for plugins.
 * **qtcreator:** a light color theme matching Qt Creator's.
 
