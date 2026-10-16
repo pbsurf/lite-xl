@@ -379,6 +379,14 @@ local function close_button_location(x, w)
 end
 
 
+---Whether the point is on the node's tab bar (shown).
+function Node:tab_bar_overlaps_point(px, py)
+  return self:should_show_tabs()
+    and px >= self.position.x and px < self.position.x + self.size.x
+    and py >= self.position.y and py < self.position.y + self:get_tab_bar_height()
+end
+
+
 function Node:get_tab_button_index(px, py)
   if not self:should_show_tabs() or not self:tabs_overflow() then return end
   for i = 1, #self:get_tab_buttons() do

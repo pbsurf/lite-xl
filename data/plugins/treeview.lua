@@ -440,6 +440,45 @@ function TreeView:toggle_expand(toggle)
 end
 
 
+---Shows a file: expands the directories leading to it, selects it and scrolls it
+---into view (the file browser too, if hidden). Returns false if it isn't listed.
+---@param abs_filename string
+---@return boolean
+function TreeView:reveal(abs_filename)
+  local dir
+  for _, d in ipairs(core.project_directories) do
+    if common.path_belongs_to(abs_filename, d.name) then dir = d break end
+  end
+  if not dir then return false end
+  self.visible = true
+  local rel = abs_filename:sub(#dir.name + 2)
+  local prefix
+  for part in rel:gmatch("([^%" .. PATHSEP .. "]+)%" .. PATHSEP) do
+    prefix = (prefix or "") .. part
+    local cached = self:get_cached(dir, { filename = prefix, type = "dir" }, dir.name)
+    if not cached.expanded then
+      cached.expanded = true
+      if dir.files_limit then core.update_project_subdir(dir, prefix, true) end
+    end
+    prefix = prefix .. PATHSEP
+  end
+  self:get_cached(dir, dir.item, dir.name).expanded = true
+  for item, _, y in self:each_item() do
+    if item.abs_filename == abs_filename then
+      self.selected_item = item
+      local lh = self:get_item_height()
+      y = y - self.position.y
+      if y < 0 or y + lh > self.size.y then
+        -- centered
+        self.scroll.to.y = self.scroll.to.y + y - (self.size.y - lh) / 2
+      end
+      return true
+    end
+  end
+  return false
+end
+
+
 -- init
 local view = TreeView()
 local node = core.root_view:get_active_node()
@@ -885,6 +924,12 @@ config.plugins.treeview.config_spec = {
     end
   }
 }
+
+table.insert(RootView.tab_menu_items, {
+  text = "Show in File Browser",
+  show = function(_, v) return v.doc and v.doc.abs_filename end,
+  command = function(_, v) view:reveal(v.doc.abs_filename) end,
+})
 
 -- Return the treeview with toolbar and contextmenu to allow
 -- user or plugin modifications

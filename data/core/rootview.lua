@@ -4,12 +4,25 @@ local style = require "core.style"
 local Node = require "core.node"
 local View = require "core.view"
 local DocView = require "core.docview"
+local ContextMenu = require "core.contextmenu"
+local command = require "core.command"
+local keymap = require "core.keymap"
 
 ---@class core.rootview : core.view
 ---@field super core.view
 ---@field root_node core.node
 ---@field mouse core.view.position
+---@field tab_menu core.rootview.tabmenu
 local RootView = View:extend()
+
+---The context menu of a tab.
+---@class core.rootview.tabmenu : core.contextmenu
+---@field node core.node? The node of the tab it was opened on
+---@field view core.view? The tab's view
+local TabMenu = ContextMenu:extend()
+
+---Seconds the mouse rests on a tab before its tooltip shows.
+local TAB_TOOLTIP_DELAY = 0.5
 
 function RootView:__tostring() return "RootView" end
 
@@ -27,6 +40,9 @@ function RootView:new()
                             color = { table.unpack(style.drag_overlay_tab) } }
   self.drag_overlay_tab.to = { x = 0, y = 0, w = 0, h = 0 }
   self.first_dnd_processed = false
+  self.tab_menu = TabMenu()
+  -- the tab under the mouse and since when; dismissed by a click until it changes
+  self.tab_tooltip = { view = nil, node = nil, time = 0, dismissed = false }
 end
 
 
@@ -135,6 +151,17 @@ end
 ---@param clicks integer
 ---@return boolean
 function RootView:on_mouse_pressed(button, x, y, clicks)
+  self.tab_tooltip.dismissed = true
+  -- the tab menu gets clicks first while shown: a click anywhere closes it,
+  -- choosing the row under the mouse, if any
+  local menu = self.tab_menu
+  if menu.show_context_menu then
+    local mx, my = menu.position.x, menu.position.y
+    if x < mx or x >= mx + menu.items.width or y < my or y >= my + menu.items.height then
+      menu.selected = -1
+    end
+    return menu:on_mouse_pressed(button, x, y, clicks)
+  end
   local div = self.root_node:get_divider_overlapping_point(x, y)
   local node = self.root_node:get_child_overlapping_point(x, y)
   if div and (node and not node.active_view:scrollbar_overlaps_point(x, y)) then
@@ -149,6 +176,9 @@ function RootView:on_mouse_pressed(button, x, y, clicks)
   if idx then
     if button == "middle" or node.hovered_close == idx then
       node:close_view(self.root_node, node.views[idx])
+      return true
+    elseif button == "right" then
+      self:show_tab_menu(node, node.views[idx], x, y)
       return true
     else
       if button == "left" then
@@ -275,6 +305,7 @@ function RootView:on_mouse_moved(x, y, dx, dy)
   end
 
   self.mouse.x, self.mouse.y = x, y
+  if self.tab_menu:on_mouse_moved(x, y) then return end
 
   local dn = self.dragged_node
   if dn and not dn.dragging then
@@ -368,8 +399,7 @@ end
 local function start_touch_scroll(self, t, x, y)
   t.scrolling = true
   t.node = self.root_node:get_child_overlapping_point(t.x, t.y)
-  t.on_tabs = t.node:should_show_tabs()
-    and t.y < t.node.position.y + t.node:get_tab_bar_height()
+  t.on_tabs = t.node:tab_bar_overlaps_point(t.x, t.y)
   local dx, dy = math.abs(x - t.x), math.abs(y - t.y)
   t.lock_x = t.on_tabs or dx > dy * 2   -- horizontal only
   t.lock_y = not t.on_tabs and dy > dx * 2
@@ -423,10 +453,9 @@ end
 function RootView:on_mouse_wheel(dy, dx)
   local x, y = self.mouse.x, self.mouse.y
   local node = self.root_node:get_child_overlapping_point(x, y)
-  -- over a tab bar whose tabs scroll: one notch scrolls one tab
-  if node:should_show_tabs() and node:tabs_overflow()
-     and y < node.position.y + node:get_tab_bar_height() then
-    node:scroll_tabs_freely(-(dy + (dx or 0)))
+  -- over a tab bar: one notch scrolls one tab if its tabs scroll, else nothing
+  if node:tab_bar_overlaps_point(x, y) then
+    if node:tabs_overflow() then node:scroll_tabs_freely(-(dy + (dx or 0))) end
     return true
   end
   return node.active_view:on_mouse_wheel(dy, dx)
@@ -469,6 +498,8 @@ function RootView:update()
   -- set this to true because at this point there are no dnd requests
   -- that are caused by the initial dnd into dock user action
   self.first_dnd_processed = true
+  self:update_tab_tooltip()
+  self.tab_menu:update()
 end
 
 
@@ -558,6 +589,8 @@ end
 
 function RootView:draw()
   self.root_node:draw()
+  self:draw_tab_tooltip()
+  self.tab_menu:draw()
   while #self.deferred_draws > 0 do
     local t = table.remove(self.deferred_draws)
     t.fn(table.unpack(t))
@@ -573,5 +606,197 @@ function RootView:draw()
     core.cursor_change_req = nil
   end
 end
+
+
+-- Tab tooltips: a view's get_filename() (a doc's full path), when it says more
+-- than the tab's title, shown once the mouse rests on its tab for a moment
+
+function RootView:update_tab_tooltip()
+  local node = self.overlapping_node
+  local view = node and node.hovered_tab and node.views[node.hovered_tab]
+  if self.dragged_node or self.tab_menu.show_context_menu then view = nil end
+  local tt = self.tab_tooltip
+  if view ~= tt.view then
+    tt.view, tt.node, tt.dismissed = view, node, false
+    tt.time = system.get_time()
+    if view then
+      core.add_thread(function()
+        coroutine.yield(TAB_TOOLTIP_DELAY)
+        core.redraw = true
+      end)
+    end
+  end
+end
+
+
+---The tooltip's text and, for a file in a project directory, that directory's
+---part of it (drawn dimmed, so files outside the project stand out).
+---@param view core.view
+---@return string? text, string? project_part
+local function get_tab_tooltip(view)
+  local text = view.get_filename and view:get_filename()
+  if not text or text == "" or text == view:get_name() then return end
+  local abs = view.doc and view.doc.abs_filename
+  for _, dir in ipairs(core.project_directories) do
+    if abs and common.path_belongs_to(abs, dir.name) then
+      local part = common.home_encode(dir.name) .. PATHSEP
+      if text:sub(1, #part) == part then return text, part end
+    end
+  end
+  return text
+end
+
+
+function RootView:draw_tab_tooltip()
+  local tt = self.tab_tooltip
+  if not tt.view or tt.dismissed or system.get_time() - tt.time < TAB_TOOLTIP_DELAY then
+    return
+  end
+  local idx = tt.node:get_view_idx(tt.view)
+  local text, project_part = get_tab_tooltip(tt.view)
+  if not (idx and text) then return end
+  local tx, ty, _, th = tt.node:get_tab_rect(idx)
+  self:defer_draw(function()
+    local font = style.font
+    local w = font:get_width(text) + style.padding.x * 2
+    local h = font:get_height() + style.padding.y
+    local x = common.clamp(math.max(tx, tt.node.position.x), 0, self.size.x - w - 1)
+    local y = ty + th + 1
+    renderer.draw_rect(x - 1, y - 1, w + 2, h + 2, style.divider)
+    renderer.draw_rect(x, y, w, h, style.background3)
+    local tx = x + style.padding.x
+    local ty = y + (h - font:get_height()) / 2
+    if project_part then
+      tx = renderer.draw_text(font, project_part, tx, ty, common.lerp(style.text, style.dim, 0.5))
+      text = text:sub(#project_part + 1)
+    end
+    renderer.draw_text(font, text, tx, ty, style.text)
+  end)
+end
+
+
+-- Tab context menu
+
+---Closes a node's views, after one confirmation for those with unsaved changes.
+---@param node core.node
+---@param views core.view[]
+local function close_views(node, views)
+  local closing = {}
+  for _, view in ipairs(views) do closing[view] = true end
+  local docs, seen = {}, {}
+  for _, view in ipairs(views) do
+    local doc = view.doc
+    if doc and not seen[doc] then
+      seen[doc] = true
+      -- no need to ask about a doc that stays open in another view
+      local kept = false
+      for _, other in ipairs(core.get_views_referencing_doc(doc)) do
+        if not closing[other] then kept = true end
+      end
+      if not kept then table.insert(docs, doc) end
+    end
+  end
+  core.confirm_close_docs(docs, function()
+    for _, view in ipairs(views) do
+      if node:get_view_idx(view) then node:remove_view(core.root_view.root_node, view) end
+    end
+  end)
+end
+
+local function has_file(_, view)
+  return view.doc and view.doc.abs_filename
+end
+
+---Rows of the tab context menu: `core.contextmenu` items (or `ContextMenu.DIVIDER`)
+---whose `command` is called with the tab's node and view, listed if their
+---optional `show(node, view)` returns true. Plugins may add rows.
+RootView.tab_menu_items = {
+  { text = "Close", command = function(node, view)
+      node:close_view(core.root_view.root_node, view)
+    end },
+  { text = "Close Others",
+    show = function(node) return #node.views > 1 end,
+    command = function(node, view)
+      local views = {}
+      for _, v in ipairs(node.views) do
+        if v ~= view then table.insert(views, v) end
+      end
+      close_views(node, views)
+    end },
+  { text = "Close to the Right",
+    show = function(node, view) return node:get_view_idx(view) < #node.views end,
+    command = function(node, view)
+      close_views(node, { table.unpack(node.views, node:get_view_idx(view) + 1) })
+    end },
+  { text = "Close All",
+    show = function(node) return #node.views > 1 end,
+    command = function(node)
+      close_views(node, { table.unpack(node.views) })
+    end },
+  ContextMenu.DIVIDER,
+  { text = "Copy Path", show = has_file,
+    command = function(_, view) system.set_clipboard(view.doc.abs_filename) end },
+  { text = "Copy Relative Path",
+    show = function(_, view)
+      return has_file(nil, view) and not common.is_absolute_path(view.doc.filename)
+    end,
+    command = function(_, view) system.set_clipboard(view.doc.filename) end },
+}
+
+
+---Shows the context menu of a tab at x, y.
+---@param node core.node
+---@param view core.view
+---@param x number
+---@param y number
+function RootView:show_tab_menu(node, view, x, y)
+  local rows = {}
+  for _, item in ipairs(RootView.tab_menu_items) do
+    if item == ContextMenu.DIVIDER then
+      -- no leading or doubled dividers
+      if #rows > 0 and rows[#rows] ~= ContextMenu.DIVIDER then table.insert(rows, item) end
+    elseif not item.show or item.show(node, view) then
+      table.insert(rows, setmetatable({
+        command = function() item.command(node, view) end
+      }, { __index = item }))
+    end
+  end
+  if rows[#rows] == ContextMenu.DIVIDER then table.remove(rows) end
+  local menu = self.tab_menu
+  menu.itemset = {}
+  menu:register(nil, rows)
+  if menu:show(x, y) then
+    menu.node, menu.view = node, view
+  end
+end
+
+
+function TabMenu:hide()
+  TabMenu.super.hide(self)
+  if self.view then
+    self.node, self.view = nil, nil
+    -- the moves the menu took left the hover state where it was opened
+    local root = core.root_view
+    root:on_mouse_moved(root.mouse.x, root.mouse.y, 0, 0)
+  end
+end
+
+
+command.add(function()
+    return core.root_view and core.root_view.tab_menu.show_context_menu == true,
+      core.root_view and core.root_view.tab_menu
+  end, {
+  ["root:tab-menu-previous"] = function(menu) menu:focus_previous() end,
+  ["root:tab-menu-next"] = function(menu) menu:focus_next() end,
+  ["root:tab-menu-hide"] = function(menu) menu:hide() end,
+  ["root:tab-menu-select"] = function(menu) menu:call_selected_item() end,
+})
+
+keymap.add {
+  ["up"] = "root:tab-menu-previous",
+  ["down"] = "root:tab-menu-next",
+  ["escape"] = "root:tab-menu-hide",
+  ["return"] = "root:tab-menu-select",
+}
 
 return RootView
