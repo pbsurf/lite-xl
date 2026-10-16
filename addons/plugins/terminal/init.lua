@@ -1031,6 +1031,19 @@ if config.plugins.terminal.inversion_key then
   keymap.add(settings)
 end
 
+-- Most terminal: commands only exist for key bindings: sending a key (terminal:f5,
+-- terminal:start-of-heading for ctrl+a, ...) or running an editor command from
+-- ctrl+shift+<key> (terminal:doc:save, ...). Hide all but these from Do Command and
+-- menus.
+local listed = {
+  "toggle-drawer", "swap-drawer", "open-tab", "focus", "execute", "close-tab",
+  "copy", "paste", "clear", "scroll-up", "scroll-down", "scroll-to-top", "scroll-to-end",
+}
+for i, name in ipairs(listed) do listed["terminal:" .. name] = true end
+for name in pairs(command.map) do
+  if name:find("^terminal:") and not listed[name] then command.hidden[name] = true end
+end
+
 return {
   class = TerminalView
 }
