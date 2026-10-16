@@ -116,6 +116,7 @@ config.plugins.menubar = common.merge({
       { command = "line-wrapping:toggle", text = "Line Wrapping" },
       { command = "draw-whitespace:toggle", text = "Whitespace" },
       { command = "lineguide:toggle", text = "Line Guide" },
+      { command = "highlight-selection:toggle", text = "Highlight Selection Matches" },
       "-",
       { command = "scale:increase", text = "Zoom In" },
       { command = "scale:decrease", text = "Zoom Out" },

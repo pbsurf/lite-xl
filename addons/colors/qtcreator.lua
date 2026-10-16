@@ -29,6 +29,7 @@ style.selection = { common.color "rgba(48, 140, 198, 0.5)" }  -- Selection
 style.line_number = { common.color "#9f9d9a" }                -- LineNumber
 style.line_number2 = { common.color "#808080" }               -- CurrentLineNumber
 style.line_highlight = { common.color "#c1ddee" }             -- CurrentLine
+style.selection_match = { common.color "#e0e0e0" }            -- Occurrences (#b4b4b4, lightened)
 
 -- bracketmatch plugin (Parentheses)
 style.bracketmatch_color = { common.color "#ff0000" }
