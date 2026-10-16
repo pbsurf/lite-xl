@@ -8,11 +8,16 @@ local TreeView = require "plugins.treeview"
 
 local RootView_open_doc = RootView.open_doc
 function RootView:open_doc(doc)
+  -- Only a view open_doc creates is a preview; one already in the node keeps its
+  -- state, also when it has no ephemeral flag (added otherwise, e.g. restored by
+  -- the workspace)
+  local node = self:get_active_node_default()
+  local exists = false
+  for _, v in ipairs(node.views) do
+    if v.doc == doc then exists = true end
+  end
   local docview = RootView_open_doc(self, doc)
-  -- The absence of the ephemeral flag means that before this moment in this
-  -- node this document was not exists
-  if docview.ephemeral == nil then
-    local node = self:get_active_node_default()
+  if not exists then
     -- We assume that ephemeral tab is always the last one
     -- But user can drag and drop tabs so full check is needed
     for i, v in ipairs(node.views) do
@@ -38,6 +43,11 @@ local DocView_get_name_style = DocView.get_name_style
 function DocView:get_name_style(font)
   font = DocView_get_name_style(self, font)
   return self.ephemeral and italic(font) or font
+end
+
+-- A preview tab isn't restored with the workspace
+function DocView:is_transient()
+  return self.ephemeral == true
 end
 
 -- Any change to the document makes the tab normal

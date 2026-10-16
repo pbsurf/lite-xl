@@ -69,7 +69,8 @@ upstream's `release/v2.1.x`. Additions to the editor:
   built by our meson build and linked into the user dir by `scripts/run.sh`.
 * **ephemeral_tabs** (imported, with our changes): a file opened from the tree
   replaces the previous preview tab until edited or double-clicked; preview tabs
-  show their name in italic (in tabs, the tab menu and the ctrl+tab list).
+  show their name in italic (in tabs, the tab menu and the ctrl+tab list) and
+  aren't restored with the workspace.
 * **shapes:** antialiased shape helpers (squiggly underlines) for plugins.
 * **qtcreator:** a light color theme matching Qt Creator's.
 
