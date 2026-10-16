@@ -46,6 +46,10 @@ local default_config = {
   drawer_height = 300,
   -- the default console font. non-monsospace is unsupported
   font = style.code_font,
+  -- extra space after each character, as a fraction of the font size; negative is
+  -- more compact (e.g. -0.125: 3 px less per character at 24 px). Applied to a copy
+  -- of the font, so editors sharing it are unaffected.
+  letter_spacing = 0,
   -- padding around the edges of the terminal
   padding = { x = 0, y = 0 },
   -- default background color if not explicitly set by the shell
@@ -271,9 +275,16 @@ function TerminalView:new(options)
   options = common.merge(common.merge({}, config.plugins.terminal), options)
   self.size.y = options.drawer_height
   self.options = options
+  -- with letter spacing, draw with a copy of the font, kept at its size in update
+  self.base_font = self.options.font
+  if self.options.letter_spacing ~= 0 then
+    self.options.font = self.base_font:copy(self.base_font:get_size())
+    self.options.font:set_letter_spacing(self.options.letter_spacing)
+  end
   -- each view resizes its bold font to match its font, and views can have different
   -- fonts (the debugger's terminal), so each needs its own copy
   self.options.bold_font = self.options.bold_font:copy(self.options.font:get_size())
+  self.options.bold_font:set_letter_spacing(self.options.letter_spacing)
   self.options.environment = common.merge(options.environment, {})
   for k,v in pairs(self.options.environment) do
     self.options.environment[k] = type(v) == "function" and v() or v
@@ -321,6 +332,9 @@ end
 
 
 function TerminalView:update()
+  if self.options.font ~= self.base_font and self.options.font:get_size() ~= self.base_font:get_size() then
+    self.options.font:set_size(self.base_font:get_size())
+  end
   -- also catches a font resized before the first update (the scale plugin at startup)
   if self.options.bold_font:get_size() ~= self.options.font:get_size() then
     self.options.bold_font:set_size(self.options.font:get_size())
