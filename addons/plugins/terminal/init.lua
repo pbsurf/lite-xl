@@ -402,9 +402,11 @@ function TerminalView:update()
       end
       local scrollback, total_scrollback = self.terminal:scrollback()
       local lh = self:get_line_height()
-      -- 0 should be if we're at max scrollback. 1 should be if we're at 0 scrollback.
-      self.v_scrollbar:set_size(self.position.x, self.position.y, self.size.x, self.size.y, self:get_scrollable_size())
-      self.v_scrollbar:set_percent(1.0 - (scrollback / total_scrollback))
+      -- the scrollbar's percent is the scroll offset from the top over the scrollable
+      -- size (as View sets it), so at 0 scrollback it's (size - visible) / size
+      local scrollable = self:get_scrollable_size()
+      self.v_scrollbar:set_size(self.position.x, self.position.y, self.size.x, self.size.y, scrollable)
+      self.v_scrollbar:set_percent((total_scrollback - scrollback) * lh / scrollable)
       self.v_scrollbar:update()
     else
       core.add_thread(function()
@@ -590,9 +592,11 @@ end
 function TerminalView:on_mouse_pressed(button, x, y, clicks)
   local result = self.v_scrollbar:on_mouse_pressed(button, x, y, clicks)
   if result then
-    if result ~= true then
-      local _, total_scrollback = self.terminal:scrollback()
-      self.terminal:scrollback(math.floor((1.0 - result) * total_scrollback))
+    if type(result) == "string" then
+      local dir = result == "page_backward" and 1 or -1
+      self.terminal:scrollback(self.terminal:scrollback() + dir * self.lines)
+    elseif result ~= true then
+      self:scroll_to_percent(result)
     end
     return true
   end
@@ -626,8 +630,7 @@ function TerminalView:on_mouse_moved(x, y, dx, dy)
   local result = self.v_scrollbar:on_mouse_moved(x, y, dx, dy)
   if result then
     if result ~= true then
-      local _, total_scrollback = self.terminal:scrollback()
-      self.terminal:scrollback(math.floor((1.0 - result) * total_scrollback))
+      self:scroll_to_percent(result)
     end
     return true
   end
@@ -689,6 +692,13 @@ function TerminalView:on_mouse_released(button, x, y)
   end
 end
 
+
+-- inverse of the percent set in update: a scrollbar result to scrollback lines
+function TerminalView:scroll_to_percent(percent)
+  local _, total_scrollback = self.terminal:scrollback()
+  local lines = math.floor(percent * self:get_scrollable_size() / self:get_line_height() + 0.5)
+  self.terminal:scrollback(common.clamp(total_scrollback - lines, 0, total_scrollback))
+end
 
 function TerminalView:get_scrollable_size()
   if not self.terminal then return self.size.y end
