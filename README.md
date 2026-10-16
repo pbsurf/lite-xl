@@ -46,8 +46,9 @@ upstream's `release/v2.1.x`. Additions to the editor:
 * **For plugins:** antialiased vector drawing (`renderer.draw_path`,
   `renderer.draw_glyph`), per-font letter spacing (`font:set_letter_spacing`),
   background marks on lines
-  (`DocView:get_line_marks`), and `command.hidden` for commands that exist only
-  for key bindings (not listed by Do Command or menus).
+  (`DocView:get_line_marks`), `command.hidden` for commands that exist only
+  for key bindings (not listed by Do Command or menus), and
+  `View:get_name_style` (the font of a view's name in tabs and tab lists).
 
 ### Add-ons
 

@@ -98,6 +98,14 @@ function View:get_name()
   return "---"
 end
 
+---The font to draw this view's name in (tab titles, tab lists), derived from
+---`font`, the one the caller would use; e.g. an italic copy.
+---@param font renderer.font
+---@return renderer.font
+function View:get_name_style(font)
+  return font
+end
+
 
 ---@return number
 function View:get_scrollable_size()

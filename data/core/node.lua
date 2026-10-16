@@ -659,7 +659,7 @@ function Node:draw_tab(view, is_active, is_hovered, is_close_hovered, x, y, w, h
   x = x + cpad
   w = cx - x
   core.push_clip_rect(x, y, w, h)
-  self:draw_tab_title(view, style.font, is_active, is_hovered, x, y, w, h)
+  self:draw_tab_title(view, view:get_name_style(style.font), is_active, is_hovered, x, y, w, h)
   core.pop_clip_rect()
 end
 
