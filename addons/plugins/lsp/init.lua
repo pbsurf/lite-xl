@@ -1057,6 +1057,8 @@ function lsp.get_hovered_location(x, y)
   if not n then return end
   local av = n.active_view
   if not av:extends(DocView) then return end
+  -- not over the node's tab bar
+  if y < av.position.y then return end
   if av and av.doc.lsp_open then
     ---@type core.doc
     local doc = av.doc
