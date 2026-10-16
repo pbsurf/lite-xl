@@ -1022,6 +1022,12 @@ function widget:update()
       self.relayout = false
       if config.plugins.search_ui.position ~= "right" then
         self:set_size(nil, self:get_real_height() + 10)
+        -- the node layout runs after views update, so would move the pane
+        -- after its children were placed, and nothing would draw again
+        -- until the next event: lay out now and place them again
+        core.root_view.root_node:update_layout()
+        self:update_position()
+        core.redraw = true
       end
     end
   end
