@@ -1113,6 +1113,7 @@ static void terminal_resize(terminal_t* terminal, int columns, int lines) {
   for (int i = 0; i < VIEW_MAX; ++i) {
     buffer_char_t* buffer = malloc(sizeof(buffer_char_t) * columns * lines);
     memset(buffer, 0, sizeof(buffer_char_t) * columns * lines);
+    int* overflows = calloc(lines * sizeof(int), 1);
     if (terminal->views[i].buffer) {
       if (lines < terminal->lines && i == VIEW_NORMAL_BUFFER) {
         for (int j = 0; j < max(0, (terminal->views[i].cursor_y+1) - lines); ++j)
@@ -1121,7 +1122,11 @@ static void terminal_resize(terminal_t* terminal, int columns, int lines) {
       int max_lines = min(terminal->lines, lines);
       for (int y = 0; y < max_lines; ++y)
         memcpy(&buffer[y*columns], &terminal->views[i].buffer[y*terminal->columns], min(terminal->columns, columns)*sizeof(buffer_char_t));
+      // rows kept whole still wrap into the next; at another width they're cut or padded
+      if (columns == terminal->columns)
+        memcpy(overflows, terminal->views[i].overflows, max_lines * sizeof(int));
       free(terminal->views[i].buffer);
+      free(terminal->views[i].overflows);
     }
     terminal->views[i].buffer = buffer;
     terminal->views[i].cursor_x = min(terminal->views[i].cursor_x, columns - 1);
@@ -1130,7 +1135,7 @@ static void terminal_resize(terminal_t* terminal, int columns, int lines) {
       terminal->views[i].scrolling_region_start = min(terminal->views[i].scrolling_region_start, lines - 1);
       terminal->views[i].scrolling_region_end = min(terminal->views[i].scrolling_region_end, lines);
     }
-    terminal->views[i].overflows = calloc(lines * sizeof(int), 1);
+    terminal->views[i].overflows = overflows;
   }
   terminal->columns = columns;
   terminal->lines = lines;
