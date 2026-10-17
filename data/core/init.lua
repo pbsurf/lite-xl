@@ -967,6 +967,45 @@ function core.confirm_close_docs(docs, close_fn, ...)
   end
 end
 
+---Asks to delete a file or directory (shown as `name`), then deletes it and
+---closes the views of docs in it, without asking about their unsaved changes.
+---@param abs_filename string
+---@param name string
+function core.confirm_delete(abs_filename, name)
+  local info = system.get_file_info(abs_filename)
+  if not info then return core.error("Cannot delete \"%s\": not found", name) end
+  local is_dir = info.type == "dir"
+  local docs, dirty = {}, false
+  for _, doc in ipairs(core.docs) do
+    local f = doc.abs_filename
+    if f and (f == abs_filename or common.path_belongs_to(f, abs_filename)) then
+      table.insert(docs, doc)
+      dirty = dirty or doc:is_dirty()
+    end
+  end
+  local text = is_dir
+    and string.format("Delete the directory \"%s\" and everything in it?", name)
+    or string.format("Delete the file \"%s\"?", name)
+  if dirty then
+    text = text .. (is_dir and " Unsaved changes to its open files are discarded."
+      or " Its unsaved changes are discarded.")
+  end
+  core.nag_view:show(is_dir and "Delete Directory" or "Delete File", text, {
+    { text = "Delete", default_yes = true },
+    { text = "Cancel", default_no = true }
+  }, function(item)
+    if item.text ~= "Delete" then return end
+    local ok, err, path = common.rm(abs_filename, is_dir)
+    if not ok then return core.error("Cannot delete \"%s\": %s", path, err) end
+    for _, doc in ipairs(docs) do
+      for _, view in ipairs(core.get_views_referencing_doc(doc)) do
+        core.root_view.root_node:get_node_for_view(view):remove_view(core.root_view.root_node, view)
+      end
+    end
+    core.log("Deleted \"%s\"", name)
+  end)
+end
+
 local temp_uid = math.floor(system.get_time() * 1000) % 0xffffffff
 local temp_file_prefix = string.format(".lite_temp_%08x", tonumber(temp_uid))
 local temp_file_counter = 0

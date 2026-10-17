@@ -723,39 +723,7 @@ command.add(
       -- add secondary project dirs names to the file path to show
       relfilename = common.basename(item.dir_name) .. PATHSEP .. relfilename
     end
-    local file_info = system.get_file_info(filename)
-    local file_type = file_info.type == "dir" and "Directory" or "File"
-    -- Ask before deleting
-    local opt = {
-      { text = "Yes", default_yes = true },
-      { text = "No", default_no = true }
-    }
-    core.nag_view:show(
-      string.format("Delete %s", file_type),
-      string.format(
-        "Are you sure you want to delete the %s?\n%s: %s",
-        file_type:lower(), file_type, relfilename
-      ),
-      opt,
-      function(item)
-        if item.text == "Yes" then
-          if file_info.type == "dir" then
-            local deleted, error, path = common.rm(filename, true)
-            if not deleted then
-              core.error("Error: %s - \"%s\" ", error, path)
-              return
-            end
-          else
-            local removed, error = os.remove(filename)
-            if not removed then
-              core.error("Error: %s - \"%s\"", error, filename)
-              return
-            end
-          end
-          core.log("Deleted \"%s\"", filename)
-        end
-      end
-    )
+    core.confirm_delete(filename, relfilename)
   end,
 
   ["treeview:rename"] = function(item)

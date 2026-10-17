@@ -569,12 +569,7 @@ local commands = {
       core.error("Cannot remove unsaved doc")
       return
     end
-    for i,docview in ipairs(core.get_views_referencing_doc(dv.doc)) do
-      local node = core.root_view.root_node:get_node_for_view(docview)
-      node:close_view(core.root_view.root_node, docview)
-    end
-    os.remove(filename)
-    core.log("Removed \"%s\"", filename)
+    core.confirm_delete(filename, dv.doc.filename)
   end,
 
   ["doc:select-to-cursor"] = function(dv, x, y, clicks)
