@@ -112,8 +112,11 @@ end
 
 
 ---@param doc core.doc
+---@param opts? { preview?: boolean } preview: opened while browsing (following a
+---link, jumping to a location) rather than chosen by the user; a plugin may show
+---it as a preview tab that the next such open replaces (ephemeral_tabs)
 ---@return core.docview
-function RootView:open_doc(doc)
+function RootView:open_doc(doc, opts)
   local node = self:get_active_node_default()
   for i, view in ipairs(node.views) do
     if view.doc == doc then

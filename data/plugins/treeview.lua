@@ -694,7 +694,7 @@ command.add(
           core.set_active_view(core.last_active_view)
         end
         local doc_filename = core.normalize_to_project_dir(item.abs_filename)
-        core.root_view:open_doc(core.open_doc(doc_filename))
+        core.root_view:open_doc(core.open_doc(doc_filename), { preview = true })
       end)
     end
   end,
