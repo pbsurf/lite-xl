@@ -78,6 +78,12 @@ another repository's version, uninstalls removing dependents under `--assume-yes
   terminal, as a drawer (shift+alt+t) or a tab (ctrl+shift+\`). ctrl+f
   searches it in search_ui's pane, newest output first (`search_backward`). Its C
   module is built by our meson build and linked into the user dir by `scripts/run.sh`.
+* **spellcheck:** spell checking with hunspell (`/usr/share/hunspell/en_US` by
+  default), off until `spell-check:toggle` turns it on for a document. Identifiers
+  are checked by their camelCase / snake_case parts; the syntax's keywords, ALL
+  CAPS words and URLs or paths are skipped. Right click a marked word for
+  suggestions or "Add to Dictionary" (`spellcheck_words.txt` in the user dir). Its
+  C module is built by our meson build when libhunspell is found.
 * **ephemeral_tabs** (imported, with our changes): a file opened from the tree
   replaces the previous preview tab until edited or double-clicked; preview tabs
   show their name in italic (in tabs, the tab menu and the ctrl+tab list) and

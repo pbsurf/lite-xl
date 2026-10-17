@@ -122,6 +122,14 @@
       "path": "addons/plugins/terminal"
     },
     {
+      "id": "spellcheck",
+      "description": "Spell checking with hunspell, toggled per document; identifiers are checked by their camelCase/snake_case parts. The hunspell module is built by lite-xl's meson build.",
+      "version": "1.0",
+      "mod_version": "3",
+      "path": "addons/plugins/spellcheck",
+      "dependencies": { "shapes": {} }
+    },
+    {
       "id": "openurl",
       "description": "Ctrl+click opens URLs, DOIs and [[wiki links]] to local files; links can be underlined; Search Web for the selection in the context menu.",
       "version": "0.1",

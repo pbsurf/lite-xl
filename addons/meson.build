@@ -9,3 +9,13 @@ if host_machine.system() != 'windows'
         dependencies : cc.find_library('util'),
     )
 endif
+
+hunspell_dep = dependency('hunspell', required : false)
+if hunspell_dep.found()
+    shared_module('hunspell', 'plugins' / 'spellcheck' / 'hunspell.c',
+        name_prefix : '',
+        name_suffix : arch_tuple + '.so',
+        include_directories : include_directories('..' / 'resources' / 'include'),
+        dependencies : hunspell_dep,
+    )
+endif

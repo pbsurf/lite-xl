@@ -45,6 +45,9 @@ export LITE_USERDIR LITE_CLANGD
 if [ -d "$LITE_USERDIR/plugins/terminal" ]; then
   ln -sf "$build"/addons/libterminal.*.so "$LITE_USERDIR/plugins/terminal/"
 fi
+if [ -d "$LITE_USERDIR/plugins/spellcheck" ]; then
+  ln -sf "$build"/addons/hunspell.*.so "$LITE_USERDIR/plugins/spellcheck/"
+fi
 
 # Headless (SDL_VIDEO_DRIVER=offscreen), SDL backs the window surface with a GPU
 # renderer; on this VMware guest (vmwgfx) every presented frame then leaks a
