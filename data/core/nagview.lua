@@ -11,6 +11,38 @@ local UNDERLINE_MARGIN = common.round(1 * SCALE)
 
 local noop = function() end
 
+local function get_button_width(opt)
+  return style.font:get_width(opt.text) + 2 * BORDER_WIDTH + style.padding.x
+end
+
+---Splits a line into lines no wider than width: at spaces (dropped at the
+---breaks), after "/" (paths), and between characters for longer words.
+local function wrap_line(font, line, width)
+  local lines, cur = {}, ""
+  local function fits(s) return font:get_width((s:gsub(" +$", ""))) <= width end
+  for piece in line:gmatch("[^ /]*[ /]*") do
+    if piece ~= "" then
+      if not fits(cur .. piece) and cur ~= "" then
+        table.insert(lines, (cur:gsub(" +$", "")))
+        cur = ""
+      end
+      if fits(cur .. piece) then
+        cur = cur .. piece
+      else
+        for ch in piece:gmatch(utf8.charpattern) do
+          if cur ~= "" and not fits(cur .. ch) then
+            table.insert(lines, cur)
+            cur = ""
+          end
+          cur = cur .. ch
+        end
+      end
+    end
+  end
+  table.insert(lines, (cur:gsub(" +$", "")))
+  return lines
+end
+
 ---@class core.nagview : core.view
 ---@field super core.view
 local NagView = View:extend()
@@ -50,6 +82,56 @@ function NagView:get_buttons_height()
   return lh + 2 * BORDER_WIDTH + 2 * bt_padding
 end
 
+---Lays the message out for the view's width: beside the buttons if its lines
+---fit there, else above them, wrapped to the whole width; buttons that don't
+---fit in a row wrap to more. Sets self.lines, self.stacked, self.button_rows
+---and self.target_height (the height without top and bottom padding).
+function NagView:update_layout()
+  if not self.message then return end
+  local width = self.size.x > 0 and self.size.x or system.get_window_size()
+  local key = table.concat({ width, style.font:get_size(), #self.queue, self.message }, "\0")
+  if key == self.layout_key then return end
+  self.layout_key = key
+
+  local x = style.padding.x
+  if #self.queue > 0 then
+    x = x + style.font:get_width(string.format("[%d]", #self.queue)) + style.padding.x
+  end
+  -- rows of buttons: { first, last } option indices
+  self.button_rows = {}
+  local row_width
+  for i, opt in ipairs(self.options) do
+    local w = get_button_width(opt) + style.padding.x
+    if row_width and row_width + w <= width - style.padding.x then
+      self.button_rows[#self.button_rows][2] = i
+      row_width = row_width + w
+    else
+      table.insert(self.button_rows, { i, i })
+      row_width = w
+    end
+  end
+  local full_width = width - x - style.padding.x
+  local beside_width = #self.button_rows > 1 and 0 or full_width - (row_width or 0)
+
+  local paragraphs = {}
+  for line in self.message:gmatch("(.-)\n") do table.insert(paragraphs, line) end
+  self.stacked = false
+  for _, line in ipairs(paragraphs) do
+    if style.font:get_width(line) > beside_width then self.stacked = true end
+  end
+  self.lines = {}
+  for _, line in ipairs(paragraphs) do
+    for _, l in ipairs(wrap_line(style.font, line, self.stacked and full_width or beside_width)) do
+      table.insert(self.lines, l)
+    end
+  end
+
+  local message_height = self:get_message_height()
+  local buttons_height = self:get_button_rows_height()
+  self.target_height = self.stacked and message_height + style.padding.y + buttons_height
+    or math.max(message_height, buttons_height)
+end
+
 function NagView:get_target_height()
   return self.target_height + 2 * style.padding.y
 end
@@ -82,21 +164,28 @@ function NagView:change_hovered(i)
   end
 end
 
+---Height of the buttons' rows together, without padding above and below.
+function NagView:get_button_rows_height()
+  local rows = #(self.button_rows or { 1 })
+  return rows * self:get_buttons_height() + (rows - 1) * style.padding.y
+end
+
 function NagView:each_option()
   return coroutine.wrap(function()
     if not self.options then return end
-    local opt, bw,bh,ox,oy
-    bh = self:get_buttons_height()
-    ox,oy = self:get_content_offset()
-    ox = ox + self.size.x
-    oy = oy + self.show_height - bh - style.padding.y
-
-    for i = #self.options, 1, -1 do
-      opt = self.options[i]
-      bw = style.font:get_width(opt.text) + 2 * BORDER_WIDTH + style.padding.x
-
-      ox = ox - bw - style.padding.x
-      coroutine.yield(i, opt, ox,oy,bw,bh)
+    local bh = self:get_buttons_height()
+    local ox, oy = self:get_content_offset()
+    local rows = self.button_rows or { { 1, #self.options } }
+    -- the rows end at the bottom, each aligned right
+    local y = oy + self.show_height - style.padding.y - self:get_button_rows_height()
+    for _, row in ipairs(rows) do
+      local x = ox + self.size.x
+      for i = row[2], row[1], -1 do
+        local bw = get_button_width(self.options[i])
+        x = x - bw - style.padding.x
+        coroutine.yield(i, self.options[i], x, y, bw, bh)
+      end
+      y = y + bh + style.padding.y
     end
   end)
 end
@@ -180,6 +269,7 @@ end
 function NagView:update()
   if not self.visible and self.show_height <= 0 then return end
   NagView.super.update(self)
+  self:update_layout()
 
   if self.visible and core.active_view == self and self.title then
     self:move_towards(self, "show_height", self:get_target_height(), nil, "nagbar")
@@ -213,10 +303,12 @@ local function draw_nagview_message(self)
     ox = ox + style.padding.x
   end
 
-  -- draw message
+  -- draw message: centered beside the buttons, or at the top above them
   local lh = style.font:get_height() * config.line_height
-  oy = oy + style.padding.y + (self.target_height - self:get_message_height()) / 2
-  for msg_line in self.message:gmatch("(.-)\n") do
+  local message_height = self:get_message_height()
+  local area_height = self.stacked and message_height or self.target_height
+  oy = oy + style.padding.y + (area_height - message_height) / 2
+  for _, msg_line in ipairs(self.lines) do
     local ty = oy + self:get_line_text_y_offset()
     renderer.draw_text(style.font, msg_line, ox, ty, style.nagbar_text)
     oy = oy + lh
@@ -259,18 +351,12 @@ function NagView:on_scale_change(new_scale, old_scale)
   BORDER_WIDTH = common.round(1 * new_scale)
   UNDERLINE_WIDTH = common.round(2 * new_scale)
   UNDERLINE_MARGIN = common.round(1 * new_scale)
-  self.target_height = math.max(
-    self:get_message_height(),
-    self:get_buttons_height()
-  )
+  self.layout_key = nil
+  self:update_layout()
 end
 
 function NagView:get_message_height()
-  local h = 0
-  for str in string.gmatch(self.message, "(.-)\n") do
-    h = h + style.font:get_height() * config.line_height
-  end
-  return h
+  return #(self.lines or {}) * style.font:get_height() * config.line_height
 end
 
 function NagView:next()
@@ -282,10 +368,8 @@ function NagView:next()
     self.options = opts.options
     self.on_selected = opts.on_selected
 
-    local message_height = self:get_message_height()
-    -- self.target_height is the nagview height needed to display the message and
-    -- the buttons, excluding the top and bottom padding space.
-    self.target_height = math.max(message_height, self:get_buttons_height())
+    self.layout_key = nil
+    self:update_layout()
     self:change_hovered(common.find_index(self.options, "default_yes"))
 
     self.force_focus = true
