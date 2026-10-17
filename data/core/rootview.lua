@@ -634,7 +634,8 @@ end
 
 
 -- Tab tooltips: a view's get_filename() (a doc's full path), when it says more
--- than the tab's title, shown once the mouse rests on its tab for a moment
+-- than the tab's title, and a line of facts about it (get_tab_tooltip_info),
+-- shown once the mouse rests on its tab for a moment
 
 function RootView:update_tab_tooltip()
   local node = self.overlapping_node
@@ -672,29 +673,53 @@ local function get_tab_tooltip(view)
 end
 
 
+---Facts about a tab's view for its tooltip: for a doc's file, its size and
+---age on disk, and whether it has unsaved changes. Plugins can add to them.
+---@param view core.view
+---@return string[]
+function RootView:get_tab_tooltip_info(view)
+  local doc = view.doc
+  local info = doc and doc.abs_filename and system.get_file_info(doc.abs_filename)
+  if not info then return {} end
+  local t = { common.format_size(info.size), "modified " .. common.format_age(info.modified) }
+  if doc:is_dirty() then table.insert(t, "unsaved changes") end
+  return t
+end
+
+
 function RootView:draw_tab_tooltip()
   local tt = self.tab_tooltip
   if not tt.view or tt.dismissed or system.get_time() - tt.time < TAB_TOOLTIP_DELAY then
     return
   end
   local idx = tt.node:get_view_idx(tt.view)
+  if not idx then return end
   local text, project_part = get_tab_tooltip(tt.view)
-  if not (idx and text) then return end
+  local info = table.concat(self:get_tab_tooltip_info(tt.view), " · ")
+  if not text and info == "" then return end
   local tx, ty, _, th = tt.node:get_tab_rect(idx)
   self:defer_draw(function()
     local font = style.font
-    local w = font:get_width(text) + style.padding.x * 2
-    local h = font:get_height() + style.padding.y
+    local lh = font:get_height()
+    local lines = (text and 1 or 0) + (info ~= "" and 1 or 0)
+    local w = math.max(text and font:get_width(text) or 0, font:get_width(info))
+      + style.padding.x * 2
+    local h = lh * lines + style.padding.y
     local x = common.clamp(math.max(tx, tt.node.position.x), 0, self.size.x - w - 1)
     local y = ty + th + 1
     common.draw_popup_box(x, y, w, h)
     local tx = x + style.padding.x
-    local ty = y + (h - font:get_height()) / 2
-    if project_part then
-      tx = renderer.draw_text(font, project_part, tx, ty, common.lerp(style.text, style.dim, 0.5))
-      text = text:sub(#project_part + 1)
+    local ty = y + style.padding.y / 2
+    if text then
+      local px = tx
+      if project_part then
+        px = renderer.draw_text(font, project_part, px, ty, common.lerp(style.text, style.dim, 0.5))
+        text = text:sub(#project_part + 1)
+      end
+      renderer.draw_text(font, text, px, ty, style.text)
+      ty = ty + lh
     end
-    renderer.draw_text(font, text, tx, ty, style.text)
+    if info ~= "" then renderer.draw_text(font, info, tx, ty, style.dim) end
   end)
 end
 

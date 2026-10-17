@@ -765,4 +765,44 @@ function common.rm(path, recursively)
 end
 
 
+---A size in bytes for people: "512 B", "1.5 KB", "12 MB".
+---@param n integer
+---@return string
+function common.format_size(n)
+  if n < 1024 then return n .. " B" end
+  for _, unit in ipairs { "KB", "MB", "GB", "TB" } do
+    n = n / 1024
+    if n < 1024 or unit == "TB" then
+      return string.format(n < 10 and "%.1f %s" or "%.0f %s", n, unit)
+    end
+  end
+end
+
+
+---How long ago a time (seconds since the epoch, as os.time()) was: "just now",
+---"5 min ago", "3 h ago", "2 days ago", then a date.
+---@param t number
+---@return string
+function common.format_age(t)
+  local d = os.time() - t
+  if d < 60 then return "just now" end
+  if d < 3600 then return math.floor(d / 60) .. " min ago" end
+  if d < 86400 then return math.floor(d / 3600) .. " h ago" end
+  if d < 30 * 86400 then
+    local days = math.floor(d / 86400)
+    return days .. (days == 1 and " day ago" or " days ago")
+  end
+  return os.date("%Y-%m-%d", t)
+end
+
+
+---An integer with thousands separators: "12,345".
+---@param n integer
+---@return string
+function common.format_count(n)
+  local s = tostring(n):reverse():gsub("(%d%d%d)", "%1,"):reverse()
+  return (s:gsub("^(-?),", "%1"))
+end
+
+
 return common

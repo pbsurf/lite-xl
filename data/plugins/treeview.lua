@@ -10,6 +10,7 @@ local DocView = require "core.docview"
 local ContextMenu = require "core.contextmenu"
 local RootView = require "core.rootview"
 local CommandView = require "core.commandview"
+local StatusView = require "core.statusview"
 local storage = require "core.storage"
 
 config.plugins.treeview = common.merge({
@@ -33,11 +34,29 @@ local function get_depth(filename)
   return n
 end
 
+-- entries directly in a folder of the tree, as shown (ignored files left
+-- out), cached until the project's files change
+local entry_counts = setmetatable({}, { __mode = "k" })
+local function count_entries(item, dir)
+  local c = entry_counts[item]
+  if c and c.files == dir.files and c.change_id == dir.files_change_id then
+    return c.n
+  end
+  local n, depth = 0, item.depth + 1
+  local prefix = item.depth > 0 and item.filename .. PATHSEP or ""
+  for _, info in ipairs(dir.files or {}) do
+    if info.filename:sub(1, #prefix) == prefix and get_depth(info.filename) == depth then
+      n = n + 1
+    end
+  end
+  entry_counts[item] = { files = dir.files, change_id = dir.files_change_id, n = n }
+  return n
+end
+
 local function replace_alpha(color, alpha)
   local r, g, b = table.unpack(color)
   return { r, g, b, alpha }
 end
-
 
 local TreeView = View:extend()
 
@@ -277,19 +296,44 @@ function TreeView:get_scrollable_size()
 end
 
 
+---Facts about an entry, for its tooltip and the status bar: a file's size
+---and age, a folder's entry count. Plugins can add to them.
+---@return string[]
+function TreeView:get_item_info(item)
+  if item.type == "dir" then
+    local dir = core.project_dir_by_name(item.dir_name)
+    if not dir then return {} end
+    local n = count_entries(item, dir)
+    return { common.format_count(n) .. (n == 1 and " item" or " items") }
+  end
+  local info = system.get_file_info(item.abs_filename)
+  if not info then return {} end
+  return { common.format_size(info.size), "modified " .. common.format_age(info.modified) }
+end
+
+
 function TreeView:draw_tooltip()
   local text = common.home_encode(self.hovered_item.abs_filename)
-  local w, h = style.font:get_width(text), style.font:get_height(text)
+  local info = table.concat(self:get_item_info(self.hovered_item), " · ")
+  local font = style.font
+  local lh = font:get_height()
+  local w = math.max(font:get_width(text), font:get_width(info)) + style.padding.x
+  local h = lh * (info ~= "" and 2 or 1) + style.padding.y
 
   local x, y = self.tooltip.x + tooltip_offset, self.tooltip.y + tooltip_offset
-  w, h = w + style.padding.x, h + style.padding.y
-
-  if x + w > core.root_view.root_node.size.x then -- check if we can span right
+  local root_w = core.root_view.root_node.size.x
+  if x + w > root_w then -- check if we can span right
     x = x - w -- span left instead
   end
+  x = math.max(0, math.min(x, root_w - w))
 
-  common.draw_popup_box(x, y, w, h, self.tooltip.alpha / 255)
-  common.draw_text(style.font, replace_alpha(style.text, self.tooltip.alpha), text, "center", x, y, w, h)
+  local alpha = self.tooltip.alpha
+  common.draw_popup_box(x, y, w, h, alpha / 255)
+  local tx, ty = x + style.padding.x / 2, y + style.padding.y / 2
+  renderer.draw_text(font, text, tx, ty, replace_alpha(style.text, alpha))
+  if info ~= "" then
+    renderer.draw_text(font, info, tx, ty + lh, replace_alpha(style.dim, alpha))
+  end
 end
 
 
@@ -876,6 +920,95 @@ command.add(function()
   end, {
   ["treeview:remove-project-directory"] = function(item)
     core.remove_project_directory(item.dir_name)
+  end,
+})
+
+
+-- Status bar items while the treeview is focused: the selected entry (its
+-- get_item_info; click to copy its path), and how many files the project has
+
+local function is_treeview_focused()
+  return core.active_view == view
+end
+
+core.status_view:add_item({
+  predicate = function()
+    return is_treeview_focused() and view.selected_item ~= nil
+  end,
+  name = "treeview:selection",
+  alignment = StatusView.Item.LEFT,
+  get_item = function()
+    local item = view.selected_item
+    local name = item.depth > 0 and item.filename or item.name
+    if item.type == "dir" then name = name .. PATHSEP end
+    local info = view:get_item_info(item)
+    return { style.text, name, style.dim, #info > 0 and "  " .. table.concat(info, "  ·  ") or "" }
+  end,
+  command = function()
+    system.set_clipboard(view.selected_item.abs_filename)
+    core.log("Copied %s", common.home_encode(view.selected_item.abs_filename))
+  end,
+  tooltip = function()
+    local item = view.selected_item
+    local path = common.home_encode(item.abs_filename)
+    local info = item.type ~= "dir" and system.get_file_info(item.abs_filename)
+    if info then
+      path = string.format("%s, %s bytes, modified %s", path, common.format_count(info.size),
+        os.date("%Y-%m-%d %H:%M", info.modified))
+    end
+    return path .. " (click to copy the path)"
+  end,
+})
+
+-- files (not folders) in each project directory, cached until they change
+local file_counts = setmetatable({}, { __mode = "k" })
+local function count_files(dir)
+  local c = file_counts[dir]
+  if c and c.files == dir.files and c.change_id == dir.files_change_id then
+    return c.n
+  end
+  local n = 0
+  for _, info in ipairs(dir.files or {}) do
+    if info.type == "file" then n = n + 1 end
+  end
+  file_counts[dir] = { files = dir.files, change_id = dir.files_change_id, n = n }
+  return n
+end
+
+local function any_files_limit()
+  for _, dir in ipairs(core.project_directories) do
+    if dir.files_limit then return true end
+  end
+  return false
+end
+
+core.status_view:add_item({
+  predicate = is_treeview_focused,
+  name = "treeview:files",
+  alignment = StatusView.Item.RIGHT,
+  get_item = function()
+    local n = 0
+    for _, dir in ipairs(core.project_directories) do n = n + count_files(dir) end
+    if any_files_limit() then
+      return { style.warn, style.icon_font, "!", style.font,
+        " " .. common.format_count(n) .. "+ files (not all indexed)" }
+    end
+    return { style.text, common.format_count(n) .. (n == 1 and " file" or " files") }
+  end,
+  tooltip = function()
+    local lines = {}
+    for _, dir in ipairs(core.project_directories) do
+      table.insert(lines, string.format("%s: %s files", common.basename(dir.name),
+        common.format_count(count_files(dir))))
+      if dir.files_limit then
+        table.insert(lines, dir.slow_filesystem
+          and "  Filesystem too slow: only opened folders are scanned"
+          or string.format("  Over max_project_files (%d): only opened folders are scanned,",
+            config.max_project_files))
+        table.insert(lines, "  so Find File and project search miss files")
+      end
+    end
+    return table.concat(lines, "\n")
   end,
 })
 

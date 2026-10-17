@@ -250,6 +250,8 @@ local function refresh_directory(topdir, target)
   if change then
     core.redraw = true
     topdir.is_dirty = true
+    -- for those that cache what they computed from topdir.files
+    topdir.files_change_id = (topdir.files_change_id or 0) + 1
   end
   return change
 end
