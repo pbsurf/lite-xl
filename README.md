@@ -60,6 +60,9 @@ upstream's `release/v2.1.x`. Additions to the editor:
   it's focused, the status bar shows the selected entry and the project's file
   count, warning when it's over `config.max_project_files`.
 * **Command view:** clicking a suggestion (ctrl+p, Do Command, ...) submits it.
+* **System file dialogs:** `core:open-file-picker`, `doc:save-as-picker` and the
+  folder commands' `-picker` versions (from upstream master's SDL3 dialogs); the
+  menubar's File menu uses them, while key bindings keep the command view.
 * **Block select:** `doc:select-block`, bound to a click (e.g.
   `keymap.add { ["alt+1lclick"] = "doc:select-block" }`), selects a rectangle
   while dragging.
