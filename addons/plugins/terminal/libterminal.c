@@ -535,7 +535,10 @@ static int terminal_escape_sequence(terminal_t* terminal, terminal_escape_type_e
         }
       } break;
       case 'c': {
-        terminal_input(terminal, "\e[?1;2c", 7);
+        if (seq[2] == '>') // secondary: as xterm 277, the first with SGR mouse (1006)
+          terminal_input(terminal, "\e[>0;277;0c", 11);
+        else if (seq[2] != '=')
+          terminal_input(terminal, "\e[?1;2c", 7);
       } break;
       case 'd': view->cursor_y = min(max(max(parse_number(&seq[2], 1), 1) - 1, 0), terminal->lines - 1); break;
       case 'h': {
@@ -700,8 +703,8 @@ static int terminal_escape_sequence(terminal_t* terminal, terminal_escape_type_e
       } break;
       case 'n': {
         if (parse_number(&seq[2], 0) == 6) {
-          char buffer[12];
-          int length = snprintf(buffer, sizeof(buffer), "\x1B[%d;%dR", view->cursor_y, view->cursor_x);
+          char buffer[32];
+          int length = snprintf(buffer, sizeof(buffer), "\x1B[%d;%dR", view->cursor_y + 1, view->cursor_x + 1);
           terminal_input(terminal, buffer, length);
         } else
           unhandled = 1;
