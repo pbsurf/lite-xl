@@ -10,10 +10,13 @@ local DocView = require "core.docview"
 local ContextMenu = require "core.contextmenu"
 local RootView = require "core.rootview"
 local CommandView = require "core.commandview"
+local storage = require "core.storage"
 
 config.plugins.treeview = common.merge({
   -- Default treeview width
-  size = 200 * SCALE
+  size = 200 * SCALE,
+  -- Dragging the treeview's divider narrower than this collapses the treeview
+  collapse_size = 100 * SCALE,
 }, config.plugins.treeview)
 
 local tooltip_offset = style.font:get_height()
@@ -57,6 +60,17 @@ end
 
 function TreeView:set_target_size(axis, value)
   if axis == "x" then
+    if core.root_view.dragged_divider then
+      -- dragged narrower than collapse_size, it collapses, keeping the width it
+      -- had when the drag started to reopen with; dragged wider, it reopens
+      self.drag_start_size = self.drag_start_size or self.target_size
+      if value < config.plugins.treeview.collapse_size then
+        self.visible = false
+        self.target_size = self.drag_start_size
+        return true
+      end
+      self.visible = true
+    end
     self.target_size = value
     return true
   end
@@ -508,13 +522,31 @@ if config.plugins.toolbarview ~= false and toolbar_plugin then
   })
 end
 
+-- The width (unscaled) and visibility it was left with, kept between sessions
+local saved = storage.load("treeview", "state")
+if type(saved) == "table" and type(saved.size) == "number" then
+  view:set_target_size("x", saved.size * SCALE)
+  view.visible = saved.visible ~= false
+end
+local on_quit_project = core.on_quit_project
+function core.on_quit_project()
+  core.try(storage.save, "treeview", "state", { size = view.target_size / SCALE, visible = view.visible })
+  on_quit_project()
+end
+
 -- Add a context menu to the treeview
 local menu = ContextMenu()
 
 local on_view_mouse_pressed = RootView.on_view_mouse_pressed
 local on_mouse_moved = RootView.on_mouse_moved
+local on_mouse_released = RootView.on_mouse_released
 local root_view_update = RootView.update
 local root_view_draw = RootView.draw
+
+function RootView:on_mouse_released(...)
+  view.drag_start_size = nil -- a divider drag ended
+  return on_mouse_released(self, ...)
+end
 
 function RootView:on_mouse_moved(...)
   if menu:on_mouse_moved(...) then return end

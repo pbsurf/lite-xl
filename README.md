@@ -46,6 +46,9 @@ upstream's `release/v2.1.x`. Additions to the editor:
   of a plugin's bindings to keep (`{ build = { "f6" }, debugger = false }`);
   `keymap.origin` records which plugin added each.
 * **Touch:** tap to click, drag to scroll.
+* **File browser:** keeps its width and visibility between sessions, and
+  dragging its divider narrower than `config.plugins.treeview.collapse_size`
+  collapses it (toggling reopens it at the width it had before the drag).
 * **Block select:** `doc:select-block`, bound to a click (e.g.
   `keymap.add { ["alt+1lclick"] = "doc:select-block" }`), selects a rectangle
   while dragging.
