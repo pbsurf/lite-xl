@@ -1323,12 +1323,12 @@ static int f_terminal_lines(lua_State* L) {
     int offset = -start;
     backbuffer_page_t* current_backbuffer = terminal_find_scrollback_page(terminal, terminal->scrollback_target, &offset, &top_offset);
     int lines_into_buffer = top_offset - offset;
-    while (current_backbuffer) {
+    while (current_backbuffer && remaining_lines > 0) {
       int* backbuffer_overflows = (int*)&current_backbuffer->buffer[LIBTERMINAL_BACKBUFFER_PAGE_LINES*current_backbuffer->columns];
       for (int y = lines_into_buffer; y < current_backbuffer->line; ++y) {
         output_line(L, &current_backbuffer->buffer[y * current_backbuffer->columns], &current_backbuffer->buffer[(y+1) * current_backbuffer->columns], backbuffer_overflows[y]);
         lua_rawseti(L, -2, ++total_lines);
-        if (remaining_lines == 0)
+        if (--remaining_lines == 0)
           break;
       }
       current_backbuffer = current_backbuffer->next;
