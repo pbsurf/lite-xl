@@ -27,6 +27,7 @@ local function save_session()
   local fp = io.open(USERDIR .. PATHSEP .. "session.lua", "w")
   if fp then
     fp:write("return {recents=", common.serialize(core.recent_projects),
+      ", recent_files=", common.serialize(core.recent_files),
       ", window=", common.serialize(table.pack(system.get_window_size())),
       ", window_mode=", common.serialize(system.get_window_mode()),
       ", previous_find=", common.serialize(core.previous_find),
@@ -34,6 +35,23 @@ local function save_session()
       "}\n")
     fp:close()
   end
+end
+
+
+-- Files made active, absolute paths, newest first, kept between sessions (unlike
+-- core.visited_files, which is for the project's files and kept per session)
+local MAX_RECENT_FILES = 50
+
+local function add_recent_file(abs_filename)
+  local recents = core.recent_files
+  for i = 1, #recents do
+    if recents[i] == abs_filename then
+      table.remove(recents, i)
+      break
+    end
+  end
+  table.insert(recents, 1, abs_filename)
+  recents[MAX_RECENT_FILES + 1] = nil
 end
 
 
@@ -709,6 +727,7 @@ function core.init()
       system.set_window_mode("maximized")
     end
     core.recent_projects = session.recents or {}
+    core.recent_files = session.recent_files or {}
     core.previous_find = session.previous_find or {}
     core.previous_replace = session.previous_replace or {}
   end
@@ -1237,6 +1256,7 @@ function core.set_active_view(view)
     core.next_active_view = nil
     if view.doc and view.doc.filename then
       core.set_visited(view.doc.filename)
+      add_recent_file(view.doc.abs_filename)
     end
     core.last_active_view = core.active_view
     core.active_view = view
