@@ -9,7 +9,9 @@ local common = require "core.common"
 local config = require "core.config"
 local command = require "core.command"
 local style = require "core.style"
+local keymap = require "core.keymap"
 local DocView = require "core.docview"
+local StatusView = require "core.statusview"
 local ContextMenu = require "core.contextmenu"
 local shapes = require "libraries.shapes"
 
@@ -22,6 +24,8 @@ config.plugins.spellcheck = common.merge({
   -- words (or identifier parts) shorter than this aren't checked
   min_length = 0,
   max_suggestions = 8,
+  -- a status bar item showing whether the document is checked; click to toggle
+  status_item = true,
   config_spec = {
     name = "Spell Check",
     {
@@ -38,6 +42,13 @@ config.plugins.spellcheck = common.merge({
       type = "number",
       default = 0,
       min = 0
+    },
+    {
+      label = "Status Bar Item",
+      description = "Show whether the document is spell checked on the status bar; click it to toggle.",
+      path = "status_item",
+      type = "toggle",
+      default = true
     },
   }
 }, config.plugins.spellcheck)
@@ -205,6 +216,24 @@ command.add("core.docview", {
     if not dv.doc.spellcheck and not get_checker() then return end
     dv.doc.spellcheck = not dv.doc.spellcheck
     core.redraw = true
+  end,
+})
+
+core.status_view:add_item({
+  predicate = function()
+    return config.plugins.spellcheck.status_item and core.active_view:is(DocView)
+  end,
+  name = "spellcheck:toggle",
+  alignment = StatusView.Item.RIGHT,
+  priority = -5,
+  get_item = function()
+    return { core.active_view.doc.spellcheck and style.accent or style.dim, "Spell" }
+  end,
+  command = "spell-check:toggle",
+  tooltip = function()
+    local key = keymap.get_binding("spell-check:toggle")
+    return string.format("Spell check: %s (click%s to toggle)",
+      core.active_view.doc.spellcheck and "on" or "off", key and " or " .. key or "")
   end,
 })
 
