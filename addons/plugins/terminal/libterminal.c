@@ -614,19 +614,21 @@ static int terminal_escape_sequence(terminal_t* terminal, terminal_escape_type_e
                   int is_inversed = display_number == 7;
                   if (is_inversed != view->cursor_styling_inversed) {
                     view->cursor_styling_inversed = is_inversed;
-                    color_t background = view->cursor_styling.background;
-                    if (view->cursor_styling.foreground.value == UNSET_COLOR.value)
-                      view->cursor_styling.background = INVERSE_COLOR;
-                    else if (view->cursor_styling.foreground.value == INVERSE_COLOR.value)
-                      view->cursor_styling.background = UNSET_COLOR;
-                    else
-                      view->cursor_styling.background = view->cursor_styling.foreground;
-                    if (background.value == UNSET_COLOR.value)
-                      view->cursor_styling.foreground = INVERSE_COLOR;
-                    else if (background.value == INVERSE_COLOR.value)
-                      view->cursor_styling.foreground = UNSET_COLOR;
-                    else
-                      view->cursor_styling.foreground = view->cursor_styling.background;
+                    // swap the colors, the styling (bold...) staying on the foreground;
+                    // the default colors stand in for each other: UNSET (the default
+                    // of its side) <-> INVERSE (the default of the other side)
+                    uint8_t styling = view->cursor_styling.foreground.attributes & ATTRIBUTE_STYLING_MASK;
+                    color_t colors[2] = { view->cursor_styling.foreground, view->cursor_styling.background };
+                    for (int i = 0; i < 2; ++i) {
+                      colors[i].attributes &= ~ATTRIBUTE_STYLING_MASK;
+                      if (colors[i].value == UNSET_COLOR.value)
+                        colors[i] = INVERSE_COLOR;
+                      else if (colors[i].value == INVERSE_COLOR.value)
+                        colors[i] = UNSET_COLOR;
+                    }
+                    view->cursor_styling.foreground = colors[1];
+                    view->cursor_styling.foreground.attributes |= styling;
+                    view->cursor_styling.background = colors[0];
                   }
                 } break;
                 case 30 : target_foreground = 1; target_color = view->palette[0]; break;
@@ -685,8 +687,12 @@ static int terminal_escape_sequence(terminal_t* terminal, terminal_escape_type_e
             } break;
           }
           if (target_color.value != UNTARGETED_COLOR.value) {
-            if (view->cursor_styling_inversed)
+            if (view->cursor_styling_inversed) {
               target_foreground = !target_foreground;
+              // the default color of one side, set on the other
+              if (target_color.value == UNSET_COLOR.value)
+                target_color = INVERSE_COLOR;
+            }
             if (target_foreground) {
               uint8_t attributes = view->cursor_styling.foreground.attributes;
               view->cursor_styling.foreground = target_color;
