@@ -405,7 +405,10 @@ static int f_wait_event(lua_State *L) {
   if (nargs >= 1) {
     double n = luaL_checknumber(L, 1);
     if (n < 0) n = 0;
-    lua_pushboolean(L, SDL_WaitEventTimeout(NULL, n * 1000));
+    // round up: SDL takes whole milliseconds, and truncating made waits under
+    // 1 ms return at once, so the main loop spun until the next thread was due
+    double ms = SDL_ceil(n * 1000);
+    lua_pushboolean(L, SDL_WaitEventTimeout(NULL, ms < SDL_MAX_SINT32 ? (Sint32) ms : SDL_MAX_SINT32));
   } else {
     lua_pushboolean(L, SDL_WaitEvent(NULL));
   }
