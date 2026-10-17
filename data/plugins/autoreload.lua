@@ -63,10 +63,10 @@ local function check_prompt_reload(doc)
   if doc and doc.deferred_reload then
     core.nag_view:show("File Changed", doc.filename .. " has changed on disk. Reload it?"
       .. (doc:is_dirty() and " Undo brings back your unsaved changes." or ""), {
-      { text = "Yes", default_yes = true },
-      { text = "No", default_no = true }
+      { text = "Reload", default_yes = true },
+      { text = "Keep Current", default_no = true }
     }, function(item)
-      if item.text == "Yes" then reload_doc(doc) end
+      if item.text == "Reload" then reload_doc(doc) end
       doc.deferred_reload = false
     end)
   end
