@@ -3,10 +3,9 @@
 -- repl: evaluate Lua sent from outside the editor (client: scripts/lxeval).
 --
 -- Requests are files req-<id>.lua in $XDG_RUNTIME_DIR/lite-xl-<pid>/, and each reply
--- is written to resp-<id>.  Requests are picked up every 10ms by a core thread.  While
--- the window is unfocused and idle, lite-xl blocks in system.wait_event() with no
--- timeout and threads don't run, so the directory is also watched with a dirmonitor,
--- whose inotify thread wakes the event loop when a request arrives.
+-- is written to resp-<id>.  The directory is watched with a dirmonitor, and a core
+-- thread waits for its changes ("dirchange"), so requests are picked up at once
+-- without polling.
 --
 -- If Lua is stuck in a loop, that thread never runs.  For that case every coroutine
 -- has a count hook registered but not armed (an armed hook roughly halves the speed
@@ -28,7 +27,7 @@ local common = require "core.common"
 local config = require "core.config"
 
 config.plugins.repl = common.merge({
-  -- seconds without the polling thread running before the hook takes over
+  -- seconds a request waits for the thread before the hook takes over
   stall = 0.5,
   -- keep the hook armed (see above) rather than arming it from gdb when needed
   always_armed = false,
@@ -197,8 +196,8 @@ local function service(context)
   servicing = false
 end
 
--- wakes the event loop on changes in dir; check() below consumes the change (until
--- then the monitor thread keeps posting wake-up events)
+-- posts "dirchange" on changes in dir; check() below consumes the change (until
+-- then the monitor thread keeps posting it)
 local monitor = dirmonitor.new()
 monitor:watch(dir)
 
@@ -209,25 +208,41 @@ core.add_thread(function()
     local ok, err = pcall(service)
     abort_requested = false -- only meaningful while stuck
     if not ok then servicing = false; core.error("repl: %s", err) end
-    coroutine.yield(0.01)
+    core.wait_for("dirchange")
   end
 end)
+
+local function request_pending()
+  for _, name in ipairs(system.list_dir(dir) or {}) do
+    if name:match("^req%-.+%.lua$") then return true end
+  end
+  return false
+end
 
 
 -- count used when the hook is armed here; lxeval -g arms with its own count
 local ARMED_COUNT = 1000000
 local last_check = 0
+-- when the hook first saw the pending request
+local pending_since
 
+-- stuck: a request has waited longer than `stall` without the thread taking it
 local function hook()
   if servicing then return end
   local now = system.get_time()
-  if now - last_service < config.plugins.repl.stall then
-    -- armed by lxeval -g, and no longer stuck
+  if now - last_check < 0.05 then return end
+  last_check = now
+  if not request_pending() then
+    -- armed by lxeval -g and done, or no longer stuck
+    pending_since = nil
     if not config.plugins.repl.always_armed then debug.sethook(hook, "", 0) end
     return
   end
-  if now - last_check < 0.05 then return end
-  last_check = now
+  pending_since = pending_since or now
+  if now - pending_since < config.plugins.repl.stall
+     or now - last_service < config.plugins.repl.stall then
+    return
+  end
   -- level 2 is the function that was running when the hook fired
   local context = {
     where = debug.traceback(string.format("stuck for %.1fs", now - last_service), 2),
@@ -241,6 +256,7 @@ local function hook()
   end
   pcall(service, context)
   servicing = false
+  pending_since = nil
   if abort_requested then
     abort_requested = false
     error("aborted by repl", 2)
