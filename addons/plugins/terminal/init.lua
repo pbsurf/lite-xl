@@ -1095,7 +1095,6 @@ local keys = {
   ["alt+backspace"] = "terminal:alt-backspace",
   ["ctrl+shift+c"] = "terminal:copy",
   ["ctrl+shift+v"] = "terminal:paste",
-  ["ctrl+shift+f"] = "terminal:find",
   ["mclick"] = "terminal:primary-paste",
   ["wheel"] = "terminal:scroll",
   ["tab"] = "terminal:tab",
@@ -1135,7 +1134,8 @@ local keys = {
   ["ctrl+c"] = "terminal:break",
   ["ctrl+d"] = "terminal:eof",
   ["ctrl+e"] = "terminal:enquiry",
-  ["ctrl+f"] = "terminal:acknowledge",
+  -- not ^F: the shell's forward-char, as right is
+  ["ctrl+f"] = "terminal:find",
   ["ctrl+g"] = "terminal:bell",
   ["ctrl+h"] = "terminal:backspace",
   ["ctrl+i"] = "terminal:tab",
