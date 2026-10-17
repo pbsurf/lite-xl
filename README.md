@@ -102,6 +102,11 @@ another repository's version, uninstalls removing dependents under `--assume-yes
   (`name`, `name.md`, ... in the file's directory or a parent; `[[name#Heading]]`
   jumps to the heading); links are underlined unless `underline = false`. "Search
   Web" in the context menu searches for the selection (`search_url`).
+* **gitfiles:** in a git repository, the project's files (tree view, ctrl+p,
+  project search) are those git doesn't ignore, hidden ones included, rather than
+  what `config.ignore_files` lets through; untracked files are green in the tree
+  view. "Show All Files" in the tree view's context menu shows everything but
+  `.git` (ignored files dimmed), per project.
 * **navigate** (imported, rewritten): alt+left / alt+right go back and forward
   through the places the cursor jumped from (another file, or a move of more than
   `config.plugins.navigate.jump_threshold` lines), alt+shift+left / alt+shift+right

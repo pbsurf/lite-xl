@@ -137,6 +137,13 @@
       "path": "addons/plugins/openurl.lua"
     },
     {
+      "id": "gitfiles",
+      "description": "In a git repository, the project's files are those git doesn't ignore; untracked files marked in the treeview; Show All Files in its context menu.",
+      "version": "0.1",
+      "mod_version": "3",
+      "path": "addons/plugins/gitfiles.lua"
+    },
+    {
       "id": "widget",
       "type": "library",
       "description": "Widget toolkit (lite-xl-widgets) that doesn't queue redraws when showing a visible widget.",
