@@ -246,6 +246,15 @@ local function timed_max_files_pred(dir, filename, entries_count, t_elapsed)
 end
 
 
+---Called when the watch of project directory `topdir` (an entry of
+---core.project_directories) reports a change in `path`, the absolute path of
+---a directory being watched (topdir.name or one in it), before refreshing its
+---file list: for plugins to override.
+---@param topdir table
+---@param path string
+function core.on_project_directory_change(topdir, path) end
+
+
 function core.add_project_directory(path)
   -- top directories has a file-like "item" but the item.filename
   -- will be simply the name of the directory, without its path.
@@ -285,6 +294,7 @@ function core.add_project_directory(path)
   topdir.watch_thread = core.add_thread(function()
     while true do
       local changed = topdir.watch:check(function(target)
+        core.on_project_directory_change(topdir, target)
         if target == topdir.name then return refresh_directory(topdir) end
         local dirpath = target:sub(#topdir.name + 2)
         local abs_dirpath = topdir.name .. PATHSEP .. dirpath
@@ -385,17 +395,21 @@ end
 -- Find files and directories recursively reading from the filesystem.
 -- Filter files and yields file's directory and info table. This latter
 -- is filled to be like required by project directories "files" list.
-local function find_files_rec(root, path)
+local function find_files_rec(dir, path, ignore_compiled)
+  local root = dir.name
+  ignore_compiled = ignore_compiled or dirwatch.compile_ignore_files()
   local all = system.list_dir(root .. path) or {}
   for _, file in ipairs(all) do
     local file = path .. PATHSEP .. file
     local info = system.get_file_info(root .. file)
-    if info then
+    if info and info.type then
       info.filename = strip_leading_path(file)
-      if info.type == "file" then
-        coroutine.yield(root, info)
-      elseif not common.match_pattern(common.basename(info.filename), config.ignore_files) then
-        find_files_rec(root, PATHSEP .. info.filename)
+      if dirwatch.project_file_filter(dir, info, ignore_compiled) then
+        if info.type == "file" then
+          coroutine.yield(root, info)
+        else
+          find_files_rec(dir, PATHSEP .. info.filename, ignore_compiled)
+        end
       end
     end
   end
@@ -408,7 +422,7 @@ local function project_files_iter(state)
   if state.co then
     -- We have a coroutine to fetch for files, use the coroutine.
     -- Used for directories that exceeds the files nuumber limit.
-    local ok, name, file = coroutine.resume(state.co, dir.name, "")
+    local ok, name, file = coroutine.resume(state.co, dir, "")
     if ok and name then
       return name, file
     else

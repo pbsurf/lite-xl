@@ -140,7 +140,7 @@ end
 
 
 -- inspect config.ignore_files patterns and prepare ready to use entries.
-local function compile_ignore_files()
+function dirwatch.compile_ignore_files()
   local ipatterns = config.ignore_files
   local compiled = {}
   -- config.ignore_files could be a simple string...
@@ -161,7 +161,6 @@ end
 
 
 local function fileinfo_pass_filter(info, ignore_compiled)
-  if info.size >= config.file_size_limit * 1e6 then return false end
   local basename = common.basename(info.filename)
   -- replace '\' with '/' for Windows where PATHSEP = '\'
   local fullname = "/" .. info.filename:gsub("\\", "/")
@@ -181,6 +180,19 @@ local function fileinfo_pass_filter(info, ignore_compiled)
 end
 
 
+---Whether a file or directory found scanning project directory `dir` (an entry
+---of core.project_directories) belongs to the project: by default, unless
+---config.ignore_files matches it. A directory left out isn't scanned further.
+---Plugins may replace this (e.g. to ask git), calling it for the default.
+---@param dir table
+---@param info system.fileinfo with `filename` relative to `dir.name`
+---@param ignore_compiled table from dirwatch.compile_ignore_files()
+---@return boolean
+function dirwatch.project_file_filter(dir, info, ignore_compiled)
+  return fileinfo_pass_filter(info, ignore_compiled)
+end
+
+
 local function compare_file(a, b)
   return system.path_compare(a.filename, a.type, b.filename, b.type)
 end
@@ -188,13 +200,14 @@ end
 
 -- compute a file's info entry completed with "filename" to be used
 -- in project scan or falsy if it shouldn't appear in the list.
-local function get_project_file_info(root, file, ignore_compiled)
+local function get_project_file_info(dir, root, file, ignore_compiled)
   local info = system.get_file_info(root .. PATHSEP .. file)
   -- info can be not nil but info.type may be nil if is neither a file neither
   -- a directory, for example for /dev/* entries on linux.
   if info and info.type then
+    if info.size >= config.file_size_limit * 1e6 then return end
     info.filename = file
-    return fileinfo_pass_filter(info, ignore_compiled) and info
+    return dirwatch.project_file_filter(dir, info, ignore_compiled) and info
   end
 end
 
@@ -210,13 +223,13 @@ end
 function dirwatch.get_directory_files(dir, root, path, entries_count, recurse_pred)
   local t = {}
   local t0 = system.get_time()
-  local ignore_compiled = compile_ignore_files()
+  local ignore_compiled = dirwatch.compile_ignore_files()
 
   local all = system.list_dir(root .. PATHSEP .. path)
   if not all then return nil end
   local entries = { }
   for _, file in ipairs(all) do
-    local info = get_project_file_info(root, (path ~= "" and (path .. PATHSEP) or "") .. file, ignore_compiled)
+    local info = get_project_file_info(dir, root, (path ~= "" and (path .. PATHSEP) or "") .. file, ignore_compiled)
     if info then
       table.insert(entries, info)
     end
