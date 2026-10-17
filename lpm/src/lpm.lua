@@ -481,14 +481,17 @@ function common.symlink(src, dst)
   error(result)
 end
 
-function common.copy(src, dst, hidden, symlink)
+-- keep_links: copy symlinks as symlinks (same target), not what they point to
+function common.copy(src, dst, hidden, symlink, keep_links)
   local src_stat, dst_stat = system.stat(src), system.stat(dst)
   if not src_stat then error("can't find " .. src) end
   if not hidden and common.basename(src):find("^%.") then return end
-  if dst_stat and dst_stat.type == "dir" then return common.copy(src, dst .. PATHSEP .. common.basename(src), hidden, symlink) end
-  if src_stat.type == "dir" then
+  if dst_stat and dst_stat.type == "dir" then return common.copy(src, dst .. PATHSEP .. common.basename(src), hidden, symlink, keep_links) end
+  if keep_links and type(src_stat.symlink) == "string" then
+    common.symlink(src_stat.symlink, dst)
+  elseif src_stat.type == "dir" then
     common.mkdirp(dst)
-    for i, file in ipairs(system.ls(src)) do common.copy(src .. PATHSEP .. file, dst .. PATHSEP .. file, hidden, symlink) end
+    for i, file in ipairs(system.ls(src)) do common.copy(src .. PATHSEP .. file, dst .. PATHSEP .. file, hidden, symlink, keep_links) end
   elseif not symlink then
     local src_io, err1 = io.open(src, "rb")
     if err1 then error("can't open for reading " .. src .. ": " .. err1) end
@@ -508,7 +511,7 @@ function common.copy(src, dst, hidden, symlink)
 end
 function common.rename(src, dst)
   if not os.rename(src, dst) then
-    common.copy(src, dst)
+    common.copy(src, dst, true, false, true)
     common.rmrf(src)
   end
 end

@@ -10,10 +10,8 @@
 #   scripts/lpm install --symlink lsp repl
 #   scripts/lpm install --no-install-optional bracketmatch search_ui
 #
-# lpm's settings (repositories, installed add-ons) are per user dir, in <userdir>/lpm,
-# and so is its staging dir: lpm moves an install from there into the user dir, and
-# across filesystems that move is a copy that turns symlinks into files.  The repo
-# cache is shared.
+# lpm is our fork (lpm/ here).  Its settings (repositories, installed add-ons) are per
+# user dir, in <userdir>/lpm; the repo cache is shared.
 #
 # Environment:
 #   LITE_BUILD    meson build dir (default: build/), as for run.sh
@@ -28,7 +26,7 @@ build=${LITE_BUILD:-$src/build}
 userdir=${LITE_USERDIR:-$top/user}
 lpm=${LPM:-$build/lpm/lpm}
 
-args=(--userdir="$userdir" --configdir="$userdir/lpm" --tmpdir="$userdir/lpm/tmp"
+args=(--userdir="$userdir" --configdir="$userdir/lpm"
       --cachedir="$top/tools/lpm-cache"
       --datadir="$build/run/share/lite-xl" --binary="$build/run/bin/lite-xl")
 
