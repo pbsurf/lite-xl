@@ -112,8 +112,11 @@ another repository's version, uninstalls removing dependents under `--assume-yes
 * **openurl:** ctrl+click opens the URL or DOI under the mouse in the browser
   (DOIs via `config.plugins.openurl.doi_url`), or a `[[wiki link]]` to a local file
   (`name`, `name.md`, ... in the file's directory or a parent; `[[name#Heading]]`
-  jumps to the heading); links are underlined unless `underline = false`. "Search
-  Web" in the context menu searches for the selection (`search_url`).
+  jumps to the heading), or the path of an existing file, with an optional
+  `:line:col` (relative to the file's directory or a project directory); links are
+  underlined unless `underline = false`. With ctrl held, what ctrl+click would open
+  is underlined, including lsp's go-to-definition targets. "Search Web" in the
+  context menu searches for the selection (`search_url`).
 * **gitfiles:** in a git repository, the project's files (tree view, ctrl+p,
   project search) are those git doesn't ignore, hidden ones included, rather than
   what `config.ignore_files` lets through; untracked files are green in the tree

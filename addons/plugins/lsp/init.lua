@@ -2758,6 +2758,68 @@ end, {
 })
 command.hidden["lsp:goto-definition-at-mouse"] = true
 
+-- ctrl+hover: the symbol under the mouse is underlined if it has a definition for
+-- ctrl+click to go to, asked of the server once per symbol hovered
+local definition_hover = {}
+
+local function definition_server(doc)
+  for _, name in pairs(lsp.get_active_servers(doc.filename, true)) do
+    local caps = lsp.servers_running[name].capabilities
+    for _, method in ipairs({ "definition", "declaration", "typeDefinition" }) do
+      if caps[method .. "Provider"] then return lsp.servers_running[name], method end
+    end
+  end
+end
+
+-- the word at ctrl+hover in dv on its line, as col1, col2 (exclusive), if ctrl+click
+-- there would go to its definition
+local function ctrl_hover_symbol(dv, line)
+  local x, y = dv:get_ctrl_hover()
+  if not x then return end
+  local hline, col = dv:resolve_screen_position(x, y)
+  if hline ~= line
+    or keymap.get_command("ctrl+1lclick", x, y) ~= "lsp:goto-definition-at-mouse" then
+    return
+  end
+  -- col is the nearest character boundary: left of it is the previous character
+  if x < dv:get_line_screen_position(line, col) then col = col - 1 end
+  local char = dv.doc:get_char(line, col)
+  if char == "" or char:find("%s") or config.non_word_chars:find(char, 1, true) then
+    return
+  end
+  local _, col1 = translate.start_of_word(dv.doc, line, col)
+  local _, col2 = translate.end_of_word(dv.doc, line, col)
+  return col1, col2
+end
+
+local DocView_draw_line_text = DocView.draw_line_text
+function DocView:draw_line_text(line, x, y)
+  local lh = DocView_draw_line_text(self, line, x, y)
+  local col1, col2 = ctrl_hover_symbol(self, line)
+  if not col1 then return lh end
+  local doc = self.doc
+  local key = table.concat({ tostring(doc), doc:get_change_id(), line, col1 }, ":")
+  if definition_hover.key ~= key then
+    definition_hover = { key = key }
+    local server, method = definition_server(doc)
+    if server then
+      lsp.update_document(doc)
+      server:push_request("textDocument/" .. method, {
+        params = get_buffer_position_params(doc, line, col1),
+        callback = function(_, response)
+          if definition_hover.key ~= key then return end
+          local location = response.result
+          definition_hover.found = location ~= nil and (location.uri ~= nil or #location > 0)
+          core.redraw = true
+        end
+      })
+    end
+  elseif definition_hover.found then
+    self:draw_ctrl_hover(line, x, y, col1, col2)
+  end
+  return lh
+end
+
 --
 -- Default Keybindings
 --

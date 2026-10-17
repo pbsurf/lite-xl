@@ -360,6 +360,7 @@ end
 function DocView:on_mouse_moved(x, y, ...)
   DocView.super.on_mouse_moved(self, x, y, ...)
 
+  self.mouse_position = { x = x, y = y }
   self.hovering_gutter = false
   local gw = self:get_gutter_width()
 
@@ -447,6 +448,63 @@ function DocView:on_mouse_pressed(button, x, y, clicks)
     self.gutter_selecting = line
   end
   return true
+end
+
+
+function DocView:on_mouse_left()
+  DocView.super.on_mouse_left(self)
+  self.mouse_position = nil
+end
+
+
+---Where the mouse is over the text while ctrl is held: add-ons that give ctrl+click
+---a target there show it with draw_ctrl_hover. nil otherwise.
+---@return number? x
+---@return number? y
+function DocView:get_ctrl_hover()
+  local m = self.mouse_position
+  if not m or not keymap.modkeys["ctrl"] or self.mouse_selecting
+    or self.hovering_gutter or self:scrollbar_hovering() then
+    return
+  end
+  return m.x, m.y
+end
+
+
+---Underlines columns col1 to col2 - 1 of a line drawn at x, y, in the color of the
+---text at col1.
+---@param line integer
+---@param x number
+---@param y number
+---@param col1 integer
+---@param col2 integer
+function DocView:draw_underline(line, x, y, col1, col2)
+  local color, col = style.text, 1
+  for _, type, text in self.doc.highlighter:each_token(line) do
+    if col + #text > col1 then
+      color = style.syntax[type] or style.text
+      break
+    end
+    col = col + #text
+  end
+  local thickness = math.max(1, math.floor(SCALE + 0.5))
+  local uy = y + self:get_line_text_y_offset() + self:get_font():get_height() - thickness
+  local x1 = x + self:get_col_x_offset(line, col1)
+  local x2 = x + self:get_col_x_offset(line, col2)
+  renderer.draw_rect(x1, uy, x2 - x1, thickness, color)
+end
+
+
+---Shows columns col1 to col2 - 1 of a line drawn at x, y as what ctrl+click at
+---get_ctrl_hover() would open: underlined, with a hand for the mouse cursor.
+---@param line integer
+---@param x number
+---@param y number
+---@param col1 integer
+---@param col2 integer
+function DocView:draw_ctrl_hover(line, x, y, col1, col2)
+  self:draw_underline(line, x, y, col1, col2)
+  self.ctrl_hover_shown = true
 end
 
 
@@ -696,6 +754,7 @@ function DocView:draw_overlay()
 end
 
 function DocView:draw()
+  self.ctrl_hover_shown = false
   self:draw_background(style.background)
   local _, indent_size = self.doc:get_indent_info()
   self:get_font():set_tab_size(indent_size)
@@ -721,6 +780,15 @@ function DocView:draw()
   core.pop_clip_rect()
 
   self:draw_scrollbar()
+
+  -- set here, as ctrl and replies from add-ons' servers change it without the
+  -- mouse moving
+  local cursor = self.ctrl_hover_shown and "hand" or "ibeam"
+  if self.mouse_position and self.cursor ~= cursor
+    and (self.cursor == "ibeam" or self.cursor == "hand") then
+    self.cursor = cursor
+    core.request_cursor(cursor)
+  end
 end
 
 return DocView

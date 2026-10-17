@@ -1,14 +1,14 @@
 -- mod-version:3
 -- Ctrl+click opens the link under the mouse: a URL (with or without a protocol) or a
--- DOI in the browser, a [[wiki link]] to a local file in the editor. Links can be
--- underlined. "Search Web" in the context menu searches for the selection. Ported
--- from a SciTE script (url.lua).
+-- DOI in the browser, a [[wiki link]] or the path of an existing file (optionally
+-- with :line[:col]) in the editor. Links can be underlined; paths are underlined
+-- only under the mouse while ctrl is held. "Search Web" in the context menu
+-- searches for the selection. Ported from a SciTE script (url.lua).
 local core = require "core"
 local common = require "core.common"
 local config = require "core.config"
 local command = require "core.command"
 local keymap = require "core.keymap"
-local style = require "core.style"
 local DocView = require "core.docview"
 
 config.plugins.openurl = common.merge({
@@ -125,14 +125,72 @@ local function get_links(text)
   return links
 end
 
+-- characters of file paths; a path is a run of them with a '/' or a '.' in it
+local PATH_CHAR = "[%w_%-%.~+@/]"
+
+-- the path of an existing file, relative to the doc's directory, a project
+-- directory, or absolute (or ~/)
+local function resolve_path(doc, name)
+  name = common.home_expand(name)
+  local candidates = {}
+  if common.is_absolute_path(name) then
+    candidates[1] = name
+  else
+    if doc.abs_filename then
+      table.insert(candidates, common.dirname(doc.abs_filename) .. PATHSEP .. name)
+    end
+    for _, dir in ipairs(core.project_directories) do
+      table.insert(candidates, dir.name .. PATHSEP .. name)
+    end
+  end
+  for _, path in ipairs(candidates) do
+    local info = system.get_file_info(path)
+    if info and info.type == "file" then return common.normalize_path(path) end
+  end
+end
+
+-- the last path looked up: paths are looked up under the mouse as it moves and
+-- each frame while ctrl is held
+local last_key, last_path
+
+-- a link to the existing file whose path contains byte col of line, if any
+local function path_at(doc, line, col)
+  local text = doc.lines[line]
+  if not text:sub(col, col):find(PATH_CHAR) then return end
+  local s, e = col, col
+  while s > 1 and text:sub(s - 1, s - 1):find(PATH_CHAR) do s = s - 1 end
+  while text:sub(e + 1, e + 1):find(PATH_CHAR) do e = e + 1 end
+  -- a sentence's period after it
+  while e > s and text:sub(e, e) == "." do e = e - 1 end
+  if col > e then return end
+  local name = text:sub(s, e)
+  if not name:find("[/.]") then return end
+  local key = table.concat({ tostring(doc), s, e, text }, "\0")
+  if key ~= last_key then
+    last_key, last_path = key, nil
+    local target = resolve_path(doc, name)
+    if target then
+      last_path = { start = s, stop = e, kind = "path", target = target }
+      -- compilers' and debuggers' file:line:col
+      local suffix, l, c = text:match("^(:(%d+):?(%d*))", e + 1)
+      if suffix then
+        last_path.stop = e + #suffix
+        last_path.line, last_path.col = tonumber(l), tonumber(c)
+      end
+    end
+  end
+  return last_path
+end
+
 -- the link containing byte col of line, if any
 local function link_at(doc, line, col)
   for _, l in ipairs(get_links(doc.lines[line])) do
     if l.start <= col and col <= l.stop then return l end
   end
+  return path_at(doc, line, col)
 end
 
--- the link under the screen position x, y of dv, if any
+-- the link under the screen position x, y of dv, if any, and its line
 local function link_at_point(dv, x, y)
   if dv.hovering_gutter then return end
   local line, col = dv:resolve_screen_position(x, y)
@@ -140,7 +198,7 @@ local function link_at_point(dv, x, y)
   if y < ly or y >= ly + dv:get_line_height() then return end
   -- col is the nearest character boundary: left of it is the previous character
   if x < lx then col = col - 1 end
-  return link_at(dv.doc, line, col)
+  return link_at(dv.doc, line, col), line
 end
 
 
@@ -187,8 +245,19 @@ local function open_wiki(doc, target)
   core.error("No file found for [[%s]]", target)
 end
 
+local function open_path(link)
+  local dv = core.root_view:open_doc(core.open_doc(core.normalize_to_project_dir(link.target)),
+    { preview = true })
+  if link.line then
+    dv.doc:set_selection(link.line, link.col or 1)
+    dv:scroll_to_line(link.line, true, true)
+  end
+end
+
 local function open_link(dv, link)
-  if link.kind == "wiki" then
+  if link.kind == "path" then
+    open_path(link)
+  elseif link.kind == "wiki" then
     open_wiki(dv.doc, link.target)
   elseif link.kind == "url" then
     launch(link.target)
@@ -256,39 +325,22 @@ end
 keymap.add { ["ctrl+1lclick"] = "open-url:open-at-mouse" }
 
 
--- hand cursor over a link while ctrl is held
-local DocView_on_mouse_moved = DocView.on_mouse_moved
-function DocView:on_mouse_moved(x, y, ...)
-  DocView_on_mouse_moved(self, x, y, ...)
-  if keymap.modkeys["ctrl"] and self.cursor == "ibeam" and not self.mouse_selecting
-     and link_at_point(self, x, y) then
-    self.cursor = "hand"
-  end
-end
-
-
 local DocView_draw_line_text = DocView.draw_line_text
 function DocView:draw_line_text(line, x, y)
   local lh = DocView_draw_line_text(self, line, x, y)
-  if not config.plugins.openurl.underline then return lh end
-  local links = get_links(self.doc.lines[line])
-  if #links == 0 then return lh end
-  local font = self:get_font()
-  local thickness = math.max(1, math.floor(SCALE + 0.5))
-  local uy = y + self:get_line_text_y_offset() + font:get_height() - thickness
-  for _, l in ipairs(links) do
-    -- in the color of the link's first token
-    local color, col = style.text, 1
-    for _, type, text in self.doc.highlighter:each_token(line) do
-      if col + #text > l.start then
-        color = style.syntax[type] or style.text
-        break
-      end
-      col = col + #text
+  local underline = config.plugins.openurl.underline
+  if underline then
+    for _, l in ipairs(get_links(self.doc.lines[line])) do
+      self:draw_underline(line, x, y, l.start, l.stop + 1)
     end
-    local x1 = x + self:get_col_x_offset(line, l.start)
-    local x2 = x + self:get_col_x_offset(line, l.stop + 1)
-    renderer.draw_rect(x1, uy, x2 - x1, thickness, color)
+  end
+  -- the link ctrl+click would open (its underline drawn twice if underlined already)
+  local hx, hy = self:get_ctrl_hover()
+  if hx and self:resolve_screen_position(hx, hy) == line then
+    local link = link_at_point(self, hx, hy)
+    if link then
+      self:draw_ctrl_hover(line, x, y, link.start, link.stop + 1)
+    end
   end
   return lh
 end

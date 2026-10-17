@@ -318,6 +318,16 @@ function keymap.on_key_pressed(k, ...)
   return false
 end
 
+---The command a stroke would run now, given the arguments it would be pressed with:
+---the first bound one whose predicate holds (a function is taken as it is).
+---@param stroke string
+---@return keymap.command|function|nil
+function keymap.get_command(stroke, ...)
+  for _, cmd in ipairs(keymap.map[to_stroke(stroke)] or {}) do
+    if type(cmd) == "function" or command.is_valid(cmd, ...) then return cmd end
+  end
+end
+
 function keymap.on_mouse_wheel(delta_y, delta_x, ...)
   local y_direction = delta_y > 0 and "up" or "down"
   local x_direction = delta_x > 0 and "left" or "right"
