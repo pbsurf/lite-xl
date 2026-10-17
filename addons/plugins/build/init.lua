@@ -498,6 +498,8 @@ build.menu_actions = {
   { text = "Clean", command = "build:clean" },
   { text = "Run", command = "build:run-or-term-or-kill", when = function() return not build.is_running() end },
   { text = "Stop", command = "build:terminate" },
+  { text = "Show Build Output", command = "build:toggle-drawer", when = function() return not build.message_view.visible end },
+  { text = "Hide Build Output", command = "build:toggle-drawer", when = function() return build.message_view.visible end },
 }
 
 ---The target menu's rows: targets, binary and recent arguments, actions.
