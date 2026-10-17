@@ -78,6 +78,10 @@ upstream's `release/v2.1.x`. Additions to the editor:
   (`name`, `name.md`, ... in the file's directory or a parent; `[[name#Heading]]`
   jumps to the heading); links are underlined unless `underline = false`. "Search
   Web" in the context menu searches for the selection (`search_url`).
+* **navigate** (imported, rewritten): alt+left / alt+right go back and forward
+  through the places the cursor jumped from (another file, or a move of more than
+  `config.plugins.navigate.jump_threshold` lines), alt+shift+left / alt+shift+right
+  within the current file only.
 * **shapes:** antialiased shape helpers (squiggly underlines) for plugins.
 * **qtcreator:** a light color theme matching Qt Creator's.
 
