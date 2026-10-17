@@ -165,6 +165,11 @@ function RootView:on_mouse_pressed(button, x, y, clicks)
     end
     return menu:on_mouse_pressed(button, x, y, clicks)
   end
+  -- the command view's suggestions are drawn over the node above it
+  if core.command_view:suggestions_overlap_point(x, y) then
+    core.command_view:on_suggestions_mouse_pressed(button, x, y)
+    return true
+  end
   local div = self.root_node:get_divider_overlapping_point(x, y)
   local node = self.root_node:get_child_overlapping_point(x, y)
   if div and (node and not node.active_view:scrollbar_overlaps_point(x, y)) then
@@ -321,6 +326,18 @@ function RootView:on_mouse_moved(x, y, dx, dy)
 
   -- avoid sending on_mouse_moved events when dragging tabs
   if dn then return end
+
+  -- hovering a suggestion selects it, and the views under the box don't see the mouse
+  local cv = core.command_view
+  if cv:suggestions_overlap_point(x, y) then
+    cv.suggestion_idx = cv:get_suggestion_at(x, y) or cv.suggestion_idx
+    core.request_cursor("arrow")
+    if self.overlapping_node then
+      self.overlapping_node:on_mouse_left()
+      self.overlapping_node = nil
+    end
+    return
+  end
 
   self.root_node:on_mouse_moved(x, y, dx, dy)
 

@@ -367,6 +367,36 @@ function CommandView:suggestions_overlap_point(x, y)
 end
 
 
+---The index of the suggestion drawn at the point, if any.
+---@param x number
+---@param y number
+---@return integer?
+function CommandView:get_suggestion_at(x, y)
+  if not self:suggestions_overlap_point(x, y) then return end
+  local row = math.floor((self.position.y - style.divider_size - y)
+    / self:get_suggestion_line_height()) + 1
+  local visible = math.min(max_suggestions, #self.suggestions - self.suggestions_offset + 1)
+  if row >= 1 and row <= visible then
+    return self.suggestions_offset + row - 1
+  end
+end
+
+
+---Handles a click on the suggestions box: a left click on a suggestion
+---completes it and submits.
+---@param button core.view.mousebutton
+---@param x number
+---@param y number
+function CommandView:on_suggestions_mouse_pressed(button, x, y)
+  local idx = self:get_suggestion_at(x, y)
+  if idx and button == "left" then
+    self.suggestion_idx = idx
+    self:complete()
+    self:submit()
+  end
+end
+
+
 ---Scrolls the suggestions by wheel amount dy (up shows later ones, which are
 ---drawn above), keeping the selected one in view.
 ---@param dy number
