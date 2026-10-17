@@ -856,6 +856,62 @@ function core.init()
 end
 
 
+---Saves `doc`, under `filename` if given, then calls `on_saved`. If saving fails,
+---offers to save it elsewhere, calling `on_saved` once that succeeds.
+---@param doc core.doc
+---@param filename? string
+---@param on_saved? fun()
+---@return boolean saved
+function core.save_doc(doc, filename, on_saved)
+  local abs_filename
+  if filename then
+    filename = core.normalize_to_project_dir(filename)
+    abs_filename = core.project_absolute_path(filename)
+  end
+  local ok, err = pcall(doc.save, doc, filename, abs_filename)
+  if ok then
+    core.log("Saved \"%s\"", doc.filename)
+    if on_saved then on_saved() end
+    return true
+  end
+  core.error(err)
+  core.nag_view:show("Saving Failed", string.format(
+    "Couldn't save \"%s\". Save it to another location?", filename or doc:get_name()), {
+    { text = "Save As...", default_yes = true },
+    { text = "Cancel", default_no = true }
+  }, function(item)
+    if item.text == "Save As..." then
+      -- in a thread: the nag view takes focus back from the command view on return
+      core.add_thread(function() core.save_doc_as(doc, on_saved) end)
+    end
+  end)
+  return false
+end
+
+
+---Asks for a filename and saves `doc` under it, then calls `on_saved`.
+---@param doc core.doc
+---@param on_saved? fun()
+function core.save_doc_as(doc, on_saved)
+  local text
+  local last_doc = core.last_active_view and core.last_active_view.doc
+  if doc.filename then
+    text = doc.filename
+  elseif last_doc and last_doc.abs_filename then
+    text = core.normalize_to_project_dir(common.dirname(last_doc.abs_filename)) .. PATHSEP
+  end
+  core.command_view:enter("Save As", {
+    text = text,
+    submit = function(filename)
+      core.save_doc(doc, common.home_expand(filename), on_saved)
+    end,
+    suggest = function(text)
+      return common.home_encode_list(common.path_suggest(common.home_expand(text)))
+    end
+  })
+end
+
+
 ---Saves docs one after another, asking for a filename for those without one, then
 ---calls `on_saved`. Stops at a save that fails or is cancelled.
 local function save_docs(docs, on_saved)
@@ -864,22 +920,13 @@ local function save_docs(docs, on_saved)
     i = i + 1
     local doc = docs[i]
     if not doc then return on_saved() end
-    if doc.filename then
-      local ok, err = pcall(doc.save, doc)
-      if not ok then return core.error("Couldn't save \"%s\": %s", doc.filename, err) end
-      return save_next()
+    if doc.filename then return core.save_doc(doc, nil, save_next) end
+    -- show the unnamed doc being named
+    local view = core.get_views_referencing_doc(doc)[1]
+    if view then
+      core.root_view.root_node:get_node_for_view(view):set_active_view(view)
     end
-    core.command_view:enter("Save Unnamed Document As", {
-      submit = function(filename)
-        filename = core.normalize_to_project_dir(common.home_expand(filename))
-        local ok, err = pcall(doc.save, doc, filename, core.project_absolute_path(filename))
-        if not ok then return core.error("Couldn't save \"%s\": %s", filename, err) end
-        save_next()
-      end,
-      suggest = function(text)
-        return common.home_encode_list(common.path_suggest(common.home_expand(text)))
-      end
-    })
+    core.save_doc_as(doc, save_next)
   end
   save_next()
 end

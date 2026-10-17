@@ -31,32 +31,6 @@ local function append_line_if_last_line(line)
   end
 end
 
-local function save(filename)
-  local abs_filename
-  if filename then
-    filename = core.normalize_to_project_dir(filename)
-    abs_filename = core.project_absolute_path(filename)
-  end
-  local ok, err = pcall(doc().save, doc(), filename, abs_filename)
-  if ok then
-    local saved_filename = doc().filename
-    core.log("Saved \"%s\"", saved_filename)
-  else
-    core.error(err)
-    core.nag_view:show("Saving failed", string.format("Couldn't save file \"%s\". Do you want to save to another location?", doc().filename), {
-      { text = "Yes", default_yes = true },
-      { text = "No", default_no = true }
-    }, function(item)
-      if item.text == "Yes" then
-        core.add_thread(function()
-          -- we need to run this in a thread because of the odd way the nagview is.
-          command.perform("doc:save-as")
-        end)
-      end
-    end)
-  end
-end
-
 local function cut_or_copy(delete)
   local full_text = ""
   local text = ""
@@ -549,30 +523,14 @@ local commands = {
   end,
 
   ["doc:save-as"] = function(dv)
-    local last_doc = core.last_active_view and core.last_active_view.doc
-    local text
-    if dv.doc.filename then
-      text = dv.doc.filename
-    elseif last_doc and last_doc.filename then
-      local dirname, filename = core.last_active_view.doc.abs_filename:match("(.*)[/\\](.+)$")
-      text = core.normalize_to_project_dir(dirname) .. PATHSEP
-    end
-    core.command_view:enter("Save As", {
-      text = text,
-      submit = function(filename)
-        save(common.home_expand(filename))
-      end,
-      suggest = function (text)
-        return common.home_encode_list(common.path_suggest(common.home_expand(text)))
-      end
-    })
+    core.save_doc_as(dv.doc)
   end,
 
   ["doc:save"] = function(dv)
     if dv.doc.filename then
-      save()
+      core.save_doc(dv.doc)
     else
-      command.perform("doc:save-as")
+      core.save_doc_as(dv.doc)
     end
   end,
 
@@ -589,11 +547,14 @@ local commands = {
     core.command_view:enter("Rename", {
       text = old_filename,
       submit = function(filename)
-        save(common.home_expand(filename))
-        core.log("Renamed \"%s\" to \"%s\"", old_filename, filename)
-        if filename ~= old_filename then
-          os.remove(old_filename)
-        end
+        local old_abs_filename = dv.doc.abs_filename
+        -- remove the old file only once the doc is saved under its new name
+        core.save_doc(dv.doc, common.home_expand(filename), function()
+          if dv.doc.abs_filename ~= old_abs_filename then
+            os.remove(old_abs_filename)
+            core.log("Renamed \"%s\" to \"%s\"", old_filename, dv.doc.filename)
+          end
+        end)
       end,
       suggest = function (text)
         return common.home_encode_list(common.path_suggest(common.home_expand(text)))
