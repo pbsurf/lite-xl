@@ -476,6 +476,66 @@ function TreeView:toggle_expand(toggle)
 end
 
 
+---Expands or collapses a folder and every folder in it. Where only opened folders
+---are scanned (files_limit), expanding scans the folders as it goes, and stops
+---once the subtree has more than config.max_project_files entries.
+---@param item table a cached tree item of type "dir"
+---@param expanded boolean
+---@param descendants_only? boolean leave the folder itself as it is
+function TreeView:set_expanded_all(item, expanded, descendants_only)
+  local dir = core.project_dir_by_name(item.dir_name)
+  if not dir or item.type ~= "dir" then return end
+  local prefix = item.depth == 0 and "" or item.filename .. PATHSEP
+  local function set(cached, filename)
+    cached.expanded = expanded
+    if dir.files_limit then core.update_project_subdir(dir, filename, expanded) end
+  end
+  -- folders in the subtree still to change, in tree order, and the subtree's size
+  local function pending()
+    local list, count = {}, 0
+    for _, info in ipairs(dir.files) do
+      if info.filename:sub(1, #prefix) == prefix then
+        count = count + 1
+        local cached = self:get_cached(dir, info, dir.name)
+        if info.type == "dir" and cached.expanded ~= expanded then
+          table.insert(list, { cached, info.filename })
+        end
+      end
+    end
+    return list, count
+  end
+  local own_name = item.depth == 0 and "" or item.filename
+  if expanded then
+    if not descendants_only then set(item, own_name) end
+    while true do
+      local list, count = pending()
+      if #list == 0 or count > config.max_project_files then break end
+      for _, d in ipairs(list) do set(d[1], d[2]) end
+    end
+  else
+    -- innermost first: a collapsed folder's contents leave dir.files in files_limit mode
+    local list = pending()
+    for i = #list, 1, -1 do set(list[i][1], list[i][2]) end
+    if not descendants_only then set(item, own_name) end
+  end
+end
+
+
+---Collapses every folder except the project folders themselves.
+function TreeView:collapse_all()
+  for _, dir in ipairs(core.project_directories) do
+    self:set_expanded_all(self:get_cached(dir, dir.item, dir.name), false, true)
+  end
+  -- a selection inside a collapsed folder moves to the folder shown
+  local item = self.selected_item
+  if item and item.depth > 1 then
+    local dir = core.project_dir_by_name(item.dir_name)
+    local top = item.filename:match("^[^%" .. PATHSEP .. "]+")
+    self.selected_item = dir and self:get_cached(dir, { filename = top, type = "dir" }, dir.name)
+  end
+end
+
+
 ---Shows a file: expands the directories leading to it, selects it and scrolls it
 ---into view (the file browser too, if hidden). Returns false if it isn't listed.
 ---@param abs_filename string
@@ -646,6 +706,11 @@ menu:register(
   }
 )
 
+-- for the treeview itself, not over an item
+menu:register(function() return core.active_view:is(TreeView) and not view.hovered_item end, {
+  { text = "Collapse All", command = "treeview:collapse-all" },
+})
+
 menu:register(
   function()
     local item = view.hovered_item
@@ -664,6 +729,10 @@ local previous_view = nil
 command.add(nil, {
   ["treeview:toggle"] = function()
     view.visible = not view.visible
+  end,
+
+  ["treeview:collapse-all"] = function()
+    view:collapse_all()
   end,
 
   ["treeview:toggle-focus"] = function()
@@ -734,6 +803,14 @@ command.add(
     if view.hovered_item then
       view:set_selection(view.hovered_item)
       command.perform "treeview:open"
+    end
+  end,
+
+  ["treeview:toggle-expand-all"] = function()
+    local item = view.hovered_item
+    if item then
+      view:set_selection(item)
+      if item.type == "dir" then view:set_expanded_all(item, not item.expanded) end
     end
   end,
 
@@ -1002,7 +1079,7 @@ keymap.add {
   ["ctrl+return"] = "treeview:new-folder",
   ["lclick"]      = "treeview:select-and-open",
   ["mclick"]      = "treeview:select",
-  ["ctrl+lclick"] = "treeview:new-folder"
+  ["ctrl+lclick"] = "treeview:toggle-expand-all"
 }
 
 -- The config specification used by gui generators
