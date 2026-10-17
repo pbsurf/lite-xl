@@ -2253,6 +2253,7 @@ function lpm.retrieve_addons(lite_xl, arguments, filters)
         end
       end
       if not found_one then error("can't find addon " .. str) end
+      potentials.version = version
       table.insert(addons, potentials)
     end
     i = i + 1
@@ -2332,6 +2333,13 @@ function lpm.install(type, ...)
   for i, potential_addons in ipairs(potential_addon_list) do
     local id = potential_addons[1].id
     local addons = common.grep(potential_addons, function(e) return e:is_installable(system_bottle) and (not e:is_installed(system_bottle) or REINSTALL) end)
+    -- Installed means the same files in the user dir, so another version of an installed
+    -- addon counts as not installed. Replace one only when a version was asked for.
+    if not REINSTALL and not potential_addons.version and common.first(potential_addons, function(e)
+      return e.repository and not e:is_core(system_bottle) and not e:is_bundled(system_bottle) and e:is_installed(system_bottle)
+    end) then
+      addons = {}
+    end
     if #addons == 0 and #potential_addons == 0 then error("can't find " .. (type or "addon") .. " " .. id .. " mod-version: " .. (system_bottle.lite_xl.mod_version or 'any')) end
     if #addons == 0 then
       log.warning((potential_addons[1].type or "addon") .. " " .. id .. " already installed")
