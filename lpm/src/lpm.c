@@ -72,7 +72,6 @@
 #define HTTPS_RESPONSE_HEADER_BUFFER_LENGTH 8192
 
 static int imin(int a, int b) { return a < b ? a : b; }
-static int imax(int a, int b) { return a > b ? a : b; }
 
 typedef struct {
   #if _WIN32
@@ -83,58 +82,6 @@ typedef struct {
     pthread_t thread;
   #endif
 } lpm_thread_t;
-
-typedef struct {
-  #if _WIN32
-    CRITICAL_SECTION mutex;
-  #else
-    pthread_mutex_t mutex;
-  #endif
-} lpm_mutex_t;
-
-static lpm_mutex_t* new_mutex() {
-  lpm_mutex_t* mutex = malloc(sizeof(lpm_mutex_t));
-  #ifndef LPM_NO_THREADS
-    #if _WIN32
-      InitializeCriticalSection(&mutex->mutex);
-    #else
-      pthread_mutex_init(&mutex->mutex, NULL);
-    #endif
-  #endif
-  return mutex;
-}
-
-static void free_mutex(lpm_mutex_t* mutex) {
-  #ifndef LPM_NO_THREADS
-    #if _WIN32
-      DeleteCriticalSection(&mutex->mutex);
-    #else
-      pthread_mutex_destroy(&mutex->mutex);
-    #endif
-  #endif
-  free(mutex);
-}
-
-static void lock_mutex(lpm_mutex_t* mutex) {
-  #ifndef LPM_NO_THREADS
-    #if _WIN32
-      EnterCriticalSection(&mutex->mutex);
-    #else
-      pthread_mutex_lock(&mutex->mutex);
-    #endif
-  #endif
-}
-
-static void unlock_mutex(lpm_mutex_t* mutex) {
-  #ifndef LPM_NO_THREADS
-    #if _WIN32
-      LeaveCriticalSection(&mutex->mutex);
-    #else
-      pthread_mutex_unlock(&mutex->mutex);
-    #endif
-  #endif
-}
-
 
 #if _WIN32
 static WINAPI unsigned int windows_thread_callback(void* data) {
@@ -828,7 +775,7 @@ static int lpm_trace(lua_State* L) {
     if (!error && !context->error_code) {
       git_buf branch_name = {0};
       if (!git_remote_default_branch(&branch_name, remote)) {
-        strncpy(context->data, branch_name.ptr, sizeof(context->data));
+        snprintf(context->data, sizeof(context->data), "%s", branch_name.ptr);
         git_buf_dispose(&branch_name);
       }
     }
@@ -851,7 +798,7 @@ static int lpm_trace(lua_State* L) {
       lua_rawgeti(L, LUA_REGISTRYINDEX, context->callback_function);
       context->error_code = lpm_fetch_callback(L, &context->progress);
       if (context->error_code)
-        strncpy(context->data, lua_tostring(L, -1), sizeof(context->data));
+        snprintf(context->data, sizeof(context->data), "%s", lua_tostring(L, -1));
     }
     if (context->complete || context->error_code) {
       join_thread(context->thread);
@@ -883,7 +830,7 @@ static int lpm_trace(lua_State* L) {
     context->depth = args >= 4 && !lua_isnil(L, 4) && !lua_toboolean(L, 4) ? 1 : GIT_FETCH_DEPTH_FULL;
     if (args >= 5 && lua_isstring(L, 5)) {
       git_proxy_options_init(&context->proxy_options, GIT_PROXY_OPTIONS_VERSION);
-      strncpy(context->proxy_url, lua_tostring(L, 5), sizeof(context->proxy_url));
+      snprintf(context->proxy_url, sizeof(context->proxy_url), "%s", lua_tostring(L, 5));
       context->proxy_options.type = GIT_PROXY_SPECIFIED;
       context->proxy_options.credentials = NULL;
       context->proxy_options.certificate_check = NULL;
@@ -895,7 +842,7 @@ static int lpm_trace(lua_State* L) {
     context->L = L;
     context->threaded = !lua_is_main_thread(L);
     if (refspec)
-      strncpy(context->refspec, refspec, sizeof(context->refspec));
+      snprintf(context->refspec, sizeof(context->refspec), "%s", refspec);
     if (lua_type(L, 2) == LUA_TFUNCTION) {
       lua_pushvalue(L, 2);
       context->callback_function = luaL_ref(L, LUA_REGISTRYINDEX);
@@ -1282,7 +1229,6 @@ static int lpm_extract(lua_State* L) {
   static mbedtls_entropy_context entropy_context;
   static mbedtls_ctr_drbg_context drbg_context;
   static mbedtls_ssl_config ssl_config;
-  static mbedtls_ssl_context ssl_context;
 
   static void lpm_tls_debug(void *ctx, int level, const char *file, int line, const char *str) {
     fprintf(stderr, "%s:%04d: |%d| %s", file, line, level, str);
@@ -1325,8 +1271,8 @@ static int lpm_extract(lua_State* L) {
     status = mbedtls_ssl_config_defaults(&ssl_config, MBEDTLS_SSL_IS_CLIENT, MBEDTLS_SSL_TRANSPORT_STREAM, MBEDTLS_SSL_PRESET_DEFAULT);
     if (status)
       return luaL_mbedtls_error(L, status, "can't set ssl_config defaults");
-    mbedtls_ssl_conf_max_version(&ssl_config, MBEDTLS_SSL_MAJOR_VERSION_3, MBEDTLS_SSL_MINOR_VERSION_3);
-    mbedtls_ssl_conf_min_version(&ssl_config, MBEDTLS_SSL_MAJOR_VERSION_3, MBEDTLS_SSL_MINOR_VERSION_3);
+    mbedtls_ssl_conf_max_tls_version(&ssl_config, MBEDTLS_SSL_VERSION_TLS1_2);
+    mbedtls_ssl_conf_min_tls_version(&ssl_config, MBEDTLS_SSL_VERSION_TLS1_2);
     mbedtls_ssl_conf_authmode(&ssl_config, MBEDTLS_SSL_VERIFY_REQUIRED);
     mbedtls_ssl_conf_rng(&ssl_config, mbedtls_ctr_drbg_random, &drbg_context);
     mbedtls_ssl_conf_read_timeout(&ssl_config, 5000);
@@ -1357,7 +1303,7 @@ static int lpm_extract(lua_State* L) {
           }
           git_libgit2_opts(GIT_OPT_SET_SSL_CERT_LOCATIONS, NULL, path);
         }
-        strncpy(git_cert_path, path, MAX_PATH);
+        snprintf(git_cert_path, sizeof(git_cert_path), "%s", path);
         if (print_trace) {
           fprintf(stderr, "[ssl] SSL directory set to %s.\n", git_cert_path);
           fflush(stderr);
@@ -1472,7 +1418,7 @@ static int lpm_extract(lua_State* L) {
           }
           git_libgit2_opts(GIT_OPT_SET_SSL_CERT_LOCATIONS, path, NULL);
         }
-        strncpy(git_cert_path, path, MAX_PATH);
+        snprintf(git_cert_path, sizeof(git_cert_path), "%s", path);
         if (print_trace) {
           fprintf(stderr, "[ssl] SSL file set to %s.\n", git_cert_path);
           fflush(stderr);
@@ -1860,9 +1806,9 @@ static int lpm_extract(lua_State* L) {
     else
       return luaL_error(L, "unknown method %s", method);
     const char* protocol = luaL_checkstring(L, 2);
-    strncpy(context->hostname, luaL_checkstring(L, 3), sizeof(context->hostname));
+    snprintf(context->hostname, sizeof(context->hostname), "%s", luaL_checkstring(L, 3));
     context->port = luaL_checkinteger(L, 4);
-    strncpy(context->rest, luaL_checkstring(L, 5), sizeof(context->rest));
+    snprintf(context->rest, sizeof(context->rest), "%s", luaL_checkstring(L, 5));
     const char* path = luaL_optstring(L, 6, NULL);
     if (path) {
       if ((context->file = lua_fopen(L, path, "wb")) == NULL)
