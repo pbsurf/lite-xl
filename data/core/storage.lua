@@ -47,7 +47,7 @@ function storage.save(module, key, value)
   local f, err = io.open(path, "wb")
   if f then
     f:write("return " .. common.serialize(value))
-    f:flush()
+    f:close()
   else
     core.error("error opening storage file %s for writing: %s", path, err)
   end
