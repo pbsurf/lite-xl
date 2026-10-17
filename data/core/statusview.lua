@@ -1147,10 +1147,8 @@ function RootView:on_mouse_pressed(button, x, y, clicks)
   return menu:on_mouse_pressed(button, x, y, clicks)
 end
 
-local mouse_x, mouse_y = 0, 0
 local root_on_mouse_moved = RootView.on_mouse_moved
 function RootView:on_mouse_moved(x, y, ...)
-  mouse_x, mouse_y = x, y
   local menu = core.status_view and core.status_view.menu
   if menu and menu:on_mouse_moved(x, y, ...) then return end
   return root_on_mouse_moved(self, x, y, ...)
@@ -1158,11 +1156,7 @@ end
 
 function StatusMenu:hide()
   StatusMenu.super.hide(self)
-  if self.item then
-    self.item = nil
-    -- the moves the menu took left the hover state where it was opened
-    root_on_mouse_moved(core.root_view, mouse_x, mouse_y, 0, 0)
-  end
+  self.item = nil
 end
 
 command.add(function()

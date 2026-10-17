@@ -110,23 +110,16 @@ function RootView:on_mouse_pressed(button, x, y, clicks)
   return menu:on_mouse_pressed(button, x, y, clicks)
 end
 
-local mouse_x, mouse_y = 0, 0
 local root_on_mouse_moved = RootView.on_mouse_moved
 function RootView:on_mouse_moved(x, y, ...)
-  mouse_x, mouse_y = x, y
   if menu:on_mouse_moved(x, y, ...) then return end
   return root_on_mouse_moved(self, x, y, ...)
 end
 
--- The moves the menu took left the root view's hover state (tab, button, cursor)
--- where the menu was opened: a click there without moving would open it again
 local menu_hide = menu.hide
 function menu:hide()
   menu_hide(self)
-  if self.node then
-    self.node = nil
-    root_on_mouse_moved(core.root_view, mouse_x, mouse_y, 0, 0)
-  end
+  self.node = nil
 end
 
 local root_update = RootView.update

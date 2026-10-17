@@ -817,12 +817,7 @@ end
 
 function TabMenu:hide()
   TabMenu.super.hide(self)
-  if self.view then
-    self.node, self.view = nil, nil
-    -- the moves the menu took left the hover state where it was opened
-    local root = core.root_view
-    root:on_mouse_moved(root.mouse.x, root.mouse.y, 0, 0)
-  end
+  self.node, self.view = nil, nil
 end
 
 
