@@ -65,6 +65,8 @@ local build = common.merge({
   drawer_size = 100,
   max_previous_arguments = 100,
   on_success = "minimize",
+  -- show the build toolbar, under the file browser
+  toolbar = true,
   terminal = (PLATFORM == "Windows" and { os.getenv("COMSPEC") } or { "xterm", "-T", function(target) return target.name end, "-e" }),
   shell = (PLATFORM == "Windows" and "START /B" or { "bash", "-c" })
 }, config.plugins.build)
@@ -759,7 +761,11 @@ build.build_bar_view = BuildBarView()
 build.message_view = BuildMessageView()
 local node = core.root_view:get_active_node()
 build.message_view_node = node:split("down", build.message_view, { y = true }, true)
-build.build_bar_node = TreeView and TreeView.node.b:split("up", build.build_bar_view, {y = true})
+-- above the file browser's toolbar, if it has one (toolbarview isn't disabled)
+if TreeView and build.toolbar then
+  build.build_bar_node = TreeView.node.b and TreeView.node.b:split("up", build.build_bar_view, {y = true})
+    or TreeView.node:split("down", build.build_bar_view, {y = true})
+end
 
 
 
