@@ -10,12 +10,10 @@
 #   scripts/lpm install --symlink lsp repl
 #   scripts/lpm install --no-install-optional bracketmatch search_ui
 #
-# lpm reads the mod-version from MOD_VERSION_MAJOR in start.lua, which only the
-# mod-version-4 line defines; for 2.1's MOD_VERSION = "3" it assumes 4, so
-# --mod-version=3 is passed.  lpm's settings (repositories, installed add-ons) are
-# per user dir, in <userdir>/lpm, and so is its staging dir: lpm moves an install
-# from there into the user dir, and across filesystems that move is a copy that
-# turns symlinks into files.  The repo cache is shared.
+# lpm's settings (repositories, installed add-ons) are per user dir, in <userdir>/lpm,
+# and so is its staging dir: lpm moves an install from there into the user dir, and
+# across filesystems that move is a copy that turns symlinks into files.  The repo
+# cache is shared.
 #
 # Environment:
 #   LITE_BUILD    meson build dir (default: build/), as for run.sh
@@ -32,7 +30,7 @@ lpm=${LPM:-$build/lpm/lpm}
 
 args=(--userdir="$userdir" --configdir="$userdir/lpm" --tmpdir="$userdir/lpm/tmp"
       --cachedir="$top/tools/lpm-cache"
-      --datadir="$build/run/share/lite-xl" --binary="$build/run/bin/lite-xl" --mod-version=3)
+      --datadir="$build/run/share/lite-xl" --binary="$build/run/bin/lite-xl")
 
 if [ ! -e "$userdir/lpm/settings.json" ]; then
   "$lpm" repo add "$src" "${args[@]}" >&2

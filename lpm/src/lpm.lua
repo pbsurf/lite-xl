@@ -392,6 +392,11 @@ function common.slice(t, i, l) local n = {} for j = i, l ~= nil and (i - l) or #
 function common.join(j, l) local s = "" for i, v in ipairs(l) do if i > 1 then s = s .. j .. v else s = v end end return s end
 function common.sort(t, f) table.sort(t, f) return t end
 function common.write(path, contents) local f, err = io.open(path, "wb") if not f then error("can't write to " .. path .. ": " .. err) end f:write(contents) f:flush() f:close() end
+-- mod-version-4 lite-xl defines MOD_VERSION_MAJOR = 4; 2.1 (mod-version 3) MOD_VERSION = "3"
+function common.read_mod_version(start_lua)
+  local text = common.read(start_lua)
+  return text:match("MOD_VERSION_MAJOR%s*=%s*(%d+)") or text:match("MOD_VERSION%s*=%s*[\"']?(%d+)")
+end
 function common.read(path) local f, err = io.open(path, "rb") if not f then error("can't read from " .. path .. ": " .. err) end local str = f:read("*all") f:close() return str end
 function common.uniq(l) local t = {} local k = {} for i,v in ipairs(l) do if not k[v] then table.insert(t, v) k[v] = true end end return t end
 function common.delete(h, d) local t = {} for k,v in pairs(h) do if k ~= d then t[k] = v end end return t end
@@ -2023,7 +2028,7 @@ function lpm.lite_xl_add(version, path)
     local path_stat = assert(system.stat(path:gsub(PATHSEP .. "$", "")), "can't find lite-xl path " .. path)
     local mod_version = MOD_VERSION
     if mod_version == "any" or not mod_version then
-      mod_version = common.read(data_path .. PATHSEP .. "core" .. PATHSEP .. "start.lua"):match("MOD_VERSION_MAJOR%s=%s(%d+)")
+      mod_version = common.read_mod_version(data_path .. PATHSEP .. "core" .. PATHSEP .. "start.lua")
     end
     table.insert(lite_xls, LiteXL.new(nil, { version = version, binary_path = { [ARCH[1]] = binary_stat.abs_path }, datadir_path = data_stat.abs_path, path = path_stat.abs_path, mod_version = mod_version or LATEST_MOD_VERSION }))
   end
@@ -2697,7 +2702,7 @@ function lpm.setup()
       if lite_xl_datadir and (mod_version == "any" or not mod_version) then
         local path = lite_xl_datadir .. PATHSEP .. "core" .. PATHSEP .. "start.lua"
         if system.stat(path) then
-          mod_version = common.read(path):match("MOD_VERSION_MAJOR%s=%s(%d+)")
+          mod_version = common.read_mod_version(path)
         end
       end
       local detected_lite_xl = LiteXL.new(nil, { path = directory, datadir_path = lite_xl_datadir, binary_path = { [DEFAULT_ARCH] = lite_xl_binary }, mod_version = mod_version or LATEST_MOD_VERSION, version = "system", tags = { "system", "local" } })
