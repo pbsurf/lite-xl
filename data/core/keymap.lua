@@ -146,8 +146,11 @@ end
 ---@param map keymap.map
 ---@param overwrite? boolean
 function keymap.add(map, overwrite)
-  remove_duplicates(map)
+  -- when appending, commands already bound to a stroke aren't added again; when
+  -- overwriting they are the new list, so must stay
+  if not overwrite then remove_duplicates(map) end
   for stroke, commands in pairs(map) do
+    if type(commands) ~= "table" then commands = { commands } end
     if macos then
       stroke = stroke:gsub("%f[%a]ctrl%f[%A]", "cmd")
     end
