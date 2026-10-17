@@ -11,6 +11,15 @@ command.keywords = {}
 ---@type table<string, boolean>
 command.hidden = {}
 
+---Modes of `core:find-file`, as in VS Code's quick open: text starting with a
+---mode's prefix runs its command, which takes over the command view (see
+---`core.commandview.mode`). Listed in this order in the empty box's hint.
+---@type core.commandview.mode[]
+command.find_file_modes = {
+  { prefix = ">", command = "core:find-command", text = "command" },
+  { prefix = ":", command = "doc:go-to-line", text = "line" },
+}
+
 ---A predicate function accepts arguments from `command.perform()` and evaluates to a boolean. </br>
 ---If the function returns true, then the function associated with the command is executed.
 ---

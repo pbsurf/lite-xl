@@ -2,6 +2,7 @@ local core = require "core"
 local common = require "core.common"
 local config = require "core.config"
 local style = require "core.style"
+local command = require "core.command"
 local Doc = require "core.doc"
 local DocView = require "core.docview"
 local View = require "core.view"
@@ -39,6 +40,8 @@ local noop = function() end
 ---@field show_suggestions boolean
 ---@field typeahead boolean
 ---@field wrap boolean
+---@field placeholder string? dim text shown while the input is empty
+---@field modes core.commandview.mode[]? prefixes that switch to other commands
 local default_state = {
   submit = noop,
   suggest = noop,
@@ -50,6 +53,17 @@ local default_state = {
   typeahead = true,
   wrap = true,
 }
+
+---A mode of a command view: when the text starts with `prefix`, `command` runs
+---with the view it was entered from as the active view, and the state it enters
+---replaces the view's own (`prefix` stays in the input but isn't part of the
+---text the state sees). Removing the prefix returns to the view's own state.
+---A command that enters asynchronously (e.g. after a server's reply) should
+---check that `core.command_view.mode_request` is still what it was when it ran.
+---@class core.commandview.mode
+---@field prefix string
+---@field command string
+---@field text string what the mode does, for hints
 
 
 function CommandView:new()
@@ -67,6 +81,10 @@ function CommandView:new()
   self.font = "font"
   self.size.y = 0
   self.label = ""
+  ---@type core.commandview.mode?
+  self.mode = nil
+  ---A fresh table while a mode's command may still enter, nil otherwise.
+  self.mode_request = nil
 end
 
 
@@ -104,18 +122,49 @@ function CommandView:scroll_to_make_visible()
 end
 
 
+function CommandView:get_prefix()
+  return self.mode and self.mode.prefix or ""
+end
+
+
+---The input's text, without the prefix of the current mode.
 function CommandView:get_text()
-  return self.doc:get_text(1, 1, 1, math.huge)
+  return self.doc:get_text(1, 1, 1, math.huge):sub(#self:get_prefix() + 1)
 end
 
 
 function CommandView:set_text(text, select)
   self.last_text = text
+  local prefix = self:get_prefix()
   self.doc:remove(1, 1, math.huge, math.huge)
-  self.doc:text_input(text)
+  self.doc:text_input(prefix .. text)
   if select then
-    self.doc:set_selection(math.huge, math.huge, 1, 1)
+    self.doc:set_selection(math.huge, math.huge, 1, #prefix + 1)
   end
+end
+
+
+local pending_state = common.merge(default_state, { pending = true })
+
+function CommandView:enter_mode(mode)
+  self.base_state, self.base_label = self.state, self.label
+  self.mode, self.mode_request = mode, {}
+  self.state = default_state
+  -- the command sees the view the command view was entered from
+  core.active_view = core.last_active_view
+  command.perform(mode.command)
+  if self.state == default_state then
+    -- not entered (yet): wait, showing what the mode does
+    core.active_view = self
+    self.state = pending_state
+    self.label = mode.text:gsub("^%l", string.upper) .. ": "
+  end
+end
+
+
+function CommandView:leave_mode()
+  self.state, self.label = self.base_state, self.base_label
+  self.mode, self.mode_request, self.base_state = nil, nil, nil
 end
 
 
@@ -196,7 +245,7 @@ end
 ---@varargs any
 ---@overload fun(label:string, options: core.commandview.state)
 function CommandView:enter(label, ...)
-  if self.state ~= default_state then
+  if self.state ~= default_state and self.state ~= pending_state then
     return
   end
   local options = select(1, ...)
@@ -224,7 +273,7 @@ function CommandView:enter(label, ...)
   -- maintain compatibility with deprecated usage, but still allow
   -- overwriting with options.text
   local old_text = self:get_text()
-  if old_text ~= "" then
+  if old_text ~= "" and not self.mode then
     core.warn("Using deprecated function CommandView:set_text")
   end
   if options.text or options.select_text then
@@ -247,10 +296,15 @@ function CommandView:exit(submitted, inexplicit)
     core.set_active_view(core.last_active_view)
   end
   local cancel = self.state.cancel
+  local base_cancel = self.base_state and self.base_state.cancel or noop
   self.state = default_state
+  self.mode, self.mode_request, self.base_state = nil, nil, nil
   self.doc:reset()
   self.suggestions = {}
-  if not submitted then cancel(not inexplicit) end
+  if not submitted then
+    cancel(not inexplicit)
+    base_cancel(not inexplicit)
+  end
   self.save_suggestion = nil
   self.last_text = ""
 end
@@ -295,6 +349,16 @@ function CommandView:update()
 
   -- update suggestions if text has changed
   if self.last_change_id ~= self.doc:get_change_id() then
+    local raw = self.doc:get_text(1, 1, 1, math.huge)
+    if self.mode and raw:sub(1, #self.mode.prefix) ~= self.mode.prefix then
+      self:leave_mode()
+    end
+    for _, mode in ipairs(not self.mode and self.state.modes or {}) do
+      if raw:sub(1, #mode.prefix) == mode.prefix then
+        self:enter_mode(mode)
+        break
+      end
+    end
     self:update_suggestions()
     if self.state.typeahead and self.suggestions[self.suggestion_idx] then
       local current_text = self:get_text()
@@ -302,7 +366,7 @@ function CommandView:update()
       if #self.last_text < #current_text and
          string.find(suggested_text, current_text, 1, true) == 1 then
         self:set_text(suggested_text)
-        self.doc:set_selection(1, #current_text + 1, 1, math.huge)
+        self.doc:set_selection(1, #self:get_prefix() + #current_text + 1, 1, math.huge)
       end
       self.last_text = current_text
     end
@@ -340,6 +404,16 @@ end
 
 function CommandView:draw_line_highlight()
   -- no-op function to disable this functionality
+end
+
+
+function CommandView:draw_line_text(line, x, y)
+  local placeholder = self.state.placeholder
+  if placeholder and self.doc:get_text(1, 1, 1, math.huge) == "" then
+    local yoffset = self:get_line_text_y_offset()
+    renderer.draw_text(self:get_font(), placeholder, x, y + yoffset, style.dim)
+  end
+  return CommandView.super.draw_line_text(self, line, x, y)
 end
 
 

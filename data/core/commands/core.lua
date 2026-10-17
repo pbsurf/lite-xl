@@ -131,7 +131,13 @@ command.add(nil, {
         table.insert(files, common.home_encode(path .. item.filename))
       end
     end
+    local hints = {}
+    for _, mode in ipairs(command.find_file_modes) do
+      table.insert(hints, mode.prefix .. " " .. mode.text)
+    end
     core.command_view:enter("Open File From Project", {
+      modes = command.find_file_modes,
+      placeholder = "file name, or type " .. table.concat(hints, ", "),
       submit = function(text, item)
         text = item and item.text or text
         core.root_view:open_doc(core.open_doc(common.home_expand(text)))
