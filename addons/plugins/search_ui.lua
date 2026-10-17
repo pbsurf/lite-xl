@@ -326,25 +326,44 @@ local function set_shown(w, shown)
   if shown then w:show() else w:hide() end
 end
 
--- Whether the replace row (box, button, "Replace in Selection") is shown;
+-- Whether the replace row (box, button, "Replace in Selection") is wanted;
 -- find-replace:find hides it, find-replace:replace shows it, the chevron
--- button left of the search box toggles it.
+-- button left of the search box toggles it. It and the chevron are only
+-- shown for a view that can be changed: not one searched through
+-- get_search_doc (a terminal).
 local replace_shown = false
+-- whether the row is shown now
+local row_was_shown = false
+
+local function can_replace()
+  return not (doc_view and doc_view.get_search_doc)
+end
+
+local function row_shown()
+  return replace_shown and can_replace()
+end
 
 local update_size
 
-local function set_replace_shown(shown)
-  local changed = shown ~= replace_shown
-  replace_shown = shown
-  togglereplace:set_icon(shown and "-" or "+")
+-- shows or hides the chevron and the replace row (in file scope)
+local function show_replace_controls()
+  if scope:get_selected() ~= 1 then return end
+  local shown = row_shown()
+  set_shown(togglereplace, can_replace())
+  set_shown(replacetext, shown)
+  set_shown(replace, shown)
+  set_shown(replaceinselection, shown)
+end
+
+local function update_replace_controls()
+  local shown = row_shown()
+  local changed = shown ~= row_was_shown
+  row_was_shown = shown
+  togglereplace:set_icon(replace_shown and "-" or "+")
   local binding = keymap.get_binding("find-replace:replace")
-  togglereplace:set_tooltip((shown and "Hide Replace" or "Show Replace")
+  togglereplace:set_tooltip((replace_shown and "Hide Replace" or "Show Replace")
     .. (binding and " (" .. binding .. ")" or ""))
-  if scope:get_selected() == 1 then
-    set_shown(replacetext, shown)
-    set_shown(replace, shown)
-    set_shown(replaceinselection, shown)
-  end
+  show_replace_controls()
   if not shown and widget.child_active == replacetext then
     widget:swap_active_child(findtext)
   end
@@ -362,17 +381,25 @@ local function set_replace_shown(shown)
   core.redraw = true
 end
 
+local function set_replace_shown(shown)
+  replace_shown = shown
+  update_replace_controls()
+end
+
+-- the view searched, with the replace controls it allows
+local function set_target(view)
+  doc_view = view
+  update_replace_controls()
+end
+
 local function toggle_scope(idx, not_set)
   if not not_set then scope:set_selected(idx) end
 
   if idx == 1 then
-    togglereplace:show()
-    set_shown(replacetext, replace_shown)
+    show_replace_controls()
     findnext:show()
     findprev:show()
-    set_shown(replace, replace_shown)
     patterncheck:show()
-    set_shown(replaceinselection, replace_shown)
     highlightall:show()
     findproject:hide()
     filepicker:hide()
@@ -465,7 +492,7 @@ local function find(reverse, typing)
 
   local last = core.last_active_view
   if last and (last:is(DocView) or last.get_search_doc) then
-    doc_view = last
+    set_target(last)
   end
 
   local doc = target_doc(doc_view)
@@ -534,7 +561,7 @@ end
 
 local function find_replace()
   if core.last_active_view:is(DocView) then
-    doc_view = core.last_active_view
+    set_target(core.last_active_view)
   end
   local doc = target_doc(doc_view)
   if not doc.replace then
@@ -679,7 +706,7 @@ local function show_find(av, toggle)
     status:set_label("")
 
     widget:swap_active_child(findtext)
-    doc_view = av
+    set_target(av)
     local doc = view_is_open(doc_view) and target_doc(doc_view)
     if doc then
       local doc_text = doc:get_text(table.unpack({ doc:get_selection() }))
@@ -923,7 +950,7 @@ local function update_right_positioning(self)
   label:set_position(10, 10)
   line:set_position(0, label:get_bottom() + 10)
   local text_x = 10
-  if scope:get_selected() == 1 then
+  if scope:get_selected() == 1 and can_replace() then
     togglereplace:set_position(10, line:get_bottom() + 10)
     text_x = togglereplace:get_right() + 5
   end
@@ -932,7 +959,7 @@ local function update_right_positioning(self)
 
   if scope:get_selected() == 1 then
     local below = findtext
-    if replace_shown then
+    if row_shown() then
       replacetext:set_position(text_x, findtext:get_bottom() + 10)
       replacetext.size.x = findtext.size.x
       below = replacetext
@@ -954,7 +981,7 @@ local function update_right_positioning(self)
     regexcheck:set_position(10, patterncheck:get_bottom() + 10)
     replaceinselection:set_position(10, regexcheck:get_bottom() + 10)
     highlightall:set_position(10,
-      (replace_shown and replaceinselection or regexcheck):get_bottom() + 10)
+      (row_shown() and replaceinselection or regexcheck):get_bottom() + 10)
     scope:set_position(10, highlightall:get_bottom() + 10)
   else
     regexcheck:set_position(10, wholeword:get_bottom() + 10)
@@ -996,7 +1023,7 @@ local function update_bottom_positioning(self)
     status:show()
     status:set_position(10, 10)
     replaceinselection:set_position(self.size.x - replaceinselection:get_width() - 10, 10)
-    local right = replace_shown and replaceinselection:get_position().x or self.size.x
+    local right = row_shown() and replaceinselection:get_position().x or self.size.x
     regexcheck:set_position(right - 10 - regexcheck:get_width(), 10)
     patterncheck:set_position(regexcheck:get_position().x - 10  - patterncheck:get_width(), 10)
     wholeword:set_position(patterncheck:get_position().x - 10 - wholeword:get_width(), 10)
@@ -1016,7 +1043,7 @@ local function update_bottom_positioning(self)
 
   if scope:get_selected() == 1 then
     togglereplace:set_position(10, line:get_bottom() + 10)
-    local text_x = togglereplace:get_right() + 10
+    local text_x = can_replace() and togglereplace:get_right() + 10 or 10
     findtext:set_position(text_x, line:get_bottom() + 10)
     findtext.size.x = self.size.x - 30 - text_x - findprev:get_width() - findnext:get_width()
     findnext:set_position(self.size.x - 10 - findnext:get_width(), line:get_bottom() + 10)
@@ -1098,7 +1125,7 @@ function core.set_active_view(...)
       view.get_search_doc
     )
   then
-    doc_view = view
+    set_target(view)
     Results:clear()
   end
 end
@@ -1183,7 +1210,7 @@ end, {
 -- find-replace:replace (ctrl+r) only applies in a doc; in the pane's boxes,
 -- show the replace row
 command.add(function()
-  return widget:is_visible() and scope:get_selected() == 1
+  return widget:is_visible() and scope:get_selected() == 1 and can_replace()
     and (core.active_view == findtext.textview or core.active_view == replacetext.textview)
 end, {
   ["search-replace:show-replace"] = function()
