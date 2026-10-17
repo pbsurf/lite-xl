@@ -939,19 +939,16 @@ static int mkdirp(lua_State* L, char* path, int len) {
 #define FA_RDONLY       0x01            // FILE_ATTRIBUTE_READONLY
 #define FA_DIREC        0x10            // FILE_ATTRIBUTE_DIRECTORY
 
-// Strips .tar.gz to .tar, .tgz to .tar, .txz to .tar, .tar.xz to .tar.
-// Assumes sizeof(dst) >= sizeof(src)
+// Strips .tar.gz to .tar, .tgz to .tar, .txz to .tar, .tar.xz to .tar; dst holds PATH_MAX.
+// Any other name gets .tar appended, so the result never names src itself.
 static const char* strip_to_tar(char* dst, const char* src) {
-  int len = strlen(src);
-  if (strstr(src, ".tar") || strstr(src, ".gz") || strstr(src, ".xz")) {
-    strncpy(dst, src, imin(len - 3, PATH_MAX));
-    len -= 3;
-  } else if (strstr(src, ".tgz") || strstr(src, ".txz")) {
-    strncpy(dst, src, imin(len - 3, PATH_MAX));
-    strcat(dst, "tar");
-  } else
-    strcpy(dst, src);
-  dst[len] = 0;
+  int len = snprintf(dst, PATH_MAX, "%s", src);
+  if (len >= 3 && len < PATH_MAX && (strcmp(&dst[len - 3], ".gz") == 0 || strcmp(&dst[len - 3], ".xz") == 0))
+    dst[len - 3] = 0;
+  else if (len >= 4 && len < PATH_MAX && (strcmp(&dst[len - 4], ".tgz") == 0 || strcmp(&dst[len - 4], ".txz") == 0))
+    strcpy(&dst[len - 3], "tar");
+  else
+    snprintf(dst, PATH_MAX, "%s.tar", src);
   return dst;
 }
 
@@ -1127,7 +1124,7 @@ static int lpm_extract(lua_State* L) {
     } else 
       strcpy(actual_src, src);
 
-    if (strstr(src, ".tar") || strstr(src, ".tgz")) {
+    if (strstr(src, ".tar") || strstr(src, ".tgz") || strstr(src, ".txz")) {
       // It's incredily slow to seek/read directly from a gzfile; so just unzip to an intermediate file first.
       mtar_t tar = {0};
       int err;
