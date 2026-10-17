@@ -1,13 +1,17 @@
 -- mod-version:3
 local core = require "core"
 local command = require "core.command"
+local keymap = require "core.keymap"
 local RootView = require "core.rootview"
 local DocView = require "core.docview"
 local Doc = require "core.doc"
 local TreeView = require "plugins.treeview"
 
+-- Only a doc opened with opts.preview (while browsing: tree view, go to
+-- definition, ...) gets a preview tab; other opens (ctrl+p, ctrl+o, ...) make a
+-- normal one
 local RootView_open_doc = RootView.open_doc
-function RootView:open_doc(doc)
+function RootView:open_doc(doc, opts)
   -- Only a view open_doc creates is a preview; one already in the node keeps its
   -- state, also when it has no ephemeral flag (added otherwise, e.g. restored by
   -- the workspace)
@@ -16,8 +20,11 @@ function RootView:open_doc(doc)
   for _, v in ipairs(node.views) do
     if v.doc == doc then exists = true end
   end
-  local docview = RootView_open_doc(self, doc)
-  if not exists then
+  local docview = RootView_open_doc(self, doc, opts)
+  if not (opts and opts.preview) then
+    -- Opening a preview's doc otherwise makes it normal
+    if docview.ephemeral then docview.ephemeral = false end
+  elseif not exists then
     -- We assume that ephemeral tab is always the last one
     -- But user can drag and drop tabs so full check is needed
     for i, v in ipairs(node.views) do
@@ -58,15 +65,20 @@ function Doc:on_text_change(type)
   Doc_on_text_change(self, type)
 end
 
--- Double clicking in the TreeView makes the tab normal
-local TreeView_on_mouse_pressed = TreeView.on_mouse_pressed
-function TreeView:on_mouse_pressed(button, x, y, clicks)
-  local result = TreeView_on_mouse_pressed(self, button, x, y, clicks)
-  if (clicks > 1) and (core.active_view.doc ~= nil) then
-    core.active_view.ephemeral = false
+-- Double clicking a file in the TreeView opens it as a normal tab (the keymap
+-- tries "2lclick" before "lclick", treeview's binding for select-and-open)
+command.add(
+  function()
+    return not TreeView.contextmenu.show_context_menu
+      and core.active_view == TreeView
+  end, {
+  ["ephemeral-tabs:treeview-select-and-open-normal"] = function()
+    command.perform "treeview:select-and-open"
+    if core.active_view.doc then core.active_view.ephemeral = false end
   end
-  return result
-end
+})
+
+keymap.add { ["2lclick"] = "ephemeral-tabs:treeview-select-and-open-normal" }
 
 -- Double clicking on a tab makes it normal
 local RootView_on_mouse_pressed = RootView.on_mouse_pressed
