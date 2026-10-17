@@ -71,11 +71,19 @@
     },
     {
       "id": "menubar",
-      "description": "A menu bar of commands, shown when Alt is tapped.",
-      "version": "0.1",
+      "description": "A menu bar of commands, shown when Alt is tapped, or dropped from a button.",
+      "version": "0.2",
       "mod_version": "3",
       "path": "addons/plugins/menubar.lua",
       "dependencies": { "shapes": {} }
+    },
+    {
+      "id": "headerbar",
+      "description": "A header bar in place of the title bar: menu button, file browser toggle, back/forward, and with config.borderless the title and window controls.",
+      "version": "0.1",
+      "mod_version": "3",
+      "path": "addons/plugins/headerbar.lua",
+      "dependencies": { "menubar": {}, "navigate": { "optional": true } }
     },
     {
       "id": "highlight_selection",
@@ -102,7 +110,7 @@
     {
       "id": "navigate",
       "description": "Back and forward between document positions (lite-xl-plugins 6e4aa64), rewritten: records jumps (doc changes, moves over jump_threshold lines) on cursor change instead of polling, keeps history across closed files, alt+shift+left/right within the current doc.",
-      "version": "0.1",
+      "version": "0.2",
       "mod_version": "3",
       "path": "addons/plugins/navigate.lua"
     },

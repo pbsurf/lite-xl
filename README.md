@@ -50,6 +50,9 @@ upstream's `release/v2.1.x`. Additions to the editor:
   of a plugin's bindings to keep (`{ build = { "f6" }, debugger = false }`);
   `keymap.origin` records which plugin added each.
 * **Touch:** tap to click, drag to scroll.
+* **Borderless window** (`config.borderless`): the title strip moves the window
+  (but not the buttons on it, `system.set_window_hit_test`'s rects), a double-click
+  on it maximizes or restores, and every edge resizes.
 * **File browser:** keeps its width and visibility between sessions, and
   dragging its divider narrower than `config.plugins.treeview.collapse_size`
   collapses it (toggling reopens it at the width it had before the drag).
@@ -87,6 +90,10 @@ another repository's version, uninstalls removing dependents under `--assume-yes
   `config.plugins.menubar.menus`; commands from plugins not placed in a menu are
   listed per plugin under Tools. File > Open Recent lists recent files (kept in
   `session.lua` between sessions, as `core.recent_files`) and projects.
+* **headerbar:** one strip at the top in place of the title bar and toolbars: a
+  menu button (menubar's menus as one dropdown), a file browser toggle,
+  back/forward (navigate, dimmed when there's nowhere to go) and, with
+  `config.borderless`, the title and the window controls.
 * **highlight_selection:** marks the other occurrences of the selected text (whole
   words only when a whole word is selected), in `style.selection_match`.
 * **search_ui** (imported, with our changes): a "Highlight All" option marking every
