@@ -596,14 +596,16 @@ end
 local function treeitem() return view.hovered_item or view.selected_item end
 
 
-menu:register(function() return core.active_view:is(TreeView) and treeitem() end, {
+-- The item menus are for the item under the pointer; elsewhere in the
+-- treeview, plugins may register a menu for the treeview itself
+menu:register(function() return core.active_view:is(TreeView) and view.hovered_item end, {
   { text = "Open in System", command = "treeview:open-in-system" },
   ContextMenu.DIVIDER
 })
 
 menu:register(
   function()
-    local item = treeitem()
+    local item = view.hovered_item
     return core.active_view:is(TreeView) and item and not is_project_folder(item.abs_filename)
   end,
   {
@@ -614,7 +616,7 @@ menu:register(
 
 menu:register(
   function()
-    local item = treeitem()
+    local item = view.hovered_item
     return core.active_view:is(TreeView) and item and item.type == "dir"
   end,
   {
@@ -625,7 +627,7 @@ menu:register(
 
 menu:register(
   function()
-    local item = treeitem()
+    local item = view.hovered_item
     return core.active_view:is(TreeView) and item
       and not is_primary_project_folder(item.abs_filename)
       and is_project_folder(item.abs_filename)
