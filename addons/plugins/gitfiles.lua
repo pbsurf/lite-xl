@@ -9,6 +9,11 @@
 -- `git status` runs once when a directory is first scanned (blocking), then
 -- again, in the background, a moment after a change in the project or its
 -- git directory (index, HEAD).
+--
+-- While the treeview is focused, the status bar shows the selected entry's
+-- repository: branch, commits ahead of/behind its upstream (as of the last
+-- fetch), and how many files are changed or untracked in the project directory.
+-- The treeview's and tabs' tooltips show an entry's or file's git state.
 
 local core = require "core"
 local common = require "core.common"
@@ -18,6 +23,8 @@ local style = require "core.style"
 local storage = require "core.storage"
 local dirwatch = require "core.dirwatch"
 local ContextMenu = require "core.contextmenu"
+local StatusView = require "core.statusview"
+local RootView = require "core.rootview"
 local TreeView = require "plugins.treeview"
 
 config.plugins.gitfiles = common.merge({
@@ -30,7 +37,8 @@ local DEFAULT_UNTRACKED = { common.color "#2e9e44" }
 
 -- per project directory name: false if it isn't in a git repository, else
 -- { git_dir, prefix (of the directory in the repository, with a trailing /),
---   ignored, untracked (sets of paths relative to the directory) }
+--   ignored, untracked (sets of paths relative to the directory),
+--   changes (status "XY" of other entries, by path), summary (see parse_status) }
 local repos = {}
 
 -- projects (core.project_dir) showing all files
@@ -48,19 +56,41 @@ end
 
 local function status_args(dir_name)
   return { "git", "-C", dir_name, "--no-optional-locks", "status", "--porcelain",
-           "-z", "--ignored", "--", "." }
+           "-z", "--branch", "--ignored", "--", "." }
 end
 
--- `git status --porcelain -z` output: entries "XY path", NUL-terminated, paths
--- relative to the repository's top; a rename's or copy's source path follows
--- it as a field of its own. A directory whose files are all untracked or all
--- ignored is one entry, with a trailing /.
+-- `git status --porcelain -z --branch` output: a "## branch...upstream [ahead
+-- n, behind m]" header, then entries "XY path", NUL-terminated, paths relative
+-- to the repository's top; a rename's or copy's source path follows it as a
+-- field of its own. A directory whose files are all untracked or all ignored is
+-- one entry, with a trailing /. Returns the sets of ignored and untracked
+-- paths, a summary: { branch, upstream, ahead, behind, staged, unstaged,
+-- untracked (counts of entries) }, and the other entries' "XY" by path.
 local function parse_status(out, prefix)
-  local ignored, untracked = {}, {}
+  local ignored, untracked, changes = {}, {}, {}
+  local summary = { ahead = 0, behind = 0, staged = 0, unstaged = 0, untracked = 0 }
   local skip = false
   for field in out:gmatch("([^\0]*)\0") do
     if skip then
       skip = false
+    elseif field:sub(1, 3) == "## " then
+      local head = field:sub(4)
+      local branch = head:match("^No commits yet on (.+)$") or head:match("^Initial commit on (.+)$")
+      if branch then
+        summary.branch = branch
+      elseif head:find("^HEAD %(no branch%)") then
+        summary.detached = true
+      else
+        local tracking = head:match("%s%[(.*)%]$")
+        head = head:gsub("%s%[.*%]$", "")
+        summary.branch, summary.upstream = head:match("^(.-)%.%.%.(.+)$")
+        summary.branch = summary.branch or head
+        if tracking then
+          summary.ahead = tonumber(tracking:match("ahead (%d+)")) or 0
+          summary.behind = tonumber(tracking:match("behind (%d+)")) or 0
+          summary.upstream_gone = tracking == "gone"
+        end
+      end
     else
       local xy, path = field:sub(1, 2), field:sub(4)
       skip = xy:find("[RC]") ~= nil
@@ -72,11 +102,16 @@ local function parse_status(out, prefix)
           ignored[path] = true
         elseif xy == "??" then
           untracked[path] = true
+          summary.untracked = summary.untracked + 1
+        else
+          changes[path] = xy
+          if xy:sub(1, 1) ~= " " then summary.staged = summary.staged + 1 end
+          if xy:sub(2, 2) ~= " " then summary.unstaged = summary.unstaged + 1 end
         end
       end
     end
   end
-  return ignored, untracked
+  return ignored, untracked, summary, changes
 end
 
 -- Blocking: the first scan of a directory needs the answer
@@ -121,7 +156,7 @@ local function get_repo(dir_name)
     local status = read_command(status_args(dir_name))
     if status then
       repo = { git_dir = git_dir, prefix = prefix }
-      repo.ignored, repo.untracked = parse_status(status, prefix)
+      repo.ignored, repo.untracked, repo.summary, repo.changes = parse_status(status, prefix)
       -- the index and HEAD change with add, rm, commit, checkout...
       git_watch:watch(git_dir)
     end
@@ -163,9 +198,9 @@ local function update()
     if repo and is_project_dir(dir_name) then
       local out = run_command(status_args(dir_name))
       if out then
-        local ignored, untracked = parse_status(out, repo.prefix)
+        local ignored, untracked, summary, changes = parse_status(out, repo.prefix)
         rescan = rescan or not same_set(ignored, repo.ignored)
-        repo.ignored, repo.untracked = ignored, untracked
+        repo.ignored, repo.untracked, repo.summary, repo.changes = ignored, untracked, summary, changes
         core.redraw = true
       end
     end
@@ -248,6 +283,66 @@ function TreeView:get_item_text(item, active, hovered)
 end
 
 
+local STATE_NAMES = { M = "modified", A = "added", D = "deleted", R = "renamed",
+                      C = "copied", T = "type changed" }
+
+-- A path's git state, for tooltips: "modified", "added (staged)", "untracked",
+-- "ignored", "conflict"...; for a folder ("" for the directory itself), how many
+-- entries in it are changed or untracked. nil if there's nothing to say.
+local function git_state(repo, path, is_dir)
+  if in_set(repo.untracked, path) then return "untracked" end
+  if in_set(repo.ignored, path) then return "ignored" end
+  if is_dir then
+    local prefix = path ~= "" and path .. PATHSEP or ""
+    local function count(set)
+      local n = 0
+      for p in pairs(set) do
+        if p:sub(1, #prefix) == prefix then n = n + 1 end
+      end
+      return n
+    end
+    local changed, untracked = count(repo.changes), count(repo.untracked)
+    local t = {}
+    if changed > 0 then table.insert(t, changed .. " changed") end
+    if untracked > 0 then table.insert(t, untracked .. " untracked") end
+    return #t > 0 and table.concat(t, ", ") or nil
+  end
+  local xy = repo.changes[path]
+  if not xy then return end
+  if xy:find("U") or xy == "AA" or xy == "DD" then return "conflict" end
+  local x, y = xy:sub(1, 1), xy:sub(2, 2)
+  local staged, unstaged = STATE_NAMES[x] or x, STATE_NAMES[y] or y
+  if x == " " then return unstaged end
+  if y == " " then return staged .. " (staged)" end
+  -- staged, then changed again
+  return staged .. " (staged), " .. (y == "M" and "modified again" or unstaged)
+end
+
+local get_item_info = TreeView.get_item_info
+function TreeView:get_item_info(item)
+  local info = get_item_info(self, item)
+  local repo = repos[item.dir_name]
+  local state = repo and git_state(repo, item.depth > 0 and item.filename or "", item.type == "dir")
+  if state then table.insert(info, "git: " .. state) end
+  return info
+end
+
+local get_tab_tooltip_info = RootView.get_tab_tooltip_info
+function RootView:get_tab_tooltip_info(view)
+  local info = get_tab_tooltip_info(self, view)
+  local abs = view.doc and view.doc.abs_filename
+  for _, dir in ipairs(abs and core.project_directories or {}) do
+    local repo = repos[dir.name]
+    if repo and common.path_belongs_to(abs, dir.name) then
+      local state = git_state(repo, abs:sub(#dir.name + 2))
+      if state then table.insert(info, "git: " .. state) end
+      break
+    end
+  end
+  return info
+end
+
+
 local function menu_items()
   return { { text = showing_all() and "Hide Ignored Files" or "Show All Files",
              command = "gitfiles:toggle-show-all-files" } }
@@ -265,3 +360,62 @@ end, function()
   table.insert(items, 1, ContextMenu.DIVIDER)
   return items
 end)
+
+
+-- the repository of the treeview's selected entry, else of the first project
+-- directory in one
+local function treeview_repo()
+  local item = TreeView.selected_item
+  if item then return repos[item.dir_name] or nil end
+  for _, dir in ipairs(core.project_directories) do
+    if repos[dir.name] then return repos[dir.name] end
+  end
+end
+
+core.status_view:add_item({
+  predicate = function()
+    return core.active_view == TreeView and treeview_repo() ~= nil
+  end,
+  name = "gitfiles:status",
+  alignment = StatusView.Item.RIGHT,
+  get_item = function()
+    local sum = treeview_repo().summary
+    local t = { style.text, sum.detached and "(detached)" or sum.branch or "?" }
+    if sum.ahead > 0 or sum.behind > 0 then
+      local s = ""
+      if sum.ahead > 0 then s = s .. " ↑" .. sum.ahead end
+      if sum.behind > 0 then s = s .. " ↓" .. sum.behind end
+      table.insert(t, style.accent)
+      table.insert(t, s)
+    end
+    if sum.staged + sum.unstaged > 0 then
+      table.insert(t, style.dim)
+      table.insert(t, "  ·  ")
+      table.insert(t, style.warn)
+      table.insert(t, sum.staged > 0 and sum.unstaged > 0
+        and string.format("%d staged, %d changed", sum.staged, sum.unstaged)
+        or sum.staged > 0 and sum.staged .. " staged" or sum.unstaged .. " changed")
+    end
+    if sum.untracked > 0 then
+      table.insert(t, style.dim)
+      table.insert(t, "  ·  ")
+      table.insert(t, style.git_untracked or DEFAULT_UNTRACKED)
+      table.insert(t, sum.untracked .. " untracked")
+    end
+    return t
+  end,
+  tooltip = function()
+    local sum = treeview_repo().summary
+    local lines = { sum.detached and "Detached HEAD" or (sum.branch or "?")
+      .. (sum.upstream and " → " .. sum.upstream or " (no upstream)") }
+    if sum.upstream_gone then
+      table.insert(lines, "Upstream is gone")
+    elseif sum.upstream then
+      table.insert(lines, string.format("%d ahead, %d behind (as of last fetch)",
+        sum.ahead, sum.behind))
+    end
+    table.insert(lines, string.format("In this folder: %d staged, %d changed, %d untracked",
+      sum.staged, sum.unstaged, sum.untracked))
+    return table.concat(lines, "\n")
+  end,
+})
