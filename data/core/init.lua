@@ -856,29 +856,64 @@ function core.init()
 end
 
 
-function core.confirm_close_docs(docs, close_fn, ...)
-  local dirty_count = 0
-  local dirty_name
-  for _, doc in ipairs(docs or core.docs) do
-    if doc:is_dirty() then
-      dirty_count = dirty_count + 1
-      dirty_name = doc:get_name()
+---Saves docs one after another, asking for a filename for those without one, then
+---calls `on_saved`. Stops at a save that fails or is cancelled.
+local function save_docs(docs, on_saved)
+  local i = 0
+  local function save_next()
+    i = i + 1
+    local doc = docs[i]
+    if not doc then return on_saved() end
+    if doc.filename then
+      local ok, err = pcall(doc.save, doc)
+      if not ok then return core.error("Couldn't save \"%s\": %s", doc.filename, err) end
+      return save_next()
     end
+    core.command_view:enter("Save Unnamed Document As", {
+      submit = function(filename)
+        filename = core.normalize_to_project_dir(common.home_expand(filename))
+        local ok, err = pcall(doc.save, doc, filename, core.project_absolute_path(filename))
+        if not ok then return core.error("Couldn't save \"%s\": %s", filename, err) end
+        save_next()
+      end,
+      suggest = function(text)
+        return common.home_encode_list(common.path_suggest(common.home_expand(text)))
+      end
+    })
   end
-  if dirty_count > 0 then
+  save_next()
+end
+
+
+function core.confirm_close_docs(docs, close_fn, ...)
+  local dirty = {}
+  for _, doc in ipairs(docs or core.docs) do
+    if doc:is_dirty() then table.insert(dirty, doc) end
+  end
+  if #dirty > 0 then
     local text
-    if dirty_count == 1 then
-      text = string.format("\"%s\" has unsaved changes. Quit anyway?", dirty_name)
+    if #dirty == 1 then
+      local name = dirty[1].filename and string.format("\"%s\"", dirty[1].filename)
+        or "the unnamed document"
+      text = string.format("Save changes to %s before closing?", name)
     else
-      text = string.format("%d docs have unsaved changes. Quit anyway?", dirty_count)
+      text = string.format("Save changes to %d documents before closing?", #dirty)
     end
     local args = {...}
     local opt = {
-      { text = "Yes", default_yes = true },
-      { text = "No", default_no = true }
+      { text = "Save", default_yes = true },
+      { text = "Discard" },
+      { text = "Cancel", default_no = true }
     }
     core.nag_view:show("Unsaved Changes", text, opt, function(item)
-      if item.text == "Yes" then close_fn(table.unpack(args)) end
+      if item.text == "Save" then
+        -- in a thread: the nag view takes focus back from the command view on return
+        core.add_thread(function()
+          save_docs(dirty, function() close_fn(table.unpack(args)) end)
+        end)
+      elseif item.text == "Discard" then
+        close_fn(table.unpack(args))
+      end
     end)
   else
     close_fn(...)

@@ -162,6 +162,14 @@ end
 
 function NagView:on_text_input(text)
   if not self.visible then return end
+  -- an option's first letter selects it
+  for i, opt in ipairs(self.options) do
+    if opt.text:sub(1, 1):lower() == text:lower() then
+      self:change_hovered(i)
+      command.perform "dialog:select"
+      return
+    end
+  end
   if text:lower() == "y" then
     command.perform "dialog:select-yes"
   elseif text:lower() == "n" then
