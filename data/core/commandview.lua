@@ -1,5 +1,6 @@
 local core = require "core"
 local common = require "core.common"
+local config = require "core.config"
 local style = require "core.style"
 local Doc = require "core.doc"
 local DocView = require "core.docview"
@@ -351,6 +352,36 @@ function CommandView:draw_line_gutter(idx, x, y)
   renderer.draw_text(self:get_font(), self.label, x, y + yoffset, color)
   core.pop_clip_rect()
   return self:get_line_height()
+end
+
+
+---Whether the suggestions box, drawn over the views above, overlaps the point.
+---@param x number
+---@param y number
+---@return boolean
+function CommandView:suggestions_overlap_point(x, y)
+  if not self.state.show_suggestions or #self.suggestions == 0 then return false end
+  local top = self.position.y - math.ceil(self.suggestions_height) - 2 * style.divider_size
+  return x >= self.position.x and x < self.position.x + self.size.x
+    and y >= top and y < self.position.y
+end
+
+
+---Scrolls the suggestions by wheel amount dy (up shows later ones, which are
+---drawn above), keeping the selected one in view.
+---@param dy number
+function CommandView:scroll_suggestions(dy)
+  local max_offset = math.max(1, #self.suggestions - max_suggestions + 1)
+  -- fractions of a row (smooth wheels) add up across events
+  self.suggestions_scroll = (self.suggestions_scroll or 0)
+    + dy * config.mouse_wheel_scroll / self:get_suggestion_line_height()
+  local rows = self.suggestions_scroll < 0 and math.ceil(self.suggestions_scroll)
+    or math.floor(self.suggestions_scroll)
+  self.suggestions_scroll = self.suggestions_scroll - rows
+  self.suggestions_offset = common.clamp(self.suggestions_offset + rows, 1, max_offset)
+  local visible = math.min(max_suggestions, #self.suggestions)
+  self.suggestion_idx = common.clamp(self.suggestion_idx,
+    self.suggestions_offset, self.suggestions_offset + visible - 1)
 end
 
 

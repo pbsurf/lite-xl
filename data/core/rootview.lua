@@ -452,6 +452,11 @@ end
 
 function RootView:on_mouse_wheel(dy, dx)
   local x, y = self.mouse.x, self.mouse.y
+  -- the command view's suggestions are drawn over the node above it
+  if core.command_view:suggestions_overlap_point(x, y) then
+    core.command_view:scroll_suggestions(dy)
+    return true
+  end
   local node = self.root_node:get_child_overlapping_point(x, y)
   -- over a tab bar: one notch scrolls one tab if its tabs scroll, else nothing
   if node:tab_bar_overlaps_point(x, y) then
