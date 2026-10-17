@@ -137,8 +137,7 @@ typedef enum keys_mode_e {
 typedef enum mouse_tracking_mode_e {
   MOUSE_TRACKING_NONE,
   MOUSE_TRACKING_X10,
-  MOUSE_TRACKING_NORMAL,
-  MOUSE_TRACKING_SGR
+  MOUSE_TRACKING_NORMAL
 } mouse_tracking_mode_e;
 
 typedef enum charset_e {
@@ -154,9 +153,6 @@ typedef struct view_t {
   int cursor_styling_inversed;
   buffer_styling_t cursor_styling; // What characters are currently being emitted as.
   cursor_mode_e cursor_mode;
-  keys_mode_e cursor_keys_mode;
-  keys_mode_e keypad_keys_mode;
-  mouse_tracking_mode_e mouse_tracking_mode;
   color_t palette[256];                // Custom palette as per the ^][4;#;rgb:24/04/3C command. The fuck?
   charset_e charset;
   int last_graphical_character; // for CSI b
@@ -191,6 +187,12 @@ typedef struct {
   paste_mode_e paste_mode;
   mode_e mode;                                       // The mode the terminal is in. 
   int reporting_focus;                               // Enables/disbles reporting focus.
+  // Modes of the terminal, not of a buffer: programs set them on either side of
+  // switching to the alternate buffer (vim turns the mouse on before, off after).
+  keys_mode_e cursor_keys_mode;
+  keys_mode_e keypad_keys_mode;
+  mouse_tracking_mode_e mouse_tracking_mode;         // which events are reported
+  int mouse_sgr;                                     // reported as SGR (1006), else as X10
   char name[LIBTERMINAL_NAME_MAX];                   // Window name, set with OS command.
   char buffered_sequence[LIBTERMINAL_CHUNK_SIZE];
   int output_ended;                                  // The pty's output ended (the shell exited).
@@ -546,12 +548,14 @@ static int terminal_escape_sequence(terminal_t* terminal, terminal_escape_type_e
           const char* next = &seq[3];
           while (next) {
             switch (parse_number(next, 0)) {
-              case 1: view->cursor_keys_mode = KEYS_MODE_APPLICATION; break;
-              case 9: view->mouse_tracking_mode = MOUSE_TRACKING_X10; break;
+              case 1: terminal->cursor_keys_mode = KEYS_MODE_APPLICATION; break;
+              case 9: terminal->mouse_tracking_mode = MOUSE_TRACKING_X10; break;
               case 12: view->cursor_mode = CURSOR_BLINKING; break;
               case 25: view->cursor_mode = CURSOR_SOLID; break;
-              case 1000: if (view->mouse_tracking_mode != MOUSE_TRACKING_SGR) view->mouse_tracking_mode = MOUSE_TRACKING_NORMAL; break;
-              case 1006: view->mouse_tracking_mode = MOUSE_TRACKING_SGR; break;
+              // button-event and any-event tracking (1002, 1003) report as
+              // normal tracking does: presses, releases, the wheel; no motion yet
+              case 1000: case 1002: case 1003: terminal->mouse_tracking_mode = MOUSE_TRACKING_NORMAL; break;
+              case 1006: terminal->mouse_sgr = 1; break;
               case 1004: terminal->reporting_focus = 1; break;
               case 1047: terminal_switch_buffer(terminal, VIEW_ALTERNATE_BUFFER); break;
               case 1049: terminal_switch_buffer(terminal, VIEW_ALTERNATE_BUFFER); break;
@@ -568,12 +572,12 @@ static int terminal_escape_sequence(terminal_t* terminal, terminal_escape_type_e
           const char* next = &seq[3];
           while (next) {
             switch (parse_number(next, 0)) {
-              case 1: view->cursor_keys_mode = KEYS_MODE_NORMAL; break;
-              case 9: view->mouse_tracking_mode = MOUSE_TRACKING_NONE; break;
+              case 1: terminal->cursor_keys_mode = KEYS_MODE_NORMAL; break;
+              case 9: terminal->mouse_tracking_mode = MOUSE_TRACKING_NONE; break;
               case 12: view->cursor_mode = CURSOR_SOLID; break;
               case 25: view->cursor_mode = CURSOR_HIDDEN; break;
-              case 1000: view->mouse_tracking_mode = MOUSE_TRACKING_NONE; break;
-              case 1006: view->mouse_tracking_mode = MOUSE_TRACKING_NONE; break;
+              case 1000: case 1002: case 1003: terminal->mouse_tracking_mode = MOUSE_TRACKING_NONE; break;
+              case 1006: terminal->mouse_sgr = 0; break;
               case 1004: terminal->reporting_focus = 0; break;
               case 1047: terminal_switch_buffer(terminal, VIEW_NORMAL_BUFFER); break;
               case 1049: terminal_switch_buffer(terminal, VIEW_NORMAL_BUFFER); break;
@@ -772,8 +776,8 @@ static int terminal_escape_sequence(terminal_t* terminal, terminal_escape_type_e
           default: view->charset = CHARSET_OTHER; break;
         }
       break;
-      case '=': view->keypad_keys_mode = KEYS_MODE_APPLICATION; break;
-      case '>': view->keypad_keys_mode = KEYS_MODE_NORMAL; break;
+      case '=': terminal->keypad_keys_mode = KEYS_MODE_APPLICATION; break;
+      case '>': terminal->keypad_keys_mode = KEYS_MODE_NORMAL; break;
       // reverse index: up a line, scrolling at the region's top
       case 'M':
         if (view->cursor_y == terminal_region_top(terminal))
@@ -1635,7 +1639,7 @@ static int f_terminal_cursor(lua_State* L) {
 
 static int f_terminal_cursor_keys_mode(lua_State* L) {
   terminal_t* terminal = lua_toterminal(L, 1);
-  switch (terminal->views[terminal->current_view].cursor_keys_mode) {
+  switch (terminal->cursor_keys_mode) {
     case KEYS_MODE_NORMAL: lua_pushliteral(L, "normal"); break;
     case KEYS_MODE_APPLICATION: lua_pushliteral(L, "application"); break;
   }
@@ -1644,7 +1648,7 @@ static int f_terminal_cursor_keys_mode(lua_State* L) {
 
 static int f_terminal_keypad_keys_mode(lua_State* L) {
   terminal_t* terminal = lua_toterminal(L, 1);
-  switch (terminal->views[terminal->current_view].keypad_keys_mode) {
+  switch (terminal->keypad_keys_mode) {
     case KEYS_MODE_NORMAL: lua_pushliteral(L, "normal"); break;
     case KEYS_MODE_APPLICATION: lua_pushliteral(L, "application"); break;
   }
@@ -1699,11 +1703,15 @@ static int f_terminal_clear(lua_State* L) {
 
 static int f_terminal_mouse_tracking_mode(lua_State* L) {
   terminal_t* terminal = lua_toterminal(L, 1);
-  switch (terminal->views[terminal->current_view].mouse_tracking_mode) {
+  switch (terminal->mouse_tracking_mode) {
     case MOUSE_TRACKING_NONE: lua_pushnil(L); break;
     case MOUSE_TRACKING_X10: lua_pushliteral(L, "x10"); break;
-    case MOUSE_TRACKING_NORMAL: lua_pushliteral(L, "normal"); break;
-    case MOUSE_TRACKING_SGR: lua_pushliteral(L, "sgr"); break;
+    case MOUSE_TRACKING_NORMAL:
+      if (terminal->mouse_sgr)
+        lua_pushliteral(L, "sgr");
+      else
+        lua_pushliteral(L, "normal");
+    break;
   }
   return 1;
 }
