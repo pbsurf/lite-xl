@@ -115,7 +115,7 @@
     },
     {
       "id": "openurl",
-      "description": "Ctrl+click opens URLs, DOIs and [[wiki links]] to local files; links can be underlined.",
+      "description": "Ctrl+click opens URLs, DOIs and [[wiki links]] to local files; links can be underlined; Search Web for the selection in the context menu.",
       "version": "0.1",
       "mod_version": "3",
       "path": "addons/plugins/openurl.lua"

@@ -1,7 +1,8 @@
 -- mod-version:3
 -- Ctrl+click opens the link under the mouse: a URL (with or without a protocol) or a
 -- DOI in the browser, a [[wiki link]] to a local file in the editor. Links can be
--- underlined. Ported from a SciTE script (url.lua).
+-- underlined. "Search Web" in the context menu searches for the selection. Ported
+-- from a SciTE script (url.lua).
 local core = require "core"
 local common = require "core.common"
 local config = require "core.config"
@@ -15,6 +16,8 @@ config.plugins.openurl = common.merge({
   underline = true,
   -- DOIs open as doi_url .. doi
   doi_url = "https://sci-hub.box/",
+  -- the selection is searched for at search_url .. query
+  search_url = "https://www.google.com/search?q=",
   -- command that opens URLs, given the URL as its argument; empty for the
   -- system's default handler (system.open_url)
   launcher = "",
@@ -33,6 +36,13 @@ config.plugins.openurl = common.merge({
       path = "doi_url",
       type = "string",
       default = "https://sci-hub.box/",
+    },
+    {
+      label = "Search URL",
+      description = "URL the selection is appended to by Search Web.",
+      path = "search_url",
+      type = "string",
+      default = "https://www.google.com/search?q=",
     },
     {
       label = "Launcher",
@@ -206,6 +216,37 @@ command.add(function()
 end, {
   ["open-url:open-at-caret"] = open_link,
 })
+
+-- query string encoding: whitespace runs as +, all but unreserved bytes as %XX
+local function encode_query(text)
+  text = text:match("^%s*(.-)%s*$"):gsub("%s+", " ")
+  return (text:gsub("[^%w%-%._~ ]", function(c)
+    return string.format("%%%02X", c:byte())
+  end):gsub(" ", "+"))
+end
+
+local function has_selection()
+  local dv = core.active_view
+  return dv:extends(DocView) and dv.doc:has_selection(), dv
+end
+
+command.add(has_selection, {
+  ["open-url:search-selection"] = function(dv)
+    local text = dv.doc:get_text(dv.doc:get_selection())
+    if text:find("%S") then
+      launch(config.plugins.openurl.search_url .. encode_query(text))
+    end
+  end,
+})
+
+local menu_found, menu = pcall(require, "plugins.contextmenu")
+if menu_found then
+  -- with its divider, only while there's a selection
+  menu:register(has_selection, {
+    menu.DIVIDER,
+    { text = "Search Web", command = "open-url:search-selection" },
+  })
+end
 
 -- before doc:split-cursor, which still gets ctrl+clicks off links
 keymap.add { ["ctrl+1lclick"] = "open-url:open-at-mouse" }

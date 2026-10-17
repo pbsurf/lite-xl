@@ -76,7 +76,8 @@ upstream's `release/v2.1.x`. Additions to the editor:
 * **openurl:** ctrl+click opens the URL or DOI under the mouse in the browser
   (DOIs via `config.plugins.openurl.doi_url`), or a `[[wiki link]]` to a local file
   (`name`, `name.md`, ... in the file's directory or a parent; `[[name#Heading]]`
-  jumps to the heading); links are underlined unless `underline = false`.
+  jumps to the heading); links are underlined unless `underline = false`. "Search
+  Web" in the context menu searches for the selection (`search_url`).
 * **shapes:** antialiased shape helpers (squiggly underlines) for plugins.
 * **qtcreator:** a light color theme matching Qt Creator's.
 
