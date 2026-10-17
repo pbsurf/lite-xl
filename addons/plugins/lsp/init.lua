@@ -1892,6 +1892,7 @@ function lsp.request_document_symbols(doc)
     local server = lsp.servers_running[name]
     if server.capabilities.documentSymbolProvider then
       log(server, "Retrieving document symbols...")
+      local mode_request = core.command_view.mode_request
       server:push_request('textDocument/documentSymbol', {
         params = {
           textDocument = {
@@ -1899,6 +1900,10 @@ function lsp.request_document_symbols(doc)
           }
         },
         callback = function(server, response)
+          -- requested by a mode of the command view that has since been left
+          if mode_request and core.command_view.mode_request ~= mode_request then
+            return
+          end
           if response.result and response.result and #response.result > 0 then
             local symbols, symbol_names = get_symbol_lists(response.result)
             core.command_view:enter("Find Symbol", {
@@ -2713,7 +2718,9 @@ command.add(nil, {
   ["lsp:find-workspace-symbol"] = function()
     local dv = get_active_docview()
     local doc = dv and dv.doc or nil
-    local symbol = doc and doc:get_text(doc:get_selection()) or ""
+    -- typed after a prefix in Ctrl+P: don't replace what follows it
+    local symbol = not core.command_view.mode and doc
+      and doc:get_text(doc:get_selection()) or nil
     core.command_view:enter("Find Workspace Symbol", {
       text = symbol,
       submit = function(query)
@@ -2819,6 +2826,12 @@ function DocView:draw_line_text(line, x, y)
   end
   return lh
 end
+
+-- Ctrl+P: "@" for the document's symbols, "#" for the workspace's
+table.insert(command.find_file_modes, 2,
+  { prefix = "@", command = "lsp:view-document-symbols", text = "symbol" })
+table.insert(command.find_file_modes, 3,
+  { prefix = "#", command = "lsp:find-workspace-symbol", text = "workspace symbol" })
 
 --
 -- Default Keybindings
