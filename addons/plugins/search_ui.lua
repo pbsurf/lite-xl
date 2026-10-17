@@ -1156,16 +1156,16 @@ end, {
   ["search-replace:next-history"] = function(box) step_history(box, -1) end
 })
 
+-- only from the boxes: focus moved elsewhere by keyboard leaves one the
+-- pane's active child
 command.add(
   function()
     return widget:is_visible()
       and
-      not core.active_view:is(CommandView)
-      and
       (
-        widget.child_active == findtext
+        core.active_view == findtext.textview
         or
-        widget.child_active == replacetext
+        core.active_view == replacetext.textview
       )
   end,
   {
