@@ -14,7 +14,13 @@ local RootView = require "core.rootview"
 local tooltip = require "core.tooltip"
 
 
----@alias core.statusview.styledtext table<integer, renderer.font|renderer.color|string>
+---Text drawn with a vertical offset, in pixels (negative raises it): for a glyph
+---that sits off the text's line, like a pilcrow.
+---@class core.statusview.offsettext
+---@field text string
+---@field y number
+
+---@alias core.statusview.styledtext table<integer, renderer.font|renderer.color|string|core.statusview.offsettext>
 ---@alias core.statusview.position '"left"' | '"right"'
 
 ---A status bar implementation for lite, check core.status_view.
@@ -266,7 +272,10 @@ function StatusView:register_docview_items()
     get_item = function()
       local doc = core.active_view.doc
       local indent_type, indent_size = doc:get_indent_info()
-      local t = { style.text, style.icon_font, "P", style.font }
+      -- a pilcrow, the usual symbol for formatting marks (the gear suggests settings);
+      -- it hangs below the baseline, so it's raised to center it on the capitals
+      local t = { style.text, style.font,
+        { text = "¶", y = -math.floor(style.font:get_size() * 0.11 + 0.5) } }
       if indent_type ~= config.tab_type or indent_size ~= config.indent_size then
         table.insert(t, (indent_type == "hard" and "  tabs: " or "  spaces: ") .. indent_size)
       end
@@ -562,6 +571,8 @@ local function draw_items(self, items, x, y, draw_fn)
   for _, item in ipairs(items) do
     if Object.is(item, renderer.font) then
       font = item
+    elseif type(item) == "table" and item.text then
+      x = draw_fn(font, color, item.text, nil, x, y + item.y, 0, self.size.y)
     elseif type(item) == "table" then
       color = item
     else
