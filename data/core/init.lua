@@ -1204,6 +1204,13 @@ function core.set_visited(filename)
 end
 
 
+---When each view was last made active: views by increasing counter values, weak keys.
+---Closing the active tab activates its node's most recently active other view.
+core.view_visit_order = setmetatable({}, { __mode = "k" })
+---While true, activated views don't count as visited (e.g. stepping through tabs).
+core.keep_visit_order = false
+local visit_counter = 0
+
 function core.set_active_view(view)
   assert(view, "Tried to set active view to nil")
   -- Reset the IME even if the focus didn't change
@@ -1219,6 +1226,10 @@ function core.set_active_view(view)
     end
     core.last_active_view = core.active_view
     core.active_view = view
+  end
+  if not core.keep_visit_order then
+    visit_counter = visit_counter + 1
+    core.view_visit_order[view] = visit_counter
   end
 end
 

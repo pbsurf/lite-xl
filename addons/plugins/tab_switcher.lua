@@ -22,8 +22,6 @@ config.plugins.tab_switcher = common.merge({
   }
 }, config.plugins.tab_switcher)
 
-local nodes_visit_order = setmetatable({}, {__mode = "k"})
-
 ---When true, releasing all the modifier keys will accept the selection
 local hold_mode = false
 ---Whether or not the CommandView relative to this plugin is active
@@ -64,20 +62,9 @@ function keymap.on_key_released(k)
   -- the tabs stepped through don't count as visited, only the one we end on
   if cycle and not still_pressed then
     cycle = nil
+    core.keep_visit_order = false
     core.set_active_view(core.active_view)
   end
-end
-
-
-local order_counter = 0
-
-local core_set_active_view = core.set_active_view
-function core.set_active_view(view)
-  if not cycle then
-    nodes_visit_order[view] = order_counter
-    order_counter = order_counter + 1
-  end
-  return core_set_active_view(view)
 end
 
 local tab_switcher = {}
@@ -106,7 +93,8 @@ function tab_switcher.get_tab_list(base_node)
     end
   end
   table.sort(list, function(a, b)
-    return (nodes_visit_order[a.view] or -1) > (nodes_visit_order[b.view] or -1)
+    local visits = core.view_visit_order
+    return (visits[a.view] or -1) > (visits[b.view] or -1)
   end)
   return list
 end
@@ -147,11 +135,13 @@ end
 ---@param dir number
 local function start_cycle(items, dir)
   cycle = { items = items, idx = items[1].view == core.active_view and 1 or 0 }
+  core.keep_visit_order = true
   if dir < 0 and cycle.idx == 0 then cycle.idx = 1 end
   command.perform(dir > 0 and "tab-switcher:previous-tab" or "tab-switcher:next-tab")
   -- not run from a key binding with modifiers: no release will end it
   if not any_true(keymap.modkeys) then
     cycle = nil
+    core.keep_visit_order = false
     core.set_active_view(core.active_view)
   end
 end

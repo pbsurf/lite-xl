@@ -131,7 +131,8 @@ function Node:remove_view(root, view)
     end
     table.remove(self.views, idx)
     if self.active_view == view then
-      self:set_active_view(self.views[idx] or self.views[#self.views])
+      self:set_active_view(self:get_most_recent_view()
+        or self.views[idx] or self.views[#self.views])
     end
   else
     local parent = self:get_parent_node(root)
@@ -167,6 +168,19 @@ function Node:remove_view(root, view)
     end
   end
   core.last_active_view = nil
+end
+
+---The node's most recently active view, nil if none of its views has been active.
+---@return core.view?
+function Node:get_most_recent_view()
+  local recent, recent_visit
+  for _, view in ipairs(self.views) do
+    local visit = core.view_visit_order[view]
+    if visit and (not recent_visit or visit > recent_visit) then
+      recent, recent_visit = view, visit
+    end
+  end
+  return recent
 end
 
 function Node:close_view(root, view)
