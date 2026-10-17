@@ -560,14 +560,21 @@ local function get_menu()
   return rows
 end
 
+-- the toolbar's Next Target icon (a bullseye), at the size of the status bar's icons
+local status_icon_font = renderer.font.load(get_plugin_directory() .. PATHSEP .. "build.ttf", style.icon_font:get_size())
+
 core.status_view:add_item({
   predicate = function() return build.state.target and build.targets[build.state.target] and build.targets[build.state.target].backend end,
   name = "build:target",
   alignment = StatusView.Item.RIGHT,
   get_item = function()
     local target = build.targets[build.state.target]
+    if status_icon_font:get_size() ~= style.icon_font:get_size() then
+      status_icon_font:set_size(style.icon_font:get_size())
+    end
     return {
-      style.text, (target.name or "default") .. (get_arguments_text() ~= "" and "*" or "")
+      style.text, status_icon_font, "&", style.font, " ",
+      (target.name or "default") .. (get_arguments_text() ~= "" and "*" or "")
     }
   end,
   tooltip = function()
