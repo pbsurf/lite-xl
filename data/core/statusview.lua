@@ -30,7 +30,8 @@ local tooltip = require "core.tooltip"
 ---@field active_items core.statusview.item[]
 ---@field hovered_item core.statusview.item
 ---@field message_timeout number
----@field message core.statusview.styledtext
+---@field message? { icon: string, color: renderer.color, text: string }
+---@field log_alert? "WARN"|"ERROR" worst level logged since the log was last viewed
 ---@field tooltip_mode boolean
 ---@field tooltip core.statusview.styledtext
 ---@field left_width number
@@ -197,7 +198,8 @@ end
 function StatusView:new()
   StatusView.super.new(self)
   self.message_timeout = 0
-  self.message = {}
+  self.message = nil
+  self.log_alert = nil
   self.tooltip_mode = false
   self.tooltip = {}
   self.items = {}
@@ -211,8 +213,32 @@ function StatusView:new()
   self.hide_messages = false
   self.visible = true
 
+  self:register_log_item()
   self:register_docview_items()
   self:register_command_items()
+end
+
+
+---The log's item, first on the left: messages pop up above it (show_message),
+---and it has the warning or error icon and color while there are ones not yet
+---viewed.
+function StatusView:register_log_item()
+  self:add_item({
+    name = "core:log",
+    alignment = StatusView.Item.LEFT,
+    priority = 20,
+    get_item = function()
+      if core.active_view:is(LogView) then self.log_alert = nil end
+      local alert = self.log_alert and style.log[self.log_alert]
+      return { alert and alert.color or style.text, style.icon_font,
+        alert and alert.icon or "i", style.font }
+    end,
+    tooltip = function()
+      local last = self.message and self.message.text
+      return (last and last .. "\n" or "") .. "Click to open the log"
+    end,
+    command = "core:open-log",
+  })
 end
 
 ---The cursor's line and column, counting a tab as `indent_size` columns.
@@ -522,17 +548,57 @@ function StatusView:show_items(names)
 end
 
 
----Shows a message for a predefined amount of time.
+---Shows a message above the log's item for config.message_timeout.
 ---@param icon string
 ---@param icon_color renderer.color
 ---@param text string
 function StatusView:show_message(icon, icon_color, text)
   if not self.visible or self.hide_messages then return end
-  self.message = {
-    icon_color, style.icon_font, icon,
-    style.dim, style.font, StatusView.separator2, style.text, text
-  }
-  self.message_timeout = system.get_time() + config.message_timeout
+  self.message = { icon = icon, color = icon_color, text = text }
+  local timeout = system.get_time() + config.message_timeout
+  self.message_timeout = timeout
+  core.redraw = true
+  core.add_thread(function()
+    coroutine.yield(config.message_timeout)
+    if self.message_timeout == timeout then core.redraw = true end
+  end)
+end
+
+
+---Hides the message shown above the log's item, if any.
+function StatusView:hide_message()
+  if self.message_timeout > 0 then
+    self.message_timeout = 0
+    core.redraw = true
+  end
+end
+
+
+---Draws the message shown above the log's item, on one line, shortened to fit.
+function StatusView:draw_message()
+  local item = self:get_item("core:log")
+  if not item.active then return end
+  local m = self.message
+  core.root_view:defer_draw(function()
+    local pad = style.padding
+    local iw = style.icon_font:get_width(m.icon) + pad.x
+    local max_w = self.size.x - iw - pad.x * 4
+    local text = m.text:match("^[^\n]*")
+    if style.font:get_width(text) > max_w then
+      while #text > 0 and style.font:get_width(text .. "…") > max_w do
+        text = text:sub(1, -2)
+      end
+      text = text .. "…"
+    end
+    local w = iw + style.font:get_width(text) + pad.x * 2
+    local h = style.font:get_height() + pad.y * 2
+    local x = math.min(item.x, self.position.x + self.size.x - w - pad.x)
+    local y = self.position.y - h - pad.y
+    common.draw_popup_box(x, y, w, h)
+    local tx = x + pad.x
+    tx = renderer.draw_text(style.icon_font, m.icon, tx, y + pad.y, m.color) + pad.x
+    renderer.draw_text(style.font, text, tx, y + pad.y, style.text)
+  end)
 end
 
 
@@ -917,13 +983,7 @@ end
 function StatusView:on_mouse_pressed(button, x, y, clicks)
   if not self.visible then return end
   core.set_active_view(core.last_active_view)
-  if
-    system.get_time() < self.message_timeout
-    and
-    not core.active_view:is(LogView)
-  then
-    command.perform "core:open-log"
-  elseif y >= self.position.y and self.hovered_item.active then
+  if y >= self.position.y and self.hovered_item.active then
     self.pressed_item = self.hovered_item
   end
   return true
@@ -934,7 +994,7 @@ function StatusView:on_mouse_moved(x, y, dx, dy)
   if not self.visible then return end
   StatusView.super.on_mouse_moved(self, x, y, dx, dy)
 
-  if y < self.position.y or system.get_time() <= self.message_timeout then
+  if y < self.position.y then
     self.cursor = "arrow"
     self.hovered_item = {}
     tooltip.hover(self, nil)
@@ -1008,12 +1068,6 @@ function StatusView:update()
     self.size.y = height
   end
 
-  if system.get_time() < self.message_timeout then
-    self.scroll.to.y = self.size.y
-  else
-    self.scroll.to.y = 0
-  end
-
   StatusView.super.update(self)
 
   self:update_active_items()
@@ -1041,37 +1095,38 @@ function StatusView:draw()
 
   self:draw_background(style.background2)
 
-  if self.message and system.get_time() <= self.message_timeout then
-    self:draw_items(self.message, false, 0, self.size.y)
-  else
-    if self.tooltip_mode then
-      self:draw_items(self.tooltip)
-    end
-    for _, item in ipairs(self.active_items) do
-      local item_x = item.x + style.padding.x
-      local hovered, item_bg = get_item_bg_color(self, item)
-      if item.alignment == StatusView.Item.RIGHT or not self.tooltip_mode then
-        if type(item_bg) == "table" then
-          renderer.draw_rect(
-            item_x, self.position.y,
-            item.w, self.size.y, item_bg
-          )
-        end
-        if item.on_draw then
-          core.push_clip_rect(item_x, self.position.y, item.w, self.size.y)
-          item.on_draw(item_x, self.position.y, self.size.y, hovered)
-          core.pop_clip_rect()
-        else
-          self:draw_items(item.cached_item, false, item_x - style.padding.x)
-        end
+  if self.tooltip_mode then
+    self:draw_items(self.tooltip)
+  end
+  for _, item in ipairs(self.active_items) do
+    local item_x = item.x + style.padding.x
+    local hovered, item_bg = get_item_bg_color(self, item)
+    if item.alignment == StatusView.Item.RIGHT or not self.tooltip_mode then
+      if type(item_bg) == "table" then
+        renderer.draw_rect(
+          item_x, self.position.y,
+          item.w, self.size.y, item_bg
+        )
+      end
+      if item.on_draw then
+        core.push_clip_rect(item_x, self.position.y, item.w, self.size.y)
+        item.on_draw(item_x, self.position.y, self.size.y, hovered)
+        core.pop_clip_rect()
+      else
+        self:draw_items(item.cached_item, false, item_x - style.padding.x)
       end
     end
+  end
 
-    -- draw tooltip
-    if self.hovered_item.active and not self.menu.show_context_menu
-      and tooltip.shown(self, self.hovered_item) then
-      self:draw_item_tooltip(self.hovered_item)
-    end
+  -- draw tooltip; the log item's has the message, which it replaces
+  local item_tooltip = self.hovered_item.active and not self.menu.show_context_menu
+    and tooltip.shown(self, self.hovered_item)
+  if item_tooltip then
+    self:draw_item_tooltip(self.hovered_item)
+  end
+  if self.message and system.get_time() <= self.message_timeout
+    and not (item_tooltip and self.hovered_item.name == "core:log") then
+    self:draw_message()
   end
   self.menu:draw()
 end

@@ -318,6 +318,13 @@ function keymap.on_key_pressed(k, ...)
   return false
 end
 
+---Whether a key (as in keypressed events) is a modifier: ctrl, shift, alt...
+---@param k string
+---@return boolean
+function keymap.is_modifier(k)
+  return modkey_map[k] ~= nil
+end
+
 ---The command a stroke would run now, given the arguments it would be pressed with:
 ---the first bound one whose predicate holds (a function is taken as it is).
 ---@param stroke string

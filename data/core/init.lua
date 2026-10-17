@@ -1431,6 +1431,9 @@ function core.custom_log(level, show, backtrace, fmt, ...)
     local s = style.log[level]
     if core.status_view then
       core.status_view:show_message(s.icon, s.color, text)
+      if level == "ERROR" or (level == "WARN" and core.status_view.log_alert ~= "ERROR") then
+        core.status_view.log_alert = level
+      end
     end
   end
 
@@ -1501,6 +1504,12 @@ end
 
 function core.on_event(type, ...)
   local did_keymap = false
+  -- typing, clicking or scrolling hides a message (before the event, which may
+  -- show another); modifiers alone don't, as for ctrl+hover
+  if type == "textinput" or type == "mousepressed" or type == "mousewheel"
+    or (type == "keypressed" and not keymap.is_modifier((...))) then
+    if core.status_view then core.status_view:hide_message() end
+  end
   if type == "textinput" then
     core.root_view:on_text_input(...)
   elseif type == "textediting" then
