@@ -609,29 +609,38 @@ function StatusView:draw_item_tooltip(item)
   if type(text) == "function" then text = text(item) end
   if not text or text == "" then return end
   core.root_view:defer_draw(function()
-    local w = style.font:get_width(text)
-    local h = style.font:get_height()
+    -- one line per "\n"
+    local lines, w = {}, 0
+    for line in (text .. "\n"):gmatch("(.-)\n") do
+      table.insert(lines, line)
+      w = math.max(w, style.font:get_width(line))
+    end
+    local lh = style.font:get_height()
+    local h = lh * #lines
     local x = self.pointer.x - (w / 2) - (style.padding.x * 2)
 
-    if x < 0 then x = 0 end
     if (x + w + (style.padding.x * 3)) > self.size.x then
       x = self.size.x - w - (style.padding.x * 3)
     end
+    if x < 0 then x = 0 end
 
+    local y = self.position.y - h - (style.padding.y * 2)
     common.draw_popup_box(
       x + style.padding.x,
-      self.position.y - h - (style.padding.y * 2),
+      y,
       w + (style.padding.x * 2),
       h + (style.padding.y * 2)
     )
 
-    renderer.draw_text(
-      style.font,
-      text,
-      x + (style.padding.x * 2),
-      self.position.y - h - style.padding.y,
-      style.text
-    )
+    for i, line in ipairs(lines) do
+      renderer.draw_text(
+        style.font,
+        line,
+        x + (style.padding.x * 2),
+        y + style.padding.y + (i - 1) * lh,
+        style.text
+      )
+    end
   end)
 end
 
