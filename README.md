@@ -75,7 +75,8 @@ another repository's version, uninstalls removing dependents under `--assume-yes
 
 * **menubar:** a menu bar of commands, toggled by tapping Alt. Menus are
   `config.plugins.menubar.menus`; commands from plugins not placed in a menu are
-  listed per plugin under Tools.
+  listed per plugin under Tools. File > Open Recent lists recent files (kept in
+  `session.lua` between sessions, as `core.recent_files`) and projects.
 * **highlight_selection:** marks the other occurrences of the selected text (whole
   words only when a whole word is selected), in `style.selection_match`.
 * **search_ui** (imported, with our changes): a "Highlight All" option marking every

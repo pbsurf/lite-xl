@@ -21,13 +21,18 @@ local shapes = require "libraries.shapes"
 
 ---A menu row: a command name; a table with `command` (a name, or a list of
 ---names: the first that applies now, else the first that exists) and optional
----`text` (else the command's name, prettified, without its prefix); a submenu,
----{ text = ..., rows = { ... } }; or "-" for a divider.
----@alias plugins.menubar.row string | { command: string|string[], text?: string } | { text: string, rows: plugins.menubar.row[] }
+---`text` (else the command's name, prettified, without its prefix); a row
+---running a function, { text = ..., action = function() ... end }; a submenu,
+---{ text = ..., rows = { ... } }, where `rows` can be a function returning them
+---(called each time the menu opens, e.g. for a list that changes); or "-" for
+---a divider.
+---@alias plugins.menubar.row string | { command: string|string[], text?: string } | { text: string, action: function } | { text: string, rows: plugins.menubar.row[] | fun(): plugins.menubar.row[] }
 
 ---@class plugins.menubar.menu
 ---@field title string
 ---@field rows plugins.menubar.row[]
+
+local menubar = {}
 
 config.plugins.menubar = common.merge({
   ---@type plugins.menubar.menu[]
@@ -36,6 +41,7 @@ config.plugins.menubar = common.merge({
       { command = "core:new-doc", text = "New File" },
       { command = "core:new-named-doc", text = "New Named File..." },
       { command = "core:open-file", text = "Open File..." },
+      { text = "Open Recent", rows = function() return menubar.recent_rows() end },
       "-",
       { command = "core:open-project-folder", text = "Open Project Folder..." },
       { command = "core:change-project-folder", text = "Change Project Folder..." },
@@ -255,8 +261,6 @@ config.plugins.menubar = common.merge({
 }, config.plugins.menubar)
 
 
-local menubar = {}
-
 -- active: the bar is shown; open: the index of the menu dropped down, if any;
 -- hovered: the title under the mouse (or chosen from the keyboard); keyboard:
 -- shown from the keyboard (accelerators underlined)
@@ -344,7 +348,9 @@ local function unplaced_commands()
   local placed = {}
   local function mark(rows)
     for _, spec in ipairs(rows) do
-      if type(spec) == "table" and spec.rows then mark(spec.rows)
+      if type(spec) == "table" and spec.rows then
+        if type(spec.rows) == "table" then mark(spec.rows) end
+      elseif type(spec) == "table" and spec.action then
       elseif spec ~= "-" then
         for _, name in ipairs(names_of(spec)) do placed[name] = true end
       end
@@ -395,11 +401,13 @@ local function build_rows(specs)
         table.insert(rows, ContextMenu.DIVIDER)
       end
     elseif type(spec) == "table" and spec.rows then
-      local sub = build_rows(spec.rows)
+      local sub = build_rows(type(spec.rows) == "function" and spec.rows() or spec.rows)
       if sub then
         -- info reserves room for the arrow
         table.insert(rows, { text = spec.text, rows = sub, info = "  ", command = function() end })
       end
+    elseif type(spec) == "table" and spec.action then
+      table.insert(rows, { text = spec.text, info = spec.info, command = spec.action })
     else
       local name = row_command(spec)
       if name then
@@ -416,6 +424,46 @@ local function build_rows(specs)
   end
   if rows[#rows] == ContextMenu.DIVIDER then table.remove(rows) end
   return #rows > 0 and rows or nil
+end
+
+-- Of each list, the rows File > Open Recent shows at most
+local MAX_RECENT_SHOWN = 15
+
+---Rows for File > Open Recent: the recent files that still exist, then the
+---recent projects (names, with their directory on the right), and Clear Recent.
+function menubar.recent_rows()
+  local rows = {}
+  local function add(paths, open, skip)
+    local n = 0
+    for _, path in ipairs(paths) do
+      if n == MAX_RECENT_SHOWN then break end
+      if path ~= skip and system.get_file_info(path) then
+        table.insert(rows, {
+          text = common.basename(path),
+          info = common.home_encode(common.dirname(path)),
+          action = function() open(path) end,
+        })
+        n = n + 1
+      end
+    end
+  end
+  local doc = core.active_view.doc
+  add(core.recent_files, function(path)
+    core.root_view:open_doc(core.open_doc(path))
+  end, doc and doc.abs_filename)
+  table.insert(rows, "-")
+  add(core.recent_projects, function(path)
+    core.confirm_close_docs(core.docs, core.open_folder_project, path)
+  end, core.project_dir)
+  table.insert(rows, "-")
+  table.insert(rows, { text = "Clear Recent", action = function()
+    for i = #core.recent_files, 1, -1 do table.remove(core.recent_files, i) end
+    -- the current project stays: it's the one opened at start
+    for i = #core.recent_projects, 1, -1 do
+      if core.recent_projects[i] ~= core.project_dir then table.remove(core.recent_projects, i) end
+    end
+  end })
+  return rows
 end
 
 local function menu_rows(i)
