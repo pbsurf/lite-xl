@@ -327,8 +327,17 @@ function TerminalView:spawn()
   setmetatable(weak_table, { __mode = "v" })
   self.routine = self.routine or core.add_thread(function()
     while weak_table.self and weak_table.self.terminal do
-      core.redraw = weak_table.self:shift_selection_update() or core.redraw
-      coroutine.yield(1 / config.fps)
+      local shifts = weak_table.self:shift_selection_update()
+      core.redraw = shifts or core.redraw
+      -- while output keeps coming, read it a frame at a time; else sleep until
+      -- there's more (none once the shell has exited)
+      local source = weak_table.self.terminal:watch_source()
+      if not source then break end
+      if shifts then
+        coroutine.yield(1 / config.fps)
+      else
+        core.wait_for(core.watch_readable(source))
+      end
     end
   end)
 end
@@ -727,7 +736,12 @@ end
 
 
 function TerminalView:close()
-  if self.terminal then self.terminal:close() end
+  if self.terminal then
+    -- also wakes the thread reading it, which then ends
+    local source = self.terminal:watch_source()
+    if source then core.unwatch_readable(source) end
+    self.terminal:close()
+  end
   local node = core.root_view.root_node:get_node_for_view(self)
   node:close_view(core.root_view.root_node, self)
   if core.terminal_view == self then 

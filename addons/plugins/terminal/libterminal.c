@@ -193,6 +193,7 @@ typedef struct {
   int reporting_focus;                               // Enables/disbles reporting focus.
   char name[LIBTERMINAL_NAME_MAX];                   // Window name, set with OS command.
   char buffered_sequence[LIBTERMINAL_CHUNK_SIZE];
+  int output_ended;                                  // The pty's output ended (the shell exited).
   #if _WIN32
     PROCESS_INFORMATION process_information;
     HPCON hpcon;
@@ -201,6 +202,7 @@ typedef struct {
     char nonblocking_buffer[LIBTERMINAL_CHUNK_SIZE];   // Oh my god, I hate windows so much.
     int nonblocking_buffer_length;
     HANDLE nonblocking_buffer_mutex;
+    HANDLE output_event;                               // Set while nonblocking_buffer has data, or output ended.
     HANDLE nonblocking_thread;
     int closing;
   #else
@@ -969,12 +971,18 @@ static int terminal_output(terminal_t* terminal, const char* str, int len) {
           }
           return 0;
         }
-        if (!ReadFile(terminal->frompty, chunk_buffer, sizeof(chunk_buffer) - terminal->nonblocking_buffer_length, &bytes_read, NULL))
+        if (!ReadFile(terminal->frompty, chunk_buffer, sizeof(chunk_buffer) - terminal->nonblocking_buffer_length, &bytes_read, NULL)) {
+          WaitForSingleObject(terminal->nonblocking_buffer_mutex, INFINITE);
+          terminal->output_ended = 1;
+          SetEvent(terminal->output_event);
+          ReleaseMutex(terminal->nonblocking_buffer_mutex);
           break;
+        }
         if (bytes_read > 0) {
           WaitForSingleObject(terminal->nonblocking_buffer_mutex, INFINITE);
           memcpy(&terminal->nonblocking_buffer[terminal->nonblocking_buffer_length], chunk_buffer, bytes_read);
           terminal->nonblocking_buffer_length += bytes_read;
+          SetEvent(terminal->output_event);
           ReleaseMutex(terminal->nonblocking_buffer_mutex);
         }
       }
@@ -998,6 +1006,8 @@ static int terminal_update(terminal_t* terminal, void (*callback)(char*, int, vo
       at_least_one = 1;
     }
     terminal->nonblocking_buffer_length = 0;
+    if (!terminal->output_ended)
+      ResetEvent(terminal->output_event);
     ReleaseMutex(terminal->nonblocking_buffer_mutex);
     return at_least_one;
   #else
@@ -1006,6 +1016,8 @@ static int terminal_update(terminal_t* terminal, void (*callback)(char*, int, vo
       len = read(terminal->master, chunk, sizeof(chunk));
       if (len == -1 && (errno == EAGAIN || errno == EWOULDBLOCK))
         return at_least_one;
+      if (len == 0 || (len == -1 && errno != EINTR))
+        terminal->output_ended = 1;
       *total_shifts += terminal_output(terminal, chunk, len);
       if (callback)
         callback(chunk, len, data);
@@ -1049,6 +1061,10 @@ static int terminal_close(terminal_t* terminal) {
       if (terminal->nonblocking_buffer_mutex) {
         CloseHandle(terminal->nonblocking_buffer_mutex);
         terminal->nonblocking_buffer_mutex = NULL;
+      }
+      if (terminal->output_event) {
+        CloseHandle(terminal->output_event);
+        terminal->output_event = NULL;
       }
       if (terminal->process_information.hProcess) {
         TerminateProcess(terminal->process_information.hProcess, 1);
@@ -1163,6 +1179,7 @@ static terminal_t* terminal_new(int columns, int lines, int scrollback_limit, co
       if (FAILED(result) && set_error_step("create pseudoconsole"))
         goto error;
       terminal->nonblocking_buffer_mutex = CreateMutex(NULL, FALSE, NULL);
+      terminal->output_event = CreateEvent(NULL, TRUE, FALSE, NULL);
       if (!terminal->nonblocking_buffer_mutex && set_error_step("create mutex"))
         goto error;
 
@@ -1498,6 +1515,24 @@ static int f_terminal_size(lua_State* L) {
 }
 
 
+// What system.watch_readable() takes to wake when the pty has output: its
+// fd, or on Windows an event set by the thread reading it. nil once it ended.
+static int f_terminal_watch_source(lua_State* L) {
+  terminal_t* terminal = lua_toterminal(L, 1);
+  if (terminal->mode != MODE_PTY || terminal->output_ended)
+    return 0;
+  #if _WIN32
+    if (!terminal->output_event)
+      return 0;
+    lua_pushinteger(L, (lua_Integer)(intptr_t)terminal->output_event);
+  #else
+    if (!terminal->master)
+      return 0;
+    lua_pushinteger(L, terminal->master);
+  #endif
+  return 1;
+}
+
 static int f_terminal_exited(lua_State* L) {
   terminal_t* terminal = lua_toterminal(L, 1);
   #if _WIN32
@@ -1615,6 +1650,7 @@ static const luaL_Reg terminal_api[] = {
   { "size",                f_terminal_size                   },
   { "update",              f_terminal_update                 },
   { "exited",              f_terminal_exited                 },
+  { "watch_source",        f_terminal_watch_source           },
   #if _WIN32
   { "getenv",              f_terminal_getenv                 },
   #endif
