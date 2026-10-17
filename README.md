@@ -32,8 +32,12 @@ upstream's `release/v2.1.x`. Additions to the editor:
 
 * **Tab overflow:** tabs scroll when they don't fit, with scroll buttons and a menu
   of all tabs at the end of the tab bar.
-* **Tab tooltips and menu:** hovering a tab shows the file's full path; right
-  clicking it offers close others / to the right / all and copy path.
+* **Tab tooltips and menu:** hovering a tab shows the file's full path, size and
+  age (and git state, with gitfiles); right clicking it offers close others / to
+  the right / all and copy path.
+* **Tooltips** behave alike and as usual elsewhere (`core.tooltip`): shown after
+  `config.tooltip_delay`, kept while the pointer stays on their target, and shown
+  at once when moving from one to another.
 * **Popups** (context menus, tooltips, autocomplete, ...) share theme colors
   (`style.popup_background`, `style.popup_border`) and can cast a soft shadow
   (`style.popup_shadow`).
@@ -49,6 +53,10 @@ upstream's `release/v2.1.x`. Additions to the editor:
 * **File browser:** keeps its width and visibility between sessions, and
   dragging its divider narrower than `config.plugins.treeview.collapse_size`
   collapses it (toggling reopens it at the width it had before the drag).
+  Hovering an entry shows its path, size and age (a folder's entry count); while
+  it's focused, the status bar shows the selected entry and the project's file
+  count, warning when it's over `config.max_project_files`.
+* **Command view:** clicking a suggestion (ctrl+p, Do Command, ...) submits it.
 * **Block select:** `doc:select-block`, bound to a click (e.g.
   `keymap.add { ["alt+1lclick"] = "doc:select-block" }`), selects a rectangle
   while dragging.
@@ -60,6 +68,8 @@ upstream's `release/v2.1.x`. Additions to the editor:
   `View:get_name_style` (the font of a view's name in tabs and tab lists),
   `View:get_icon` (the icon shown with it; the treeview gives docs their file's),
   `View:is_transient` (views the workspace doesn't restore),
+  facts in tooltips (`TreeView:get_item_info`, `RootView:get_tab_tooltip_info`),
+  multi-line status bar tooltips,
   `system.open_url` (opens a URL with the system's default handler), context
   menu items built when the menu opens (`ContextMenu:register` with a function), and
   threads that wait for events rather than time (`core.wait_for`, `core.wake`,
@@ -90,7 +100,8 @@ another repository's version, uninstalls removing dependents under `--assume-yes
   default), off until `spell-check:toggle` turns it on for a document. Identifiers
   are checked by their camelCase / snake_case parts; the syntax's keywords, ALL
   CAPS words and URLs or paths are skipped. Right click a marked word for
-  suggestions or "Add to Dictionary" (`spellcheck_words.txt` in the user dir). Its
+  suggestions or "Add to Dictionary" (`spellcheck_words.txt` in the user dir).
+  "Spell" on the status bar shows whether it's on and toggles it. Its
   C module is built by our meson build when libhunspell is found.
 * **ephemeral_tabs** (imported, with our changes): a file opened while browsing
   (a click in the tree, go to definition, a search result, ...; callers pass
@@ -107,7 +118,9 @@ another repository's version, uninstalls removing dependents under `--assume-yes
   project search) are those git doesn't ignore, hidden ones included, rather than
   what `config.ignore_files` lets through; untracked files are green in the tree
   view. "Show All Files" in the tree view's context menu shows everything but
-  `.git` (ignored files dimmed), per project.
+  `.git` (ignored files dimmed), per project. With the tree view focused, the
+  status bar shows the branch, ahead/behind and counts of changed and untracked
+  files; tooltips show a file's git state.
 * **navigate** (imported, rewritten): alt+left / alt+right go back and forward
   through the places the cursor jumped from (another file, or a move of more than
   `config.plugins.navigate.jump_threshold` lines), alt+shift+left / alt+shift+right
