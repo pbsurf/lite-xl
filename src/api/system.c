@@ -822,6 +822,17 @@ static int f_exec(lua_State *L) {
   return 0;
 }
 
+static int f_open_url(lua_State *L) {
+  const char *url = luaL_checkstring(L, 1);
+  if (!SDL_OpenURL(url)) {
+    lua_pushboolean(L, 0);
+    lua_pushstring(L, SDL_GetError());
+    return 2;
+  }
+  lua_pushboolean(L, 1);
+  return 1;
+}
+
 static int f_fuzzy_match(lua_State *L) {
   size_t strLen, ptnLen;
   const char *str = luaL_checklstring(L, 1, &strLen);
@@ -1107,6 +1118,7 @@ static const luaL_Reg lib[] = {
   { "get_time",            f_get_time            },
   { "sleep",               f_sleep               },
   { "exec",                f_exec                },
+  { "open_url",            f_open_url            },
   { "fuzzy_match",         f_fuzzy_match         },
   { "set_window_opacity",  f_set_window_opacity  },
   { "load_native_plugin",  f_load_native_plugin  },

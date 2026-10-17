@@ -285,6 +285,15 @@ function system.sleep(seconds) end
 function system.exec(command) end
 
 ---
+---Opens a URL in the system's default handler for it (e.g. a web browser),
+---without blocking: ShellExecute on Windows, xdg-open on Linux.
+---
+---@param url string
+---@return boolean ok
+---@return string? errmsg
+function system.open_url(url) end
+
+---
 ---Generates a matching score depending on how well the value of the
 ---given needle compares to that of the value in the haystack.
 ---

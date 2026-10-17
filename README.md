@@ -50,7 +50,8 @@ upstream's `release/v2.1.x`. Additions to the editor:
   for key bindings (not listed by Do Command or menus),
   `View:get_name_style` (the font of a view's name in tabs and tab lists),
   `View:get_icon` (the icon shown with it; the treeview gives docs their file's),
-  and `View:is_transient` (views the workspace doesn't restore).
+  `View:is_transient` (views the workspace doesn't restore), and
+  `system.open_url` (opens a URL with the system's default handler).
 
 ### Add-ons
 
