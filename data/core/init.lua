@@ -1511,14 +1511,21 @@ function core.on_event(type, ...)
     if core.status_view then core.status_view:hide_message() end
   end
   if type == "textinput" then
-    core.root_view:on_text_input(...)
+    if not core.context_menu then core.root_view:on_text_input(...) end
   elseif type == "textediting" then
     ime.on_text_editing(...)
   elseif type == "keypressed" then
     -- In some cases during IME composition input is still sent to us
     -- so we just ignore it.
     if ime.editing then return false end
-    did_keymap = keymap.on_key_pressed(...)
+    -- an open context menu takes the keyboard (modifiers still go to the
+    -- keymap, which tracks them)
+    if core.context_menu and not keymap.is_modifier((...)) then
+      core.context_menu:on_key_pressed(...)
+      did_keymap = true
+    else
+      did_keymap = keymap.on_key_pressed(...)
+    end
   elseif type == "keyreleased" then
     keymap.on_key_released(...)
   elseif type == "mousemoved" then

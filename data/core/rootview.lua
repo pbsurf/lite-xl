@@ -5,8 +5,6 @@ local Node = require "core.node"
 local View = require "core.view"
 local DocView = require "core.docview"
 local ContextMenu = require "core.contextmenu"
-local command = require "core.command"
-local keymap = require "core.keymap"
 local tooltip = require "core.tooltip"
 
 ---@class core.rootview : core.view
@@ -820,22 +818,5 @@ function TabMenu:hide()
   self.node, self.view = nil, nil
 end
 
-
-command.add(function()
-    return core.root_view and core.root_view.tab_menu.show_context_menu == true,
-      core.root_view and core.root_view.tab_menu
-  end, {
-  ["root:tab-menu-previous"] = function(menu) menu:focus_previous() end,
-  ["root:tab-menu-next"] = function(menu) menu:focus_next() end,
-  ["root:tab-menu-hide"] = function(menu) menu:hide() end,
-  ["root:tab-menu-select"] = function(menu) menu:call_selected_item() end,
-})
-
-keymap.add {
-  ["up"] = "root:tab-menu-previous",
-  ["down"] = "root:tab-menu-next",
-  ["escape"] = "root:tab-menu-hide",
-  ["return"] = "root:tab-menu-select",
-}
 
 return RootView

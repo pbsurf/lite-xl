@@ -126,6 +126,7 @@ function ContextMenu:show(x, y)
 
     self.position.x, self.position.y = x, y
     self.show_context_menu = true
+    core.context_menu = self
     core.request_cursor("arrow")
     return true
   end
@@ -136,6 +137,7 @@ end
 function ContextMenu:hide()
   local shown = self.show_context_menu
   self.show_context_menu = false
+  if core.context_menu == self then core.context_menu = nil end
   self.items = nil
   self.selected = -1
   self.height = 0
@@ -222,6 +224,22 @@ function ContextMenu:call_selected_item()
     if selected then
       self:on_selected(selected)
     end
+end
+
+---Event handler for key presses while the menu is shown, which it takes all of
+---(core.on_event gives them to `core.context_menu`): up, down, return and
+---escape work the menu; any other key closes it and goes no further.
+---@param key string
+function ContextMenu:on_key_pressed(key)
+  if key == "up" then
+    self:focus_previous()
+  elseif key == "down" then
+    self:focus_next()
+  elseif key == "return" or key == "keypad enter" then
+    self:call_selected_item()
+  else
+    self:hide()
+  end
 end
 
 ---Event handler for mouse press.

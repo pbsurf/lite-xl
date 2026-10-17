@@ -1,7 +1,6 @@
 local core = require "core"
 local common = require "core.common"
 local command = require "core.command"
-local keymap = require "core.keymap"
 local config = require "core.config"
 local style = require "core.style"
 local DocView = require "core.docview"
@@ -1158,23 +1157,6 @@ function StatusMenu:hide()
   StatusMenu.super.hide(self)
   self.item = nil
 end
-
-command.add(function()
-    return core.status_view and core.status_view.menu.show_context_menu == true,
-      core.status_view and core.status_view.menu
-  end, {
-  ["status-bar:menu-previous"] = function(menu) menu:focus_previous() end,
-  ["status-bar:menu-next"] = function(menu) menu:focus_next() end,
-  ["status-bar:menu-hide"] = function(menu) menu:hide() end,
-  ["status-bar:menu-select"] = function(menu) menu:call_selected_item() end,
-})
-
-keymap.add {
-  ["up"] = "status-bar:menu-previous",
-  ["down"] = "status-bar:menu-next",
-  ["escape"] = "status-bar:menu-hide",
-  ["return"] = "status-bar:menu-select",
-}
 
 
 return StatusView

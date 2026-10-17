@@ -42,25 +42,6 @@ keymap.add {
   ["menu"] = "context:show"
 }
 
-command.add(function() return menu.show_context_menu == true end, {
-  ["context:focus-previous"] = function()
-    menu:focus_previous()
-  end,
-  ["context:focus-next"] = function()
-    menu:focus_next()
-  end,
-  ["context:hide"] = function()
-    menu:hide()
-  end,
-  ["context:on-selected"] = function()
-    menu:call_selected_item()
-  end,
-})
-keymap.add { ["return"] = "context:on-selected" }
-keymap.add { ["up"] = "context:focus-previous" }
-keymap.add { ["down"] = "context:focus-next" }
-keymap.add { ["escape"] = "context:hide" }
-
 
 local cmds = {
   { text = "Cut",     command = "doc:cut" },

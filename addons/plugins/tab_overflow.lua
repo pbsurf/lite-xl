@@ -6,7 +6,6 @@
 local core = require "core"
 local common = require "core.common"
 local command = require "core.command"
-local keymap = require "core.keymap"
 local style = require "core.style"
 local ContextMenu = require "core.contextmenu"
 local Node = require "core.node"
@@ -134,13 +133,6 @@ function RootView:draw(...)
   menu:draw()
 end
 
-command.add(function() return menu.show_context_menu == true end, {
-  ["tab-overflow:focus-previous"] = function() menu:focus_previous() end,
-  ["tab-overflow:focus-next"] = function() menu:focus_next() end,
-  ["tab-overflow:hide"] = function() menu:hide() end,
-  ["tab-overflow:select"] = function() menu:call_selected_item() end,
-})
-
 command.add(function()
     local node = core.root_view:get_active_node()
     return #node.views > 1, node
@@ -149,12 +141,5 @@ command.add(function()
     show_menu(node, node.position.x + node.size.x, node.position.y + node:get_tab_bar_height())
   end,
 })
-
-keymap.add {
-  ["up"] = "tab-overflow:focus-previous",
-  ["down"] = "tab-overflow:focus-next",
-  ["escape"] = "tab-overflow:hide",
-  ["return"] = "tab-overflow:select",
-}
 
 return menu
