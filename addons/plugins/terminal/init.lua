@@ -899,7 +899,7 @@ end, {
     if view.terminal:mouse_tracking_mode() then
       local col, row = view:convert_coordinates(view.mouse_x, view.mouse_y)
       if view.terminal:mouse_tracking_mode() == "normal" then
-        view.terminal:input("\x1B[M" .. string.char(amount > 0 and 64 or 65) .. string.char(32 + col + 1) .. string.char(32 + row + 1) )
+        view.terminal:input("\x1B[M" .. string.char(32 + (amount > 0 and 64 or 65)) .. string.char(32 + col + 1) .. string.char(32 + row + 1) )
       elseif view.terminal:mouse_tracking_mode() == "sgr" then
         view.terminal:input("\x1B[<" .. (amount > 0 and 64 or 65) .. ";" .. (col+1) .. ";" .. (row+1) .. "M" )
       end
