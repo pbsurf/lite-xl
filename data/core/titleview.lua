@@ -40,17 +40,33 @@ function TitleView:new()
   self.visible = true
 end
 
+---Width of the window's edges that resize it, when borderless.
+function TitleView.resize_border()
+  return math.max(1, math.floor(3 * SCALE))
+end
+
 function TitleView:configure_hit_test(borderless)
   if borderless then
     local title_height = title_view_height()
     local icon_w = style.icon_font:get_width("_")
     local icon_spacing = icon_w
     local controls_width = (icon_w + icon_spacing) * #title_commands + icon_spacing
-    system.set_window_hit_test(title_height, controls_width, icon_spacing)
+    system.set_window_hit_test(title_height, controls_width, TitleView.resize_border())
     -- core.hit_test_title_height = title_height
   else
     system.set_window_hit_test()
   end
+end
+
+function TitleView.toggle_maximized()
+  system.set_window_mode(core.window_mode == "maximized" and "normal" or "maximized")
+end
+
+---A press on the drag area, which moves the window (see
+---`system.set_window_hit_test`); not passed on as a click.
+function TitleView:on_hit_test(x, y, clicks)
+  -- a double-click whose second press started a move too
+  if clicks % 2 == 0 then TitleView.toggle_maximized() end
 end
 
 function TitleView:on_scale_change()
@@ -110,6 +126,9 @@ function TitleView:on_mouse_pressed(button, x, y, clicks)
   core.set_active_view(core.last_active_view)
   if self.hovered_item then
     self.hovered_item.action()
+  elseif button == "left" and clicks % 2 == 0 then
+    -- the WM doesn't do this for a title we draw
+    TitleView.toggle_maximized()
   end
 end
 

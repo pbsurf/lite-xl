@@ -58,61 +58,99 @@ static void str_tolower(char *p) {
   }
 }
 
+#define MAX_HIT_TEST_RECTS 32
+
+/* The borderless window's hit test, in Lua's coordinates: the title strip is
+** draggable (moves the window) except for the controls at its right and the
+** rects of other interactive items on it; edges and corners resize. */
 struct HitTestInfo {
   int title_height;
   int controls_width;
   int resize_border;
+  int rect_count;
+  SDL_Rect rects[MAX_HIT_TEST_RECTS];
 };
 typedef struct HitTestInfo HitTestInfo;
 
 static HitTestInfo window_hit_info[1] = {{0, 0, 0}};
 
-#define RESIZE_FROM_TOP 0
-#define RESIZE_FROM_RIGHT 0
+/* The last press that started a window move (SDL's hit-test event). A press
+** soon after it, near it, is a double-click: the hit test then lets it through
+** to the app, as a press with 2 clicks, rather than starting another move. */
+static struct {
+  Uint64 ticks;
+  float x, y; /* global */
+  int clicks;
+  bool pass_next;
+} title_press;
 
-static SDL_HitTestResult SDLCALL hit_test(SDL_Window *window, const SDL_Point *pt, void *data) {
-  const HitTestInfo *hit_info = (HitTestInfo *) data;
-  const int resize_border = hit_info->resize_border;
-  const int controls_width = hit_info->controls_width;
+#define TITLE_DOUBLE_CLICK_RADIUS 4
+
+static Uint64 double_click_time(void) {
+  const char *hint = SDL_GetHint(SDL_HINT_MOUSE_DOUBLE_CLICK_TIME);
+  return hint && *hint ? (Uint64) SDL_atoi(hint) : 500;
+}
+
+/* Whether a press now at x, y (global) would be a double-click with the last
+** title press. */
+static bool title_double_click_at(float x, float y) {
+  if (title_press.ticks == 0 || SDL_GetTicks() - title_press.ticks > double_click_time())
+    return false;
+  return SDL_fabsf(x - title_press.x) <= TITLE_DOUBLE_CLICK_RADIUS &&
+    SDL_fabsf(y - title_press.y) <= TITLE_DOUBLE_CLICK_RADIUS;
+}
+
+static bool title_double_click(void) {
+  float x, y;
+  SDL_GetGlobalMouseState(&x, &y);
+  return title_double_click_at(x, y);
+}
+
+static SDL_HitTestResult hit_test_area(SDL_Window *window, const SDL_Point *pt) {
+  const HitTestInfo *hit_info = window_hit_info;
+  const int x = pt->x * window_renderer.scale_x, y = pt->y * window_renderer.scale_y;
   int w, h;
+  SDL_GetWindowSize(window, &w, &h);
+  w *= window_renderer.scale_x;
+  h *= window_renderer.scale_y;
 
-  SDL_GetWindowSize(window_renderer.window, &w, &h);
+  /* no resizing when maximized or fullscreen */
+  const int b = (SDL_GetWindowFlags(window) & (SDL_WINDOW_MAXIMIZED | SDL_WINDOW_FULLSCREEN))
+    ? 0 : hit_info->resize_border;
+  const bool left = x < b, right = x >= w - b, top = y < b, bottom = y >= h - b;
+  if (top && left) return SDL_HITTEST_RESIZE_TOPLEFT;
+  if (top && right) return SDL_HITTEST_RESIZE_TOPRIGHT;
+  if (bottom && left) return SDL_HITTEST_RESIZE_BOTTOMLEFT;
+  if (bottom && right) return SDL_HITTEST_RESIZE_BOTTOMRIGHT;
+  if (top) return SDL_HITTEST_RESIZE_TOP;
+  if (bottom) return SDL_HITTEST_RESIZE_BOTTOM;
+  if (left) return SDL_HITTEST_RESIZE_LEFT;
+  if (right) return SDL_HITTEST_RESIZE_RIGHT;
 
-  if (pt->y < hit_info->title_height &&
-    #if RESIZE_FROM_TOP
-    pt->y > hit_info->resize_border &&
-    #endif
-    pt->x > resize_border && pt->x < w - controls_width) {
+  if (y < hit_info->title_height && x < w - hit_info->controls_width) {
+    const SDL_Point p = { x, y };
+    for (int i = 0; i < hit_info->rect_count; i++) {
+      if (SDL_PointInRect(&p, &hit_info->rects[i])) return SDL_HITTEST_NORMAL;
+    }
     return SDL_HITTEST_DRAGGABLE;
   }
-
-  #define REPORT_RESIZE_HIT(name) { \
-    return SDL_HITTEST_RESIZE_##name; \
-  }
-
-  if (pt->x < resize_border && pt->y < resize_border) {
-    REPORT_RESIZE_HIT(TOPLEFT);
-  #if RESIZE_FROM_TOP
-  } else if (pt->x > resize_border && pt->x < w - controls_width && pt->y < resize_border) {
-    REPORT_RESIZE_HIT(TOP);
-  #endif
-  } else if (pt->x > w - resize_border && pt->y < resize_border) {
-    REPORT_RESIZE_HIT(TOPRIGHT);
-  #if RESIZE_FROM_RIGHT
-  } else if (pt->x > w - resize_border && pt->y > resize_border && pt->y < h - resize_border) {
-    REPORT_RESIZE_HIT(RIGHT);
-  #endif
-  } else if (pt->x > w - resize_border && pt->y > h - resize_border) {
-    REPORT_RESIZE_HIT(BOTTOMRIGHT);
-  } else if (pt->x < w - resize_border && pt->x > resize_border && pt->y > h - resize_border) {
-    REPORT_RESIZE_HIT(BOTTOM);
-  } else if (pt->x < resize_border && pt->y > h - resize_border) {
-    REPORT_RESIZE_HIT(BOTTOMLEFT);
-  } else if (pt->x < resize_border && pt->y < h - resize_border && pt->y > resize_border) {
-    REPORT_RESIZE_HIT(LEFT);
-  }
-
   return SDL_HITTEST_NORMAL;
+}
+
+/* The last point tested and its area: what a press there would do (X11 calls
+** the hit test on motion, and uses the last result on a press). */
+static SDL_Point last_hit_point;
+static SDL_HitTestResult last_hit_area;
+
+static SDL_HitTestResult SDLCALL hit_test(SDL_Window *window, const SDL_Point *pt, void *data) {
+  SDL_HitTestResult rc = hit_test_area(window, pt);
+  last_hit_point = *pt;
+  last_hit_area = rc;
+  if (rc == SDL_HITTEST_DRAGGABLE && title_double_click()) {
+    title_press.pass_next = true;
+    return SDL_HITTEST_NORMAL;
+  }
+  return rc;
 }
 
 static const char *numpad[] = { "end", "down", "pagedown", "left", "", "right", "home", "up", "pageup", "ins", "delete" };
@@ -295,12 +333,44 @@ top:
     case SDL_EVENT_MOUSE_BUTTON_DOWN:
       {
         if (e.button.button == 1) { SDL_CaptureMouse(1); }
+        /* the second press of a double-click on the drag area, which SDL
+        ** counts as the first (it didn't get the first) */
+        int clicks = e.button.clicks;
+        if (title_press.pass_next && e.button.button == 1 && title_double_click()) {
+          clicks = title_press.clicks + 1;
+          title_press.ticks = 0;
+        }
+        title_press.pass_next = false;
         lua_pushstring(L, "mousepressed");
         lua_pushstring(L, button_name(e.button.button));
         lua_pushinteger(L, e.button.x * window_renderer.scale_x);
         lua_pushinteger(L, e.button.y * window_renderer.scale_y);
-        lua_pushinteger(L, e.button.clicks);
+        lua_pushinteger(L, clicks);
         return 5;
+      }
+
+    case SDL_EVENT_WINDOW_HIT_TEST:
+      {
+        /* a press the hit test took (a move or resize started); SDL doesn't
+        ** pass the press on */
+        /* X11 reports a press twice, from the master and the slave device,
+        ** each starting a move */
+        static Uint64 last_timestamp;
+        const bool duplicate = e.window.timestamp - last_timestamp < SDL_MS_TO_NS(20);
+        last_timestamp = e.window.timestamp;
+        if (duplicate || last_hit_area != SDL_HITTEST_DRAGGABLE) goto top;
+        int wx, wy;
+        SDL_GetWindowPosition(window_renderer.window, &wx, &wy);
+        const float gx = wx + last_hit_point.x, gy = wy + last_hit_point.y;
+        title_press.clicks = title_double_click_at(gx, gy) ? title_press.clicks + 1 : 1;
+        title_press.ticks = SDL_GetTicks();
+        title_press.x = gx;
+        title_press.y = gy;
+        lua_pushstring(L, "hittest");
+        lua_pushinteger(L, last_hit_point.x * window_renderer.scale_x);
+        lua_pushinteger(L, last_hit_point.y * window_renderer.scale_y);
+        lua_pushinteger(L, title_press.clicks);
+        return 4;
       }
 
     case SDL_EVENT_MOUSE_BUTTON_UP:
@@ -482,6 +552,9 @@ static int f_set_window_mode(lua_State *L) {
 
 
 static int f_set_window_bordered(lua_State *L) {
+  /* finish pending changes first (X11 applies them asynchronously): the size
+  ** restored from the session would be lost otherwise */
+  SDL_SyncWindow(window_renderer.window);
   SDL_SetWindowBordered(window_renderer.window, lua_toboolean(L, 1));
   return 0;
 }
@@ -495,6 +568,24 @@ static int f_set_window_hit_test(lua_State *L) {
   window_hit_info->title_height = luaL_checknumber(L, 1);
   window_hit_info->controls_width = luaL_checknumber(L, 2);
   window_hit_info->resize_border = luaL_checknumber(L, 3);
+  window_hit_info->rect_count = 0;
+  if (!lua_isnoneornil(L, 4)) {
+    luaL_checktype(L, 4, LUA_TTABLE);
+    int n = luaL_len(L, 4);
+    for (int i = 1; i <= n && i <= MAX_HIT_TEST_RECTS; i++) {
+      lua_rawgeti(L, 4, i);
+      luaL_checktype(L, -1, LUA_TTABLE);
+      int v[4];
+      for (int j = 0; j < 4; j++) {
+        lua_rawgeti(L, -1, j + 1);
+        v[j] = luaL_checknumber(L, -1);
+        lua_pop(L, 1);
+      }
+      lua_pop(L, 1);
+      window_hit_info->rects[i - 1] = (SDL_Rect) { v[0], v[1], v[2], v[3] };
+      window_hit_info->rect_count = i;
+    }
+  }
   SDL_SetWindowHitTest(window_renderer.window, &hit_test, window_hit_info);
   return 0;
 }

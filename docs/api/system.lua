@@ -42,6 +42,7 @@ system = {}
 ---
 ---Mouse events:
 --- * "mousepressed" -> button_name, x, y, amount_of_clicks
+--- * "hittest" -> x, y, amount_of_clicks (a press on the drag area, see `set_window_hit_test`)
 --- * "mousereleased" -> button_name, x, y
 --- * "mousemoved" -> x, y, relative_x, relative_y
 --- * "mousewheel" -> y, x
@@ -134,10 +135,17 @@ function system.set_window_bordered(bordered) end
 ---To disable custom window management, call this function without any
 ---arguments
 ---
+---The strip `title_height` high at the top drags the window, except for the
+---controls at its right and the given rects; a press there is not passed on,
+---but reported as a "hittest" event. A second press soon after, at the same
+---place, is passed on as a double-click ("mousepressed" with 2 clicks).
+---The `resize_border` along every edge resizes, except while maximized.
+---
 ---@param title_height? number Height of the window decoration
 ---@param controls_width? number Width of window controls (maximize,minimize and close buttons, etc).
 ---@param resize_border? number The amount of pixels reserved for resizing
-function system.set_window_hit_test(title_height, controls_width, resize_border) end
+---@param rects? number[][] Rects {x, y, w, h} of other items on the strip that take clicks (at most 32).
+function system.set_window_hit_test(title_height, controls_width, resize_border, rects) end
 
 ---
 ---Get the size and coordinates of the window.

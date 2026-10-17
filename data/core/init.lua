@@ -1527,6 +1527,8 @@ function core.on_event(type, ...)
     if not core.root_view:on_mouse_pressed(...) then
       did_keymap = keymap.on_mouse_pressed(...)
     end
+  elseif type == "hittest" then
+    core.title_view:on_hit_test(...)
   elseif type == "mousereleased" then
     core.root_view:on_mouse_released(...)
   elseif type == "mouseleft" then
