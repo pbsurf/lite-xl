@@ -744,7 +744,9 @@ end
 
 function TerminalView:on_mouse_released(button, x, y)
   self.v_scrollbar:on_mouse_released(button, x, y)
-  if button == "left" then
+  -- the release can come before the first update has spawned the terminal (a
+  -- click in the treeview's menu opening a terminal tab under the pointer)
+  if button == "left" and self.terminal then
     self.pressing = false
     self.word_selecting = nil
     self.row_selecting = nil
@@ -1051,6 +1053,28 @@ command.add(nil, {
     core.root_view:get_active_node_default():add_view(tv)
   end
 })
+
+-- "Terminal Here" in the treeview's context menu for folders: a terminal tab
+-- starting in that folder (PWD is also the directory the shell starts in)
+local treeview = config.plugins.treeview ~= false and require "plugins.treeview"
+if treeview then
+  local function hovered_dir()
+    local item = treeview.hovered_item
+    if core.active_view == treeview and item and item.type == "dir" then return true, item end
+  end
+  treeview.contextmenu:register(hovered_dir, {
+    { text = "Terminal Here", command = "treeview:terminal-here" }
+  })
+  command.add(hovered_dir, {
+    ["treeview:terminal-here"] = function(item)
+      local environment = common.merge(config.plugins.terminal.environment, { PWD = item.abs_filename })
+      local tv = TerminalView({ environment = environment })
+      core.root_view:get_active_node_default():add_view(tv)
+      core.set_active_view(tv)
+    end
+  })
+end
+
 command.add(function() return core.terminal_view and core.active_view ~= core.terminal_view end, {
   ["terminal:focus"] = function()
     core.set_active_view(core.terminal_view)

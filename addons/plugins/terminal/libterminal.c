@@ -1249,6 +1249,9 @@ static terminal_t* terminal_new(int columns, int lines, int scrollback_limit, co
         setenv("TERM", term_env, 1);
         for (int i = 0; i < 256 && environment[i]; i += 2)
           setenv(environment[i], environment[i+1], 1);
+        // start in $PWD (shells trust PWD only if it names the current directory)
+        const char* pwd = getenv("PWD");
+        if (pwd && chdir(pwd)) {}
         execvp(pathname,  (char** const)argv);
         exit(-1);
         return NULL;
