@@ -60,7 +60,6 @@ function TreeView:new()
   self.init_size = true
   self.target_size = config.plugins.treeview.size
   self.cache = {}
-  self.cursor_pos = { x = 0, y = 0 }
 
   self.item_icon_width = 0
   self.item_text_spacing = 0
@@ -220,8 +219,6 @@ end
 
 function TreeView:on_mouse_moved(px, py, ...)
   if not self.visible then return end
-  self.cursor_pos.x = px
-  self.cursor_pos.y = py
   if TreeView.super.on_mouse_moved(self, px, py, ...) then
     -- mouse movement handled by the View (scrollbar)
     self.hovered_item = nil
@@ -229,16 +226,18 @@ function TreeView:on_mouse_moved(px, py, ...)
     return
   end
 
-  local item_changed
-  for item, x,y,w,h in self:each_item() do
-    if px > x and py > y and px <= x + w and py <= y + h then
-      item_changed = true
-      self.hovered_item = item
-      break
-    end
-  end
-  if not item_changed then self.hovered_item = nil end
+  self.hovered_item = self:item_at(px, py)
   tooltip.hover(self, self.hovered_item)
+end
+
+
+---The item at a point, if it's in the view.
+function TreeView:item_at(px, py)
+  local p, s = self.position, self.size
+  if px < p.x or py < p.y or px >= p.x + s.x or py >= p.y + s.y then return end
+  for item, x,y,w,h in self:each_item() do
+    if px > x and py > y and px <= x + w and py <= y + h then return item end
+  end
 end
 
 
@@ -256,13 +255,6 @@ function TreeView:update()
 
   self.item_icon_width = style.icon_font:get_width("D")
   self.item_text_spacing = style.icon_font:get_width("f") / 2
-
-  -- this will make sure hovered_item is updated
-  -- we don't want events when the thing is scrolling fast
-  local dy = math.abs(self.scroll.to.y - self.scroll.y)
-  if self.scroll.to.y ~= 0 and dy < self:get_item_height() then
-    self:on_mouse_moved(self.cursor_pos.x, self.cursor_pos.y, 0, 0)
-  end
 
   TreeView.super.update(self)
 end
@@ -639,6 +631,9 @@ function RootView:on_mouse_moved(...)
 end
 
 function RootView.on_view_mouse_pressed(button, x, y, clicks)
+  -- a click acts on the item where it lands (its menu, and its commands, use
+  -- the hovered item), whatever the last move left hovered
+  if not menu.show_context_menu then view.hovered_item = view:item_at(x, y) end
   -- We give the priority to the menu to process mouse pressed events.
   local handled = menu:on_mouse_pressed(button, x, y, clicks)
   return handled or on_view_mouse_pressed(button, x, y, clicks)

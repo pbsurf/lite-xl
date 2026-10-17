@@ -1550,6 +1550,9 @@ function core.on_event(type, ...)
   elseif type == "keyreleased" then
     keymap.on_key_released(...)
   elseif type == "mousemoved" then
+    -- where the pointer is, though a popup may keep the move from the root view
+    local mouse = core.root_view.mouse
+    mouse.x, mouse.y = ...
     core.root_view:on_mouse_moved(...)
   elseif type == "mousepressed" then
     if not core.root_view:on_mouse_pressed(...) then

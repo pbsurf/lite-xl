@@ -122,7 +122,6 @@ function ContextMenu:show(x, y)
 
   if #items_list > 0 then
     self.items = items_list
-    self.mouse_x, self.mouse_y = x, y
     local w, h = self.items.width, self.items.height
 
     -- by default the box is opened on the right and below
@@ -147,10 +146,8 @@ function ContextMenu:hide()
   self.selected = -1
   self.height = 0
   core.request_cursor(core.active_view.cursor)
-  -- the menu took the mouse moves while shown, so the views under it still
-  -- think the pointer is where it was (a treeview's hovered item, which the
-  -- next click would act on); tell them where it is now
-  if shown then core.root_view:on_mouse_moved(self.mouse_x, self.mouse_y, 0, 0) end
+  -- the menu took the mouse moves while shown
+  if shown then core.root_view:recheck_pointer() end
 end
 
 ---Returns an iterator that iterates over each context menu item and their dimensions.
@@ -175,7 +172,6 @@ end
 function ContextMenu:on_mouse_moved(px, py)
   if not self.show_context_menu then return false end
 
-  self.mouse_x, self.mouse_y = px, py
   self.selected = -1
   for i, item, x, y, w, h in self:each_item() do
     if px > x and px <= x + w and py > y and py <= y + h then
@@ -263,7 +259,6 @@ function ContextMenu:on_mouse_pressed(button, px, py, clicks)
         self:on_selected(selected)
       end
     end
-    self.mouse_x, self.mouse_y = px, py
     self:hide()
     caught = true
   else

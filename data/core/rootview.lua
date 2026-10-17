@@ -522,6 +522,19 @@ function RootView:update()
   self.first_dnd_processed = true
   self:update_tab_tooltip()
   self.tab_menu:update()
+  if self.pointer_recheck then
+    self.pointer_recheck = false
+    self:on_mouse_moved(self.mouse.x, self.mouse.y, 0, 0)
+  end
+end
+
+
+---Tells the views where the pointer is on the next update, for when what's under
+---it changes without it moving (a popup closing, scrolling): their hover state
+---is from the last move. Deferred, so it never runs inside an event's handling.
+function RootView:recheck_pointer()
+  self.pointer_recheck = true
+  core.redraw = true
 end
 
 

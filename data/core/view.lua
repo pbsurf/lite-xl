@@ -359,8 +359,10 @@ function View:update()
   end
 
   self:clamp_scroll_position()
+  local x, y = self.scroll.x, self.scroll.y
   self:move_towards(self.scroll, "x", self.scroll.to.x, 0.3, "scroll")
   self:move_towards(self.scroll, "y", self.scroll.to.y, 0.3, "scroll")
+  if self.scroll.x ~= x or self.scroll.y ~= y then core.root_view:recheck_pointer() end
   if not self.scrollable then return end
   self:update_scrollbar()
 end

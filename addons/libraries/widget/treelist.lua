@@ -44,7 +44,6 @@ function TreeList:new(parent)
   self.scroll_width = 0
   self.items = {}
   self.tooltip = { x = 0, y = 0, begin = 0, alpha = 0 }
-  self.last_scroll_y = 0
 
   self.item_icon_width = 0
   self.item_text_spacing = 0
@@ -316,13 +315,6 @@ function TreeList:update()
 
   self.item_icon_width = style.icon_font:get_width("D")
   self.item_text_spacing = style.icon_font:get_width("f") / 2
-
-  -- this will make sure hovered_item is updated
-  local dy = math.abs(self.last_scroll_y - self.scroll.y)
-  if dy > 0 then
-    self:on_mouse_moved(core.root_view.mouse.x, core.root_view.mouse.y, 0, 0)
-    self.last_scroll_y = self.scroll.y
-  end
 
   TreeList.super.update(self)
 end
