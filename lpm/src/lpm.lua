@@ -1100,11 +1100,6 @@ function Addon:uninstall(bottle, uninstalling)
   local install_path = self:get_install_path(bottle)
   if self:is_core(bottle) then error("can't uninstall " .. self.id .. "; is a core addon") end
   local orphans = common.sort(common.grep(self:get_orphaned_dependencies(bottle), function(e) return not uninstalling or not uninstalling[e.id] end), function(a, b) return a.id < b.id end)
-  -- debate about this being a full abort, vs. just not uninstalling the orphans; settled in favour of full abort. can be revisited.
-  if #orphans > 0 and not uninstalling and not prompt("Uninstalling " .. self.id .. " will uninstall the following orphans: " .. common.join(", ", common.map(orphans, function(e) return e.id end)).. ". Do you want to continue?") then
-    return false
-  end
-  common.each(orphans, function(e) e:uninstall(bottle, common.merge(uninstalling or {}, { [self.id] = true })) end)
   local incompatible_addons = common.grep(bottle:installed_addons(), function(p) return p:depends_on(self) and (not uninstalling or not uninstalling[p.id]) end)
   local should_uninstall = #incompatible_addons == 0 or uninstalling
   -- dependents named for uninstall too (or with --force) go without asking; others are
@@ -1122,9 +1117,15 @@ function Addon:uninstall(bottle, uninstalling)
     end
   end
   if should_uninstall then
+    -- debate about this being a full abort, vs. just not uninstalling the orphans; settled in favour of full abort. can be revisited.
+    if #orphans > 0 and not uninstalling and not prompt("Uninstalling " .. self.id .. " will uninstall the following orphans: " .. common.join(", ", common.map(orphans, function(e) return e.id end)).. ". Do you want to continue?") then
+      return false
+    end
     for i,addon in ipairs(incompatible_addons) do
       if not addon:uninstall(bottle, common.merge(uninstalling or {}, { [self.id] = true })) then return false end
     end
+    -- orphans go only once self will: a refused or declined uninstall leaves them
+    common.each(orphans, function(e) e:uninstall(bottle, common.merge(uninstalling or {}, { [self.id] = true })) end)
     if self.type == "meta" then
       log.action("Uninstalling meta " .. self.id .. ".", "green")
     else
