@@ -315,17 +315,43 @@ static void terminal_clear_scrollback_buffer(terminal_t* terminal) {
   terminal->scrollback_total_lines = 0;
 }
 
+// Scrolls rows [top, bottom) of the current view up by n rows (down if n < 0),
+// blanking the rows that come in; the rows' wrap flags move with them.
+static void terminal_scroll_rows(terminal_t* terminal, int top, int bottom, int n) {
+  view_t* view = &terminal->views[terminal->current_view];
+  int columns = terminal->columns;
+  top = max(top, 0);
+  bottom = min(bottom, terminal->lines);
+  int rows = bottom - top;
+  if (rows <= 0 || n == 0)
+    return;
+  int count = min(n < 0 ? -n : n, rows);
+  int kept = rows - count;
+  int from = n > 0 ? top + count : top, to = n > 0 ? top : top + count;
+  int blank = n > 0 ? bottom - count : top;
+  memmove(&view->buffer[columns * to], &view->buffer[columns * from], sizeof(buffer_char_t) * columns * kept);
+  memmove(&view->overflows[to], &view->overflows[from], sizeof(int) * kept);
+  memset(&view->buffer[columns * blank], 0, sizeof(buffer_char_t) * columns * count);
+  memset(&view->overflows[blank], 0, sizeof(int) * count);
+}
+
+static int terminal_region_top(terminal_t* terminal) {
+  view_t* view = &terminal->views[terminal->current_view];
+  return view->scrolling_region_start == -1 ? 0 : min(view->scrolling_region_start, terminal->lines - 1);
+}
+
+static int terminal_region_end(terminal_t* terminal) {
+  view_t* view = &terminal->views[terminal->current_view];
+  return view->scrolling_region_end == -1 ? terminal->lines : min(view->scrolling_region_end, terminal->lines);
+}
+
+// Scrolls up one line: the scrolling region if one is set, else the whole view
+// (the normal buffer's top line going to the scrollback).
 static void terminal_shift_buffer(terminal_t* terminal) {
   view_t* view = &terminal->views[terminal->current_view];
 
   if (view->scrolling_region_start != -1 && view->scrolling_region_end != -1) {
-    // We perform this song and dance in case of Guldoman levels of resizing.
-    int start = min(view->scrolling_region_start, terminal->lines - 1);
-    int start_plus_1 = min((view->scrolling_region_start + 1), terminal->lines - 1);
-    int end = min(view->scrolling_region_end, terminal->lines);
-    if (start_plus_1 != start)
-      memmove(&view->buffer[terminal->columns * start], &view->buffer[terminal->columns * start_plus_1], sizeof(buffer_char_t) * terminal->columns * (end - start));
-    memset(&view->buffer[terminal->columns * max(end - 1 , 0)], 0, sizeof(buffer_char_t) * terminal->columns);
+    terminal_scroll_rows(terminal, terminal_region_top(terminal), terminal_region_end(terminal), 1);
     return;
   }
   if (terminal->current_view == VIEW_NORMAL_BUFFER) {
@@ -418,7 +444,7 @@ static int terminal_escape_sequence(terminal_t* terminal, terminal_escape_type_e
       case 'C': view->cursor_x = min(view->cursor_x + max(parse_number(&seq[2], 1), 1), terminal->columns - 1); break;
       case 'D': view->cursor_x = max(view->cursor_x - max(parse_number(&seq[2], 1), 1), 0); break;
       case 'E': view->cursor_y = min(view->cursor_y + max(parse_number(&seq[2], 1), 1), terminal->lines - 1); view->cursor_x = 0; break;
-      case 'F': view->cursor_y = min(view->cursor_y - max(parse_number(&seq[2], 1), 1), 0); view->cursor_x = 0; break;
+      case 'F': view->cursor_y = max(view->cursor_y - max(parse_number(&seq[2], 1), 1), 0); view->cursor_x = 0; break;
       case 'G': view->cursor_x = min(max(max(parse_number(&seq[2], 1), 1) - 1, 0), terminal->columns - 1); break;
       case 'f':
       case 'H': {
@@ -466,21 +492,26 @@ static int terminal_escape_sequence(terminal_t* terminal, terminal_escape_type_e
         for (int i = s; i < e; ++i)
           view->buffer[view->cursor_y * terminal->columns + i] = (buffer_char_t){ view->cursor_styling, ' ' };
       } break;
-      case 'L': {
-        int length = parse_number(&seq[2], 1);
-        memmove(&view->buffer[terminal->columns * (view->cursor_y + length)], &view->buffer[terminal->columns * view->cursor_y], sizeof(buffer_char_t) * terminal->columns * max(end - (view->cursor_y + length), 0));
-        for (int y = view->cursor_y; y < min(view->cursor_y + length, end); ++y) {
-          for (int i = 0; i < terminal->columns; ++i)
-            view->buffer[terminal->columns * y + i].codepoint = ' ';
+      // insert / delete lines at the cursor, within the scrolling region
+      case 'L':
+      case 'M': {
+        int length = max(parse_number(&seq[2], 1), 1);
+        if (view->cursor_y >= terminal_region_top(terminal) && view->cursor_y < end) {
+          terminal_scroll_rows(terminal, view->cursor_y, end, seq[seq_end] == 'L' ? -length : length);
+          view->cursor_x = 0;
         }
       } break;
-      case 'M': {
-        int length = parse_number(&seq[2], 1);
-        memmove(&view->buffer[terminal->columns * view->cursor_y], &view->buffer[terminal->columns * (view->cursor_y + length)], sizeof(buffer_char_t) * terminal->columns * max(end - (view->cursor_y + length), 0));
-        for (int y = end - length; y < end; ++y) {
-          for (int i = 0; i < terminal->columns; ++i)
-            view->buffer[terminal->columns * y + i].codepoint = ' ';
-        }
+      // scroll up / down: the scrolling region, or the whole view
+      case 'S': {
+        int length = min(max(parse_number(&seq[2], 1), 1), terminal->lines);
+        for (int i = 0; i < length; ++i)
+          terminal_shift_buffer(terminal);
+      } break;
+      case 'T': {
+        if (strchr(seq, ';')) // with more parameters, xterm's mouse highlight tracking
+          unhandled = 1;
+        else
+          terminal_scroll_rows(terminal, terminal_region_top(terminal), end, -max(parse_number(&seq[2], 1), 1));
       } break;
       case 'P': {
         int length = parse_number(&seq[2], 1);
@@ -715,8 +746,16 @@ static int terminal_escape_sequence(terminal_t* terminal, terminal_escape_type_e
           default: unhandled = 1; break;
         }
       } break;
-      case 'D': view->cursor_y = min(view->cursor_y + 1, terminal->lines - 1); break;
-      case 'E': view->cursor_y = min(view->cursor_y + 1, terminal->lines - 1); view->cursor_x = 0; break;
+      // index (and next line): down a line, scrolling at the region's bottom
+      case 'D':
+      case 'E':
+        if (view->cursor_y == end - 1)
+          terminal_shift_buffer(terminal);
+        else
+          view->cursor_y = min(view->cursor_y + 1, terminal->lines - 1);
+        if (seq[1] == 'E')
+          view->cursor_x = 0;
+      break;
       case '(':
         switch (seq[2]) {
           case '0': view->charset = CHARSET_DEC; break;
@@ -726,13 +765,12 @@ static int terminal_escape_sequence(terminal_t* terminal, terminal_escape_type_e
       break;
       case '=': view->keypad_keys_mode = KEYS_MODE_APPLICATION; break;
       case '>': view->keypad_keys_mode = KEYS_MODE_NORMAL; break;
+      // reverse index: up a line, scrolling at the region's top
       case 'M':
-        if (view->cursor_y == 0) {
-          memmove(&view->buffer[terminal->columns], &view->buffer[0], sizeof(buffer_char_t)*terminal->columns*(terminal->lines-1));
-          memset(&view->buffer[0], 0, sizeof(buffer_char_t)*terminal->columns);
-        } else {
+        if (view->cursor_y == terminal_region_top(terminal))
+          terminal_scroll_rows(terminal, view->cursor_y, end, -1);
+        else if (view->cursor_y > 0)
           --view->cursor_y;
-        }
       break;
       default: unhandled = 1; break;
     }
