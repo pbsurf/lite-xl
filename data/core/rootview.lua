@@ -7,6 +7,7 @@ local DocView = require "core.docview"
 local ContextMenu = require "core.contextmenu"
 local command = require "core.command"
 local keymap = require "core.keymap"
+local tooltip = require "core.tooltip"
 
 ---@class core.rootview : core.view
 ---@field super core.view
@@ -20,9 +21,6 @@ local RootView = View:extend()
 ---@field node core.node? The node of the tab it was opened on
 ---@field view core.view? The tab's view
 local TabMenu = ContextMenu:extend()
-
----Seconds the mouse rests on a tab before its tooltip shows.
-local TAB_TOOLTIP_DELAY = 0.5
 
 function RootView:__tostring() return "RootView" end
 
@@ -42,7 +40,7 @@ function RootView:new()
   self.first_dnd_processed = false
   self.tab_menu = TabMenu()
   -- the tab under the mouse and since when; dismissed by a click until it changes
-  self.tab_tooltip = { view = nil, node = nil, time = 0, dismissed = false }
+  self.tab_tooltip = { view = nil, node = nil }
 end
 
 
@@ -154,7 +152,7 @@ end
 ---@param clicks integer
 ---@return boolean
 function RootView:on_mouse_pressed(button, x, y, clicks)
-  self.tab_tooltip.dismissed = true
+  tooltip.dismiss()
   -- the tab menu gets clicks first while shown: a click anywhere closes it,
   -- choosing the row under the mouse, if any
   local menu = self.tab_menu
@@ -363,6 +361,7 @@ end
 
 
 function RootView:on_mouse_left()
+  tooltip.clear()
   if self.overlapping_node then
     self.overlapping_node:on_mouse_left()
   end
@@ -635,7 +634,9 @@ end
 
 -- Tab tooltips: a view's get_filename() (a doc's full path), when it says more
 -- than the tab's title, and a line of facts about it (get_tab_tooltip_info),
--- shown once the mouse rests on its tab for a moment
+-- timed by core.tooltip
+
+local get_tab_tooltip
 
 function RootView:update_tab_tooltip()
   local node = self.overlapping_node
@@ -643,14 +644,10 @@ function RootView:update_tab_tooltip()
   if self.dragged_node or self.tab_menu.show_context_menu then view = nil end
   local tt = self.tab_tooltip
   if view ~= tt.view then
-    tt.view, tt.node, tt.dismissed = view, node, false
-    tt.time = system.get_time()
-    if view then
-      core.add_thread(function()
-        coroutine.yield(TAB_TOOLTIP_DELAY)
-        core.redraw = true
-      end)
-    end
+    tt.view, tt.node = view, node
+    local has_tooltip = view and (get_tab_tooltip(view)
+      or #self:get_tab_tooltip_info(view) > 0)
+    tooltip.hover(tt, has_tooltip and view or nil)
   end
 end
 
@@ -659,7 +656,7 @@ end
 ---part of it (drawn dimmed, so files outside the project stand out).
 ---@param view core.view
 ---@return string? text, string? project_part
-local function get_tab_tooltip(view)
+function get_tab_tooltip(view)
   local text = view.get_filename and view:get_filename()
   if not text or text == "" or text == view:get_name() then return end
   local abs = view.doc and view.doc.abs_filename
@@ -689,9 +686,7 @@ end
 
 function RootView:draw_tab_tooltip()
   local tt = self.tab_tooltip
-  if not tt.view or tt.dismissed or system.get_time() - tt.time < TAB_TOOLTIP_DELAY then
-    return
-  end
+  if not tt.view or not tooltip.shown(tt, tt.view) then return end
   local idx = tt.node:get_view_idx(tt.view)
   if not idx then return end
   local text, project_part = get_tab_tooltip(tt.view)

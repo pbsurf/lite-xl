@@ -11,6 +11,7 @@ local View = require "core.view"
 local Object = require "core.object"
 local ContextMenu = require "core.contextmenu"
 local RootView = require "core.rootview"
+local tooltip = require "core.tooltip"
 
 
 ---@alias core.statusview.styledtext table<integer, renderer.font|renderer.color|string>
@@ -925,6 +926,7 @@ function StatusView:on_mouse_moved(x, y, dx, dy)
   if y < self.position.y or system.get_time() <= self.message_timeout then
     self.cursor = "arrow"
     self.hovered_item = {}
+    tooltip.hover(self, nil)
     return
   end
 
@@ -942,6 +944,8 @@ function StatusView:on_mouse_moved(x, y, dx, dy)
         if self.hovered_item ~= item then
           self.hovered_item = item
         end
+        -- status bar tooltips show at once
+        tooltip.hover(self, item.tooltip ~= "" and item or nil, 0)
         if item.command or item.on_click or item.menu then
           self.cursor = "hand"
         end
@@ -951,6 +955,7 @@ function StatusView:on_mouse_moved(x, y, dx, dy)
   end
   self.cursor = "arrow"
   self.hovered_item = {}
+  tooltip.hover(self, nil)
 end
 
 
@@ -1052,7 +1057,8 @@ function StatusView:draw()
     end
 
     -- draw tooltip
-    if self.hovered_item.active and not self.menu.show_context_menu then
+    if self.hovered_item.active and not self.menu.show_context_menu
+      and tooltip.shown(self, self.hovered_item) then
       self:draw_item_tooltip(self.hovered_item)
     end
   end

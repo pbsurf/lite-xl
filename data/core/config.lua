@@ -5,6 +5,8 @@ local config = {}
 config.fps = 60
 config.max_log_items = 800
 config.message_timeout = 5
+-- seconds the mouse rests on something before its tooltip shows (core.tooltip)
+config.tooltip_delay = 0.5
 config.mouse_wheel_scroll = 50 * SCALE
 config.animate_drag_scroll = false
 config.scroll_past_end = true
