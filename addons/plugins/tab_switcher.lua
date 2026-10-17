@@ -4,7 +4,6 @@ local config = require "core.config"
 local command = require "core.command"
 local keymap = require "core.keymap"
 local common = require "core.common"
-local DocView = require "core.docview"
 
 config.plugins.tab_switcher = common.merge({
   -- false: the switch commands change tabs immediately instead of showing a list;
@@ -73,24 +72,41 @@ local tab_switcher = {}
 ---@field text string The tab name
 ---@field view core.view
 
----Returns the list of DocView tabs under a specific node tree.
+---The views in tabs (those of nodes that aren't locked: not the file browser,
+---status bar, drawers...) under a node, in tab order.
+---@param node core.node
+---@param views? core.view[]
+---@return core.view[]
+local function tab_views(node, views)
+  views = views or {}
+  if node.type == "leaf" then
+    if not node.locked and not node:is_empty() then
+      for _, v in ipairs(node.views) do table.insert(views, v) end
+    end
+  else
+    tab_views(node.a, views)
+    tab_views(node.b, views)
+  end
+  return views
+end
+
+---Returns the list of tabs (documents, terminals, the log...) under a
+---specific node tree.
 ---@param base_node core.node Where to start the search from
 ---@return tab_switcher.tab_item[]
 function tab_switcher.get_tab_list(base_node)
-  local raw_list = base_node:get_children()
+  local raw_list = tab_views(base_node)
   local list = {}
   local mt = {
     -- fuzzy_match uses tostring to get the text to compare
     __tostring = function(i) return i.text end
   }
-  for _,v in pairs(raw_list) do
-    if v:is(DocView) then
-      table.insert(list, setmetatable({
-        text = v:get_name(),
-        font = v:get_name_style(core.command_view:get_font()),
-        view = v
-      }, mt))
-    end
+  for _,v in ipairs(raw_list) do
+    table.insert(list, setmetatable({
+      text = v:get_name(),
+      font = v:get_name_style(core.command_view:get_font()),
+      view = v
+    }, mt))
   end
   table.sort(list, function(a, b)
     local visits = core.view_visit_order
