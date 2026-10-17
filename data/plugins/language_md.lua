@@ -2,6 +2,7 @@
 local syntax = require "core.syntax"
 local style = require "core.style"
 local core = require "core"
+local DocView = require "core.docview"
 
 local in_squares_match = "^%[%]"
 local in_parenthesis_match = "^%(%)"
@@ -243,7 +244,7 @@ core.add_thread(function()
     end
   end
 
-  while true do
+  local function update()
     if last_code_font ~= style.code_font then
       last_code_font = style.code_font
       for attr, _ in pairs(custom_fonts) do
@@ -263,6 +264,13 @@ core.add_thread(function()
         end
       end
     end
-    coroutine.yield(1)
+  end
+  update()
+
+  -- checked when a markdown doc is drawn, as theme and font changes redraw
+  local draw = DocView.draw
+  function DocView:draw(...)
+    if self.doc.syntax and self.doc.syntax.name == "Markdown" then update() end
+    return draw(self, ...)
   end
 end)

@@ -132,6 +132,19 @@ end
 --
 local max_symbols = config.plugins.autocomplete.max_symbols
 
+-- woken when a doc may need rescanning: its text changed, or it was opened
+local rescan_key = "autocomplete:rescan"
+local doc_on_text_change, doc_load = Doc.on_text_change, Doc.load
+function Doc:on_text_change(...)
+  core.wake(rescan_key)
+  return doc_on_text_change(self, ...)
+end
+function Doc:load(...)
+  local res = doc_load(self, ...)
+  core.wake(rescan_key)
+  return res
+end
+
 core.add_thread(function()
   local cache = setmetatable({}, { __mode = "k" })
 
@@ -206,16 +219,17 @@ core.add_thread(function()
     -- update symbols list
     autocomplete.add { name = "open-docs", items = symbols }
 
-    -- wait for next scan
+    -- wait for next scan: at most one a second, once a doc has changed
+    coroutine.yield(1)
     local valid = true
     while valid do
-      coroutine.yield(1)
       for _, doc in ipairs(core.docs) do
         if not cache_is_valid(doc) then
           valid = false
           break
         end
       end
+      if valid then core.wait_for(rescan_key) end
     end
 
   end
