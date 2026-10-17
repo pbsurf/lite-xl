@@ -91,8 +91,10 @@ another repository's version, uninstalls removing dependents under `--assume-yes
   CAPS words and URLs or paths are skipped. Right click a marked word for
   suggestions or "Add to Dictionary" (`spellcheck_words.txt` in the user dir). Its
   C module is built by our meson build when libhunspell is found.
-* **ephemeral_tabs** (imported, with our changes): a file opened from the tree
-  replaces the previous preview tab until edited or double-clicked; preview tabs
+* **ephemeral_tabs** (imported, with our changes): a file opened while browsing
+  (a click in the tree, go to definition, a search result, ...; callers pass
+  `{ preview = true }` to `RootView:open_doc`) replaces the previous preview tab
+  until edited or double-clicked; ctrl+p and ctrl+o open normal tabs. Preview tabs
   show their name in italic (in tabs, the tab menu and the ctrl+tab list) and
   aren't restored with the workspace.
 * **openurl:** ctrl+click opens the URL or DOI under the mouse in the browser
