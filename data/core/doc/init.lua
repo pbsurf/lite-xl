@@ -88,13 +88,63 @@ function Doc:load(filename)
 end
 
 
+-- Replaces the text with the file's as one undoable edit, so undo brings back
+-- what was there (unsaved changes included). Only the lines between those the
+-- two have in common at the start and end are replaced.
 function Doc:reload()
-  if self.filename then
-    local sel = { self:get_selection() }
-    self:load(self.filename)
-    self:clean()
-    self:set_selection(table.unpack(sel))
+  if not self.filename then return end
+  local fp = assert( io.open(self.filename, "rb") )
+  local lines, crlf = {}, false
+  for line in fp:lines() do
+    if line:byte(-1) == 13 then
+      line = line:sub(1, -2)
+      crlf = true
+    end
+    table.insert(lines, line .. "\n")
   end
+  fp:close()
+  if #lines == 0 then lines[1] = "\n" end
+  self.crlf = crlf
+
+  local old = self.lines
+  local first = 1
+  while first <= #old and first <= #lines and old[first] == lines[first] do
+    first = first + 1
+  end
+  local last_old, last_new = #old, #lines
+  while last_old >= first and last_new >= first and old[last_old] == lines[last_new] do
+    last_old, last_new = last_old - 1, last_new - 1
+  end
+
+  if last_old >= first or last_new >= first then
+    local text = table.concat(lines, "", first, last_new)
+    local line1, col1, line2, col2
+    if last_old < #old then
+      line1, col1, line2, col2 = first, 1, last_old + 1, 1
+    else
+      -- through the end: the doc's last newline stays, so the change starts
+      -- at the newline before the first changed line and the text omits its own
+      line2, col2 = #old, #old[#old]
+      if first > 1 then
+        line1, col1 = first - 1, #old[first - 1]
+        text = text ~= "" and "\n" .. text:sub(1, -2) or ""
+      else
+        line1, col1 = 1, 1
+        text = text:sub(1, -2)
+      end
+    end
+    -- one timestamp: undone as a single step, and apart from a preceding edit
+    local time = system.get_time()
+    local prev = self.undo_stack[self.undo_stack.idx - 1]
+    if prev then time = math.max(time, prev.time + config.undo_merge_timeout * 1.01) end
+    self.redo_stack = { idx = 1 }
+    if line1 ~= line2 or col1 ~= col2 then
+      self:raw_remove(line1, col1, line2, col2, self.undo_stack, time)
+    end
+    if text ~= "" then self:raw_insert(line1, col1, text, self.undo_stack, time) end
+    self:on_text_change("reload")
+  end
+  self:clean()
 end
 
 

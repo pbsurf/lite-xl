@@ -54,7 +54,6 @@ end
 
 local function reload_doc(doc)
   doc:reload()
-  update_time(doc)
   core.redraw = true
   core.log_quiet("Auto-reloaded doc \"%s\"", doc.filename)
 end
@@ -89,7 +88,8 @@ end
 
 local function check_prompt_reload(doc)
   if doc and doc.deferred_reload then
-    core.nag_view:show("File Changed", doc.filename .. " has changed. Reload this file?", {
+    core.nag_view:show("File Changed", doc.filename .. " has changed on disk. Reload it?"
+      .. (doc:is_dirty() and " Undo brings back your unsaved changes." or ""), {
       { text = "Yes", default_yes = true },
       { text = "No", default_no = true }
     }, function(item)
@@ -149,13 +149,20 @@ core.add_thread(function()
   end
 end)
 
--- patch `Doc.save|load` to store modified time
+-- patch `Doc.save|load|reload` to store modified time
 local load = Doc.load
+local reload = Doc.reload
 local save = Doc.save
 
 Doc.load = function(self, ...)
   local res = load(self, ...)
   update_time(self)
+  return res
+end
+
+Doc.reload = function(self, ...)
+  local res = reload(self, ...)
+  if self.filename then update_time(self) end
   return res
 end
 
