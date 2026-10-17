@@ -2162,6 +2162,70 @@ function lsp.goto_symbol(doc, line, col, implementation)
   end
 end
 
+local source_exts = { "c", "cc", "cpp", "cxx", "c++", "m", "mm" }
+local header_exts = { "h", "hh", "hpp", "hxx", "h++", "inl" }
+
+---Return the extensions of the counterpart of a C/C++ file (headers for a
+---source, sources for a header), or nil if the file is neither.
+---@param filename string
+---@return string[]|nil
+local function counterpart_exts(filename)
+  local ext = (filename:match("%.([^./\\]+)$") or ""):lower()
+  for _, e in ipairs(source_exts) do
+    if e == ext then return header_exts end
+  end
+  for _, e in ipairs(header_exts) do
+    if e == ext then return source_exts end
+  end
+end
+
+---Find the counterpart of a C/C++ file in its own directory.
+---@param filename string absolute path
+---@return string|nil
+local function find_counterpart_in_dir(filename)
+  local exts = counterpart_exts(filename)
+  if not exts then return end
+  local base = filename:match("^(.*)%.[^./\\]+$")
+  for _, ext in ipairs(exts) do
+    for _, e in ipairs({ ext, ext:upper() }) do
+      local path = base .. "." .. e
+      if system.get_file_info(path) then return path end
+    end
+  end
+end
+
+--- Opens the header of a C/C++ source file, or the source of a header: asks
+-- clangd (textDocument/switchSourceHeader, a clangd extension, which also
+-- searches its index), else looks for a file with the same name next to it.
+function lsp.switch_source_header(doc)
+  local filename = core.project_absolute_path(doc.filename)
+  local function open(path)
+    if path then
+      core.root_view:open_doc(core.open_doc(common.home_expand(path)))
+    else
+      core.log("[LSP] No header or source found for %s", common.basename(filename))
+    end
+  end
+
+  if doc.lsp_open then
+    for _, name in pairs(lsp.get_active_servers(doc.filename, true)) do
+      local server = lsp.servers_running[name]
+      if server.name == "clangd" then
+        server:push_request("textDocument/switchSourceHeader", {
+          params = { uri = util.touri(filename) },
+          callback = function(server, response)
+            local uri = response.result
+            open(type(uri) == "string" and util.tofilename(uri)
+              or find_counterpart_in_dir(filename))
+          end
+        })
+        return
+      end
+    end
+  end
+  open(find_counterpart_in_dir(filename))
+end
+
 --
 -- Thread to process server requests and responses
 -- without blocking entirely the editor.
@@ -2614,6 +2678,18 @@ command.add(
   end
 })
 
+command.add(
+  function()
+    local dv = get_active_docview()
+    return dv ~= nil and counterpart_exts(dv.doc.filename) ~= nil,
+      dv and dv.doc or nil
+  end, {
+
+  ["lsp:switch-source-header"] = function(doc)
+    lsp.switch_source_header(doc)
+  end
+})
+
 command.add(nil, {
   ["lsp:view-all-diagnostics"] = function()
     lsp.view_all_diagnostics()
@@ -2672,6 +2748,7 @@ keymap.add {
   ["alt+shift+e"]       = "lsp:toggle-diagnostics",
   ["alt+c"]             = "lsp:view-call-hierarchy",
   ["alt+r"]             = "lsp:rename-symbol",
+  ["f4"]                = "lsp:switch-source-header",
 }
 
 --
