@@ -37,4 +37,18 @@ function shapes.squiggle(x, y, width, color, opts)
   renderer.draw_path(path, color, opts.thickness or SCALE)
 end
 
+---Draw a checkmark (✓) fitted in the square x, y, size, size.
+---@param x number
+---@param y number
+---@param size number
+---@param color renderer.color
+---@param thickness? number Stroke width (default size / 7, at least 1 * SCALE)
+function shapes.checkmark(x, y, size, color, thickness)
+  renderer.draw_path({
+    "M", x + size * 0.1, y + size * 0.55,
+    "L", x + size * 0.38, y + size * 0.82,
+    "L", x + size * 0.9, y + size * 0.2,
+  }, color, thickness or math.max(SCALE, size / 7))
+end
+
 return shapes

@@ -74,7 +74,8 @@
       "description": "A menu bar of commands, shown when Alt is tapped.",
       "version": "0.1",
       "mod_version": "3",
-      "path": "addons/plugins/menubar.lua"
+      "path": "addons/plugins/menubar.lua",
+      "dependencies": { "shapes": {} }
     },
     {
       "id": "highlight_selection",

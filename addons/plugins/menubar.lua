@@ -7,7 +7,8 @@
 -- While shown: a menu's first letter (underlined) or Down/Return opens it,
 -- Left/Right move between menus, Up/Down/Return choose in one, Escape closes.
 -- Rows whose command doesn't apply now are dimmed; commands of plugins that
--- aren't installed are left out.
+-- aren't installed are left out. Rows for settings that are on (see
+-- config.plugins.menubar.checked) have a checkmark.
 local core = require "core"
 local common = require "core.common"
 local command = require "core.command"
@@ -16,6 +17,7 @@ local keymap = require "core.keymap"
 local style = require "core.style"
 local ContextMenu = require "core.contextmenu"
 local RootView = require "core.rootview"
+local shapes = require "libraries.shapes"
 
 ---A menu row: a command name; a table with `command` (a name, or a list of
 ---names: the first that applies now, else the first that exists) and optional
@@ -221,6 +223,35 @@ config.plugins.menubar = common.merge({
   },
   ---Patterns of other commands left out of the automatic list.
   hidden_commands = { "^status%-bar:menu%-" },
+  ---Commands that toggle a setting, each with a function telling whether it's
+  ---on now (its rows get a checkmark then).
+  ---@type table<string, fun(): boolean?>
+  checked = {
+    ["treeview:toggle"] = function()
+      local tv = package.loaded["plugins.treeview"]
+      return tv and tv.visible
+    end,
+    ["toolbar:toggle"] = function()
+      local tv = package.loaded["plugins.treeview"]
+      return tv and tv.toolbar and tv.toolbar.visible
+    end,
+    ["status-bar:toggle"] = function() return core.status_view.visible end,
+    ["build:toggle-drawer"] = function()
+      local build = package.loaded["plugins.build"]
+      return build and build.message_view.visible
+    end,
+    ["debugger:toggle-drawer"] = function()
+      local debugger = package.loaded["plugins.debugger"]
+      return debugger and debugger:should_show_drawer()
+    end,
+    ["line-wrapping:toggle"] = function() return core.active_view.wrapped_settings ~= nil end,
+    ["draw-whitespace:toggle"] = function() return config.plugins.drawwhitespace.enabled end,
+    ["lineguide:toggle"] = function() return config.plugins.lineguide.enabled end,
+    ["highlight-selection:toggle"] = function() return config.plugins.highlight_selection.enabled end,
+    ["minimap:toggle-visibility"] = function() return config.plugins.minimap.enabled end,
+    ["minimap:toggle-syntax-highlighting"] = function() return config.plugins.minimap.syntax_highlight end,
+    ["core:toggle-fullscreen"] = function() return system.get_window_mode() == "fullscreen" end,
+  },
 }, config.plugins.menubar)
 
 
@@ -235,6 +266,16 @@ local state = { active = false, open = nil, hovered = nil, keyboard = false }
 ---submenus (rows with `rows`), opened to the right
 ---@class plugins.menubar.dropdown : core.contextmenu
 local Dropdown = ContextMenu:extend()
+
+---Size of the checkmark, and of the column for it left of the rows' text.
+local function check_size()
+  return math.floor(style.font:get_height() * 0.5)
+end
+
+function Dropdown:register(predicate, items)
+  ContextMenu.register(self, predicate, items)
+  items.width = items.width + check_size()
+end
 
 -- the open dropdowns: [1] dropped from the bar, then each one's open submenu
 local stack = {}
@@ -362,7 +403,9 @@ local function build_rows(specs)
     else
       local name = row_command(spec)
       if name then
+        local checked = config.plugins.menubar.checked[name]
         table.insert(rows, {
+          checked = checked and checked() or nil,
           text = type(spec) == "table" and spec.text or label(name),
           info = binding(name),
           disabled = not command.is_valid(name),
@@ -505,7 +548,11 @@ function Dropdown:draw_context_menu()
         renderer.draw_rect(x, y, w, h, style.selection)
       end
       local color = item.disabled and style.dim or style.text
-      common.draw_text(style.font, color, item.text, "left", x + style.padding.x, y, w, h)
+      local cs = check_size()
+      if item.checked then
+        shapes.checkmark(x + style.padding.x / 2, y + (h - cs) / 2, cs, color)
+      end
+      common.draw_text(style.font, color, item.text, "left", x + style.padding.x + cs, y, w, h)
       if item.rows then
         common.draw_text(style.icon_font, color, "+", "right", x, y, w - style.padding.x, h)
       elseif item.info then
