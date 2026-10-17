@@ -79,11 +79,13 @@ local function update_items_size(items, update_binding)
 end
 
 ---Registers a list of items into the context menu with a predicate.
+---`items` may be a function, called with the menu's position when it is shown,
+---that returns the items (or nil for none), for menus that depend on where it opens.
 ---@param predicate core.command.predicate
----@param items core.contextmenu.item[]
+---@param items core.contextmenu.item[] | fun(x: number, y: number): core.contextmenu.item[]?
 function ContextMenu:register(predicate, items)
   predicate = command.generate_predicate(predicate)
-  update_items_size(items, true)
+  if type(items) ~= "function" then update_items_size(items, true) end
   table.insert(self.itemset, { predicate = predicate, items = items })
 end
 
@@ -95,10 +97,15 @@ function ContextMenu:show(x, y)
   self.items = nil
   local items_list = { width = 0, height = 0 }
   for _, items in ipairs(self.itemset) do
-    if items.predicate(x, y) then
-      items_list.width = math.max(items_list.width, items.items.width)
+    local set = items.predicate(x, y) and items.items
+    if type(set) == "function" then
+      set = set(x, y)
+      if set then update_items_size(set) end
+    end
+    if set then
+      items_list.width = math.max(items_list.width, set.width)
       items_list.height = items_list.height
-      for _, subitems in ipairs(items.items) do
+      for _, subitems in ipairs(set) do
         if type(subitems.command) ~= "string" or command.is_valid(subitems.command) then
           local lw, lh = get_item_size(subitems)
           items_list.height = items_list.height + lh
@@ -255,7 +262,7 @@ function ContextMenu:draw()
   if self.current_scale ~= SCALE then
     update_items_size(self.items)
     for _, set in ipairs(self.itemset) do
-      update_items_size(set.items)
+      if type(set.items) ~= "function" then update_items_size(set.items) end
     end
     self.current_scale = SCALE
   end

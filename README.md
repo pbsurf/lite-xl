@@ -53,7 +53,8 @@ upstream's `release/v2.1.x`. Additions to the editor:
   `View:get_name_style` (the font of a view's name in tabs and tab lists),
   `View:get_icon` (the icon shown with it; the treeview gives docs their file's),
   `View:is_transient` (views the workspace doesn't restore),
-  `system.open_url` (opens a URL with the system's default handler), and
+  `system.open_url` (opens a URL with the system's default handler), context
+  menu items built when the menu opens (`ContextMenu:register` with a function), and
   threads that wait for events rather than time (`core.wait_for`, `core.wake`,
   `core.watch_readable` with `process:watch_source`).
 
