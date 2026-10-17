@@ -59,6 +59,19 @@ local function reload_doc(doc)
 end
 
 
+local function check_prompt_reload(doc)
+  if doc and doc.deferred_reload then
+    core.nag_view:show("File Changed", doc.filename .. " has changed on disk. Reload it?"
+      .. (doc:is_dirty() and " Undo brings back your unsaved changes." or ""), {
+      { text = "Yes", default_yes = true },
+      { text = "No", default_no = true }
+    }, function(item)
+      if item.text == "Yes" then reload_doc(doc) end
+      doc.deferred_reload = false
+    end)
+  end
+end
+
 local timers = setmetatable({}, { __mode = "k" })
 
 local function delayed_reload(doc, mtime)
@@ -78,25 +91,18 @@ local function delayed_reload(doc, mtime)
     -- to determine if a file has changed, and on many systems it has a
     -- resolution of 1 second.
     while diff < 1 do
-      coroutine.yield(diff)
+      coroutine.yield(1 - diff)
       diff = system.get_time() - timers[doc].last_trigger
     end
     timers[doc] = nil
-    reload_doc(doc)
+    if doc:is_dirty() then
+      -- edited while we waited: ask, as for a change to an edited doc
+      doc.deferred_reload = true
+      if doc == core.active_view.doc then check_prompt_reload(doc) end
+    else
+      reload_doc(doc)
+    end
   end)
-end
-
-local function check_prompt_reload(doc)
-  if doc and doc.deferred_reload then
-    core.nag_view:show("File Changed", doc.filename .. " has changed on disk. Reload it?"
-      .. (doc:is_dirty() and " Undo brings back your unsaved changes." or ""), {
-      { text = "Yes", default_yes = true },
-      { text = "No", default_no = true }
-    }, function(item)
-      if item.text == "Yes" then reload_doc(doc) end
-      doc.deferred_reload = false
-    end)
-  end
 end
 
 local function doc_changes_visiblity(doc, visibility)
