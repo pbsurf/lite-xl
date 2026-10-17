@@ -223,13 +223,9 @@ function HeaderBar:update()
 end
 
 ---Tells the window which parts of the strip take clicks; the rest drags the
----window. With the menubar's bar shown above the header bar, none of it drags.
+---window.
 function HeaderBar:update_hit_test()
   local rects = {}
-  local mb = menubar()
-  if mb and mb.state.active and not mb.state.popup then
-    table.insert(rects, { 0, 0, core.root_view.size.x, self.position.y })
-  end
   for _, b in ipairs(self.buttons) do
     table.insert(rects, { b.x, b.y, b.w, b.h })
   end

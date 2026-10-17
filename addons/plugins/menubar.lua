@@ -1,5 +1,6 @@
 -- mod-version:3
--- A menu bar of commands, shown at the top of the window (the rest moves down)
+-- A menu bar of commands, shown under the title view (the header bar, with the
+-- headerbar plugin; else at the top of the window), the rest moving down,
 -- when Alt is tapped (pressed and released on its own). Its menus come from
 -- config.plugins.menubar.menus; the end of the last one lists, by plugin, the
 -- commands no menu has, leaving out those that only exist to be bound to keys.
@@ -21,6 +22,7 @@ local keymap = require "core.keymap"
 local style = require "core.style"
 local ContextMenu = require "core.contextmenu"
 local RootView = require "core.rootview"
+local View = require "core.view"
 local shapes = require "libraries.shapes"
 
 ---A menu row: a command name; a table with `command` (a name, or a list of
@@ -311,8 +313,25 @@ local function title_rects()
   return rects
 end
 
+-- the bar is a view, in the layout under the title view: 0 high while hidden
+local BarView = View:extend()
+
+function BarView:__tostring() return "MenuBar" end
+
+function BarView:update()
+  self.size.y = bar_shown() and bar_height() or 0
+  BarView.super.update(self)
+end
+
+local bar_view = BarView()
+core.root_view.root_node:get_node_for_view(core.title_view):split("down", bar_view, { y = true })
+
+local function bar_bottom()
+  return bar_view.position.y + bar_view.size.y
+end
+
 local function on_bar(py)
-  return bar_shown() and py >= 0 and py < bar_height()
+  return bar_shown() and py >= bar_view.position.y and py < bar_bottom()
 end
 
 local function title_at(px, py)
@@ -498,7 +517,7 @@ local function push(level, rows, x, y)
   local d = Dropdown()
   d:register(nil, rows)
   if not d:show(x, y) then return end
-  local top = state.popup or (level == 1 and bar_height() or 0)
+  local top = state.popup or (level == 1 and bar_bottom() or 0)
   d.position.y = math.max(top, math.min(y, core.root_view.size.y - d.items.height))
   d.height = d.items.height
   stack[level] = d
@@ -575,7 +594,7 @@ function menubar.open(i)
   i = (i - 1) % #menus + 1
   state.hovered = i
   local rows = menu_rows(i)
-  state.open = rows and push(1, rows, title_rects()[i].x, bar_height()) and i or nil
+  state.open = rows and push(1, rows, title_rects()[i].x, bar_bottom()) and i or nil
   core.redraw = true
 end
 
@@ -652,20 +671,21 @@ function Dropdown:draw_context_menu()
 end
 
 
-local function draw_bar()
-  local w, h = core.root_view.size.x, bar_height()
-  renderer.draw_rect(0, 0, w, h, style.background2)
-  renderer.draw_rect(0, h - 1, w, 1, style.divider)
+function BarView:draw()
+  if not bar_shown() then return end
+  local y, w, h = self.position.y, self.size.x, self.size.y
+  renderer.draw_rect(0, y, w, h, style.background2)
+  renderer.draw_rect(0, y + h - 1, w, 1, style.divider)
   local font = style.font
   for i, r in ipairs(title_rects()) do
     local title = config.plugins.menubar.menus[i].title
     local color = style.text
     if i == state.open or i == state.hovered then
-      renderer.draw_rect(r.x, 0, r.w, h - 1, i == state.open and style.popup_background or style.line_highlight)
+      renderer.draw_rect(r.x, y, r.w, h - 1, i == state.open and style.popup_background or style.line_highlight)
       if i == state.open then color = style.accent end
     end
     local tx = r.x + style.padding.x
-    local ty = (h - font:get_height()) / 2
+    local ty = y + (h - font:get_height()) / 2
     renderer.draw_text(font, title, tx, ty, color)
     if state.keyboard then
       local uw = font:get_width(title:sub(1, 1))
@@ -678,23 +698,11 @@ end
 -- Events: while the bar is shown it gets the keyboard, and the mouse over it
 -- or while a menu is down
 
--- the views are laid out below the bar: the root view's rect is the window
--- without it while its nodes are laid out, and the whole window otherwise
-local root_update = RootView.update
-function RootView:update(...)
-  if not bar_shown() then return root_update(self, ...) end
-  local h = bar_height()
-  self.position.y, self.size.y = self.position.y + h, self.size.y - h
-  root_update(self, ...)
-  self.position.y, self.size.y = self.position.y - h, self.size.y + h
-end
-
 local root_draw = RootView.draw
 function RootView:draw(...)
   root_draw(self, ...)
   if not state.active then return end
   renderer.set_clip_rect(0, 0, self.size.x, self.size.y)
-  if not state.popup then draw_bar() end
   for _, d in ipairs(stack) do d:draw_context_menu() end
 end
 
