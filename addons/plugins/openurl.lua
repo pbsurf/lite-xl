@@ -79,7 +79,7 @@ local function overlaps(links, s, e)
 end
 
 -- all matches of prefix (+ optional suffix) in text, without trailing punctuation
--- and without a closing ')' when the link follows a '('
+-- and without a trailing ')' that has no '(' in the link (the link is in parentheses)
 local function find_matches(text, p, links)
   local init = 1
   while true do
@@ -90,14 +90,18 @@ local function find_matches(text, p, links)
       e = se or e
     end
     init = e + 1
-    local last = text:sub(e, e)
-    if last == "," or last == "." or last == ":" or last == ";" then
-      e = e - 1
-      last = text:sub(e, e)
-    end
-    -- can't use %b() since parentheses in URLs needn't be balanced
-    if last == ")" and text:sub(1, s - 1):match("%(%s*$") then
-      e = e - 1
+    -- open parentheses in the link; can't use %b() since URLs can have unbalanced ones
+    local _, opens = text:sub(s, e):gsub("%(", "")
+    local _, closes = text:sub(s, e):gsub("%)", "")
+    while e >= s do
+      local last = text:sub(e, e)
+      if last == "," or last == "." or last == ":" or last == ";" then
+        e = e - 1
+      elseif last == ")" and closes > opens then
+        e, closes = e - 1, closes - 1
+      else
+        break
+      end
     end
     if e >= s and not overlaps(links, s, e) then
       table.insert(links, { start = s, stop = e, kind = p.kind, target = capture or text:sub(s, e) })
