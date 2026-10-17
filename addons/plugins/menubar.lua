@@ -179,7 +179,7 @@ config.plugins.menubar = common.merge({
     } },
     { title = "Build", rows = {
       { command = "build:build", text = "Build" },
-      { command = "build:rebuild", text = "Rebuild" },
+      { command = "build:clean-and-build", text = "Clean and Build" },
       { command = "build:clean", text = "Clean" },
       { command = "build:terminate", text = "Stop Build" },
       "-",

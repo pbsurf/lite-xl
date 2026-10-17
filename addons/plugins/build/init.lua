@@ -495,7 +495,6 @@ end
 ---is shown if its command is valid and its `when`, if any, returns true.
 build.menu_actions = {
   { text = "Build", command = "build:build" },
-  { text = "Rebuild", command = "build:rebuild" },
   { text = "Clean", command = "build:clean" },
   { text = "Run", command = "build:run-or-term-or-kill", when = function() return not build.is_running() end },
   { text = "Stop", command = "build:terminate" },
@@ -747,7 +746,7 @@ function BuildBarView:new()
   self.toolbar_commands = {
     {symbol = "!", command = "build:build"},
     {symbol = '"', command = "build:run-or-term-or-kill"},
-    {symbol = "#", command = "build:rebuild"},
+    {symbol = "#", command = "build:clean-and-build"},
     {symbol = "$", command = "build:terminate"},
     {symbol = "&", command = "build:next-target"},
     {symbol = "%", command = "build:toggle-drawer"},
@@ -824,7 +823,7 @@ end, {
 command.add(function(root_view, arguments)
   return not build.is_running() and build.can_build(build.targets[build.state.target]) and build.can_clean(build.targets[build.state.target]), arguments
 end, {
-  ["build:rebuild"] = function()
+  ["build:clean-and-build"] = function()
     save_docs()
     build.clean(function(status)
       if (status or 0) == 0 and #build.targets > 0 then
@@ -962,7 +961,7 @@ keymap.add {
   ["lclick"]             = { "build:toggle-minimize", "build:jump-to-hovered" },
   ["ctrl+b"]             = { "build:build", "build:terminate" },
   ["alt+b"]         = "build:build-and-run",
-  ["ctrl+alt+b"]         = "build:rebuild",
+  ["ctrl+alt+b"]         = "build:clean-and-build",
   ["ctrl+e"]             = "build:run-or-term-or-kill",
   ["ctrl+shift+e"]       = "build:run-or-term-or-kill-with-arguments",
   ["ctrl+t"]             = "build:next-target",
