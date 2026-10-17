@@ -247,8 +247,9 @@ function build.run_tasks(tasks, on_done, on_line)
             end
             if not has_unfinished and bundle_finished == nil then bundle_finished = 0 end
             if bundle_finished ~= nil then
-              if bundle.on_done then bundle.on_done(bundle_finished) end
+              -- removed first, so on_done sees it finished and can start the next step
               table.remove(build.running_bundles, i)
+              if bundle.on_done then bundle.on_done(bundle_finished) end
               yield_time = 0
               break
             end
@@ -275,7 +276,7 @@ function build.run_tasks(tasks, on_done, on_line)
   end
 end
 
-function build.is_running() return build.thread ~= nil end
+function build.is_running() return #build.running_bundles > 0 end
 function build.output(line) core.log_quiet(line) end
 
 function build.set_target(target)
@@ -334,7 +335,6 @@ function build.build(callback)
       build.output(line)
       build.message_view.scroll.to.y = 0
       if status == 0 and build.on_success == "minimize" then build.message_view.minimized = true end
-      build.thread = nil
       if callback then callback(status) end
     end)
   end)
@@ -823,8 +823,8 @@ command.add(function(root_view, arguments)
   return not build.is_running() and build.can_build(build.targets[build.state.target]) and build.can_clean(build.targets[build.state.target]), arguments
 end, {
   ["build:rebuild"] = function()
-    build.clean(function()
-      if #build.targets > 0 then
+    build.clean(function(status)
+      if (status or 0) == 0 and #build.targets > 0 then
         build.build()
       end
     end)
