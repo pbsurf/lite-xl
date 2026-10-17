@@ -134,6 +134,11 @@ Server.DEFAULT_TIMEOUT = 10
 ---@type integer Amount of bytes
 Server.BUFFER_SIZE = 1024 * 10
 
+---What core.wake() is called with when a message is queued, for a thread
+---that waits (core.wait_for) while there's nothing to send.
+---@type string
+Server.WAKE_KEY = "lsp:queued"
+
 ---LSP Docs: /#errorCodes
 Server.error_code = {
   ParseError                      = -32700,
@@ -1106,6 +1111,7 @@ function Server:push_notification(method, options)
     callback = options.callback,
     data = options.data,
   })
+  core.wake(Server.WAKE_KEY)
 end
 
 -- Requests that should bypass the hitrate limit
@@ -1176,6 +1182,7 @@ function Server:push_request(method, options)
     timestamp = 0,
     times_sent = 0
   })
+  core.wake(Server.WAKE_KEY)
 end
 
 ---Queue a client response to a server request which can be an error
@@ -1205,6 +1212,7 @@ function Server:push_response(method, id, result, error)
   end
 
   table.insert(self.response_list, response)
+  core.wake(Server.WAKE_KEY)
 end
 
 ---Send raw json strings to server in cases where the json encoder
@@ -1242,6 +1250,7 @@ function Server:push_raw(name, options)
     callback = options.callback,
     data = options.data,
   })
+  core.wake(Server.WAKE_KEY)
 end
 
 ---Retrieve a request and removes it from the internal requests list

@@ -2232,7 +2232,6 @@ end
 --
 core.add_thread(function()
   while true do
-    local servers_running = false
     for _,server in pairs(lsp.servers_running) do
       -- Send raw data to server which is usually big and slow in a
       -- non blocking way by creating a coroutine just for it.
@@ -2271,16 +2270,30 @@ core.add_thread(function()
       end
 
       server:process_errors(config.plugins.lsp.log_server_stderr)
-
-      servers_running = true
     end
 
-    if servers_running then
-      local wait = 0.01
-      if config.plugins.lsp.more_yielding then wait = 0 end
-      coroutine.yield(wait)
+    -- poll while there's something to send or a request awaits its answer
+    -- (they're re-sent and expire by time); otherwise sleep until a server
+    -- writes something or a message is queued
+    local busy, keys = false, { Server.WAKE_KEY }
+    for _, server in pairs(lsp.servers_running) do
+      if #server.notification_list > 0 or #server.request_list > 0
+         or #server.response_list > 0 or #server.raw_list > 0 then
+        busy = true
+        break
+      end
+      -- a dead server's pipes are always readable; it's noticed when written to
+      if server.proc and server.proc:running() then
+        for _, stream in ipairs({ process.STREAM_STDOUT, process.STREAM_STDERR }) do
+          local source = server.proc:watch_source(stream)
+          if source then table.insert(keys, core.watch_readable(source)) end
+        end
+      end
+    end
+    if busy then
+      coroutine.yield(config.plugins.lsp.more_yielding and 0 or 0.01)
     else
-      coroutine.yield(2)
+      core.wait_for(keys)
     end
   end
 end)
