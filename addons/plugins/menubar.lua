@@ -6,6 +6,10 @@
 --
 -- While shown: a menu's first letter (underlined) or Down/Return opens it,
 -- Left/Right move between menus, Up/Down/Return choose in one, Escape closes.
+-- menubar.popup drops the same menus from a point instead (e.g. a button), as
+-- one menu with a submenu each; Up/Down/Left/Right/Return and first letters
+-- work there too.
+--
 -- Rows whose command doesn't apply now are dimmed; commands of plugins that
 -- aren't installed are left out. Rows for settings that are on (see
 -- config.plugins.menubar.checked) have a checkmark.
@@ -261,10 +265,16 @@ config.plugins.menubar = common.merge({
 }, config.plugins.menubar)
 
 
--- active: the bar is shown; open: the index of the menu dropped down, if any;
--- hovered: the title under the mouse (or chosen from the keyboard); keyboard:
--- shown from the keyboard (accelerators underlined)
-local state = { active = false, open = nil, hovered = nil, keyboard = false }
+-- active: the bar or the popup is shown; open: the index of the menu dropped
+-- down from the bar, if any; hovered: the title under the mouse (or chosen from
+-- the keyboard); keyboard: shown from the keyboard (accelerators underlined);
+-- popup: the y of the top of the popup (menubar.popup) when that's shown
+-- instead of the bar
+local state = { active = false, open = nil, hovered = nil, keyboard = false, popup = nil }
+
+local function bar_shown()
+  return state.active and not state.popup
+end
 
 ---A dropdown menu: rows dimmed when their command doesn't apply, and
 ---submenus (rows with `rows`), opened to the right
@@ -300,7 +310,7 @@ local function title_rects()
 end
 
 local function on_bar(py)
-  return py >= 0 and py < bar_height()
+  return bar_shown() and py >= 0 and py < bar_height()
 end
 
 local function title_at(px, py)
@@ -479,14 +489,15 @@ end
 
 
 ---Opens a dropdown of rows with its top left at x, y (moved to fit the
----window), as stack level `level`, closing any deeper ones.
+---window, but not over the bar, or above the popup), as stack level `level`,
+---closing any deeper ones.
 local function push(level, rows, x, y)
   for j = #stack, level, -1 do stack[j]:hide(); stack[j] = nil end
   local d = Dropdown()
   d:register(nil, rows)
   if not d:show(x, y) then return end
-  d.position.y = math.max(level == 1 and bar_height() or 0,
-    math.min(y, core.root_view.size.y - d.items.height))
+  local top = state.popup or (level == 1 and bar_height() or 0)
+  d.position.y = math.max(top, math.min(y, core.root_view.size.y - d.items.height))
   d.height = d.items.height
   stack[level] = d
   return d
@@ -525,8 +536,29 @@ end
 
 function menubar.hide()
   close_from(1)
-  state.active, state.open, state.hovered = false, nil, nil
+  state.active, state.open, state.hovered, state.popup = false, nil, nil, nil
   core.redraw = true
+end
+
+---Drops the menus down from x, y (the top left), as one menu with a submenu
+---each, rather than on the bar.
+function menubar.popup(x, y)
+  menubar.hide()
+  local rows = {}
+  for i, menu in ipairs(config.plugins.menubar.menus) do
+    local sub = menu_rows(i)
+    if sub then
+      table.insert(rows, { text = menu.title, rows = sub, info = "  ", command = function() end })
+    end
+  end
+  state.active, state.keyboard, state.popup = true, false, y
+  if not push(1, rows, x, y) then menubar.hide() end
+  core.redraw = true
+end
+
+---Whether the menus are shown, on the bar or as the popup.
+function menubar.is_shown()
+  return state.active
 end
 
 ---Drops menu i down (closing any other).
@@ -614,7 +646,6 @@ end
 
 local function draw_bar()
   local w, h = core.root_view.size.x, bar_height()
-  renderer.set_clip_rect(0, 0, w, core.root_view.size.y)
   renderer.draw_rect(0, 0, w, h, style.background2)
   renderer.draw_rect(0, h - 1, w, 1, style.divider)
   local font = style.font
@@ -633,7 +664,6 @@ local function draw_bar()
       renderer.draw_rect(tx, ty + font:get_height() - math.max(1, SCALE), uw, math.max(1, SCALE), color)
     end
   end
-  for _, d in ipairs(stack) do d:draw_context_menu() end
 end
 
 
@@ -644,7 +674,7 @@ end
 -- without it while its nodes are laid out, and the whole window otherwise
 local root_update = RootView.update
 function RootView:update(...)
-  if not state.active then return root_update(self, ...) end
+  if not bar_shown() then return root_update(self, ...) end
   local h = bar_height()
   self.position.y, self.size.y = self.position.y + h, self.size.y - h
   root_update(self, ...)
@@ -654,12 +684,15 @@ end
 local root_draw = RootView.draw
 function RootView:draw(...)
   root_draw(self, ...)
-  if state.active then draw_bar() end
+  if not state.active then return end
+  renderer.set_clip_rect(0, 0, self.size.x, self.size.y)
+  if not state.popup then draw_bar() end
+  for _, d in ipairs(stack) do d:draw_context_menu() end
 end
 
 local root_on_mouse_moved = RootView.on_mouse_moved
 function RootView:on_mouse_moved(x, y, dx, dy)
-  if state.active and (on_bar(y) or state.open) then
+  if state.active and (on_bar(y) or state.open or state.popup) then
     local i = title_at(x, y)
     if i and state.open and i ~= state.open then menubar.open(i) end
     state.hovered = i or state.open
@@ -694,7 +727,7 @@ function RootView:on_mouse_pressed(button, x, y, clicks)
       return true
     elseif on_bar(y) then
       return true
-    elseif state.open then
+    elseif state.open or state.popup then
       local d, level = dropdown_at(x, y)
       if d then
         d:on_mouse_moved(x, y)
@@ -712,15 +745,49 @@ end
 local root_on_mouse_wheel = RootView.on_mouse_wheel
 function RootView:on_mouse_wheel(...)
   alt_used = true
-  if state.open then return true end
+  if state.open or state.popup then return true end
   return root_on_mouse_wheel(self, ...)
 end
 
 
 local function is_alt(k) return k == "left alt" or k == "right alt" end
 
+---Keys while the popup is shown; true if handled.
+local function popup_key(k)
+  local top = stack[#stack]
+  local item = top and top:get_item_selected()
+  if k == "escape" then
+    if #stack > 1 then close_from(#stack) else menubar.hide() end
+  elseif k == "left" then
+    if #stack > 1 then close_from(#stack) end
+  elseif k == "right" then
+    if item and item.rows then choose() end
+  elseif k == "return" or k == "keypad enter" then
+    choose()
+  elseif top and (k == "up" or k == "down") then
+    top:focus_step(k == "up" and -1 or 1)
+  elseif top and #k == 1 and k:match("%a") then
+    -- the next row starting with the letter; a submenu opens
+    local n = #top.items
+    for step = 1, n do
+      local i = (math.max(top.selected, 0) + step - 1) % n + 1
+      local row = top.items[i]
+      if row ~= ContextMenu.DIVIDER and not row.disabled and row.text:sub(1, 1):lower() == k then
+        top.selected = i
+        if row.rows then choose() end
+        break
+      end
+    end
+  else
+    return false
+  end
+  core.redraw = true
+  return true
+end
+
 ---Keys while the bar is shown; true if handled.
 local function bar_key(k)
+  if state.popup then return popup_key(k) end
   local menus = config.plugins.menubar.menus
   local top = stack[#stack]
   if k == "escape" then
