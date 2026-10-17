@@ -30,6 +30,10 @@ args=(--userdir="$userdir" --configdir="$userdir/lpm"
       --cachedir="$top/tools/lpm-cache"
       --datadir="$build/run/share/lite-xl" --binary="$build/run/bin/lite-xl")
 
+if [ ! -x "$lpm" ]; then
+  echo "lpm: $lpm not built (meson skips it without its dependencies; see -Dlpm)" >&2
+  exit 1
+fi
 if [ ! -e "$userdir/lpm/settings.json" ]; then
   "$lpm" repo add "$src" "${args[@]}" >&2
 fi
