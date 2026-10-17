@@ -158,7 +158,7 @@ local function jump_to_file(file, line, col)
     -- Check to see if the file is in the project. If it is, open it, and go to the line.
     for i = 1, #core.projects do
       if file and common.path_belongs_to(file, core.projects[i].path) then
-        local view = core.root_view:open_doc(core.open_doc(file))
+        local view = core.root_view:open_doc(core.open_doc(file), { preview = true })
         if line then
           view:scroll_to_line(math.max(1, line - 20), true)
           view:set_selection(line, col or 1, line, col or 1)

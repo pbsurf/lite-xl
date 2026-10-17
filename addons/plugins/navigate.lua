@@ -73,7 +73,7 @@ local function go_to(entry)
     end
     doc = d
   end
-  local dv = core.root_view:open_doc(doc)
+  local dv = core.root_view:open_doc(doc, { preview = true })
   doc:set_selection(entry.line, entry.col)
   dv:scroll_to_line((doc:get_selection()), true)
   update_last(doc)

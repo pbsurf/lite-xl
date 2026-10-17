@@ -208,7 +208,7 @@ for i,v in ipairs(config.plugins.debugger.skip_files) do table.insert(model.skip
 local function jump_to_file(file, line)
   -- Check to see if the file is in the project. If it is, open it, and go to the line.
   if file and system.get_file_info(file) then
-    local view = core.root_view:open_doc(core.open_doc(file))
+    local view = core.root_view:open_doc(core.open_doc(file), { preview = true })
     if line then
       view:scroll_to_line(line, true, true)
       set_selection(view, line, 1, line, 1)

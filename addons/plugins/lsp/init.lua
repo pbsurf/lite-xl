@@ -637,7 +637,8 @@ function lsp.goto_location(location)
       common.home_expand(
         util.tofilename(location.uri or location.targetUri)
       )
-    )
+    ),
+    { preview = true }
   )
   local line1, col1 = util.toselection(
     location.range or location.targetRange, doc_view.doc
@@ -912,7 +913,8 @@ function lsp.start_server(filename, project_directory)
               local document = util.tofilename(request.params.uri)
               ---@type core.docview
               local doc_view = core.root_view:open_doc(
-                core.open_doc(common.home_expand(document))
+                core.open_doc(common.home_expand(document)),
+                { preview = true }
               )
               if request.params.selection then
                 local line1, col1, line2, col2 = util.toselection(
@@ -2201,7 +2203,7 @@ function lsp.switch_source_header(doc)
   local filename = core.project_absolute_path(doc.filename)
   local function open(path)
     if path then
-      core.root_view:open_doc(core.open_doc(common.home_expand(path)))
+      core.root_view:open_doc(core.open_doc(common.home_expand(path)), { preview = true })
     else
       core.log("[LSP] No header or source found for %s", common.basename(filename))
     end

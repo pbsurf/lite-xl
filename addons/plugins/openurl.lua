@@ -168,7 +168,7 @@ local function open_wiki(doc, target)
       local path = dir .. PATHSEP .. name .. ext
       local info = system.get_file_info(path)
       if info and info.type == "file" then
-        local dv = core.root_view:open_doc(core.open_doc(path))
+        local dv = core.root_view:open_doc(core.open_doc(path), { preview = true })
         if section ~= "" then
           local heading = "^#+%s*" .. escape_pattern(section) .. "%s*#*%s*$"
           for i, text in ipairs(dv.doc.lines) do
