@@ -294,7 +294,9 @@ function NagView:next()
     register_mouse_pressed(self)
   else
     self.force_focus = false
-    core.set_active_view(core.next_active_view or core.last_active_view)
+    -- an option may have closed the last active view (Node:remove_view clears it)
+    core.set_active_view(core.next_active_view or core.last_active_view
+      or core.root_view:get_primary_node().active_view)
     self.visible = false
     unregister_mouse_pressed(self)
   end
