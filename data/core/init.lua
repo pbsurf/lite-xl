@@ -304,7 +304,7 @@ function core.add_project_directory(path)
         end
       end
       if project_dir_open then
-        coroutine.yield(changed and 0 or 0.05)
+        if changed then coroutine.yield(0) else topdir.watch:wait(0.05) end
       else
         return
       end
@@ -1122,6 +1122,82 @@ function core.add_thread(f, weak_ref, ...)
 end
 
 
+-- Threads waiting for core.wake(): key -> set of their coroutines
+local thread_waits = {}
+-- coroutine -> the key it was woken with
+local woken_with = setmetatable({}, { __mode = "k" })
+-- a thread was woken since the main loop last checked: run threads before waiting
+local threads_woken = false
+
+---Suspends the calling thread (the coroutine of core.add_thread, not one
+---inside it) until core.wake() with one of `keys` (a key or a list of keys),
+---or for at most `timeout` seconds (default: no limit). A wait with no limit
+---is what lets an idle editor block until an event arrives.
+---@param keys any
+---@param timeout? number
+---@return any key the key it was woken with, or nil after the timeout
+function core.wait_for(keys, timeout)
+  local co = coroutine.running()
+  if type(keys) ~= "table" then keys = { keys } end
+  for _, key in ipairs(keys) do
+    thread_waits[key] = thread_waits[key] or setmetatable({}, { __mode = "k" })
+    thread_waits[key][co] = true
+  end
+  coroutine.yield(timeout or math.huge)
+  for _, key in ipairs(keys) do
+    local waiting = thread_waits[key]
+    if waiting then
+      waiting[co] = nil
+      if not next(waiting) then thread_waits[key] = nil end
+    end
+  end
+  local key = woken_with[co]
+  woken_with[co] = nil
+  return key
+end
+
+---Wakes the threads waiting in core.wait_for() for `key`.
+---@param key any
+function core.wake(key)
+  local waiting = thread_waits[key]
+  if not waiting then return end
+  for _, thread in pairs(core.threads) do
+    if waiting[thread.cr] then
+      waiting[thread.cr] = nil
+      woken_with[thread.cr] = woken_with[thread.cr] or key
+      thread.wake = 0
+      threads_woken = true
+    end
+  end
+end
+
+---Arms a one-shot watch on `source` (as process:watch_source() returns) and
+---returns the key core.wait_for() is woken with once it has data to read or
+---ends. Re-arm after reading. If it can't be watched, the key is woken after
+---a short while instead, so waiting for it polls.
+---@param source integer
+---@return string key
+function core.watch_readable(source)
+  local key = "readable:" .. source
+  local ok, err = system.watch_readable(source)
+  if not ok then
+    core.log_quiet("Can't watch %s, polling instead: %s", key, err)
+    core.add_thread(function()
+      coroutine.yield(0.1)
+      core.wake(key)
+    end)
+  end
+  return key
+end
+
+---Drops the watch on `source` (before closing it) and wakes its waiters.
+---@param source integer
+function core.unwatch_readable(source)
+  system.unwatch_readable(source)
+  core.wake("readable:" .. source)
+end
+
+
 function core.push_clip_rect(x, y, w, h)
   local x2, y2, w2, h2 = table.unpack(core.clip_rect_stack[#core.clip_rect_stack])
   local r, b, r2, b2 = x+w, y+h, x2+w2, y2+h2
@@ -1321,15 +1397,20 @@ function core.step()
 
   -- e: touchmoved's finger id, the only event with five values
   for type, a,b,c,d,e in system.poll_event do
-    if type == "textinput" and did_keymap then
-      did_keymap = false
-    elseif type == "mousemoved" then
-      core.try(core.on_event, type, a, b, c, d)
+    if type == "readable" or type == "dirchange" then
+      -- a background source: wake the threads waiting for it, without a redraw
+      core.wake(type == "readable" and "readable:" .. a or "dirchange")
     else
-      local _, res = core.try(core.on_event, type, a, b, c, d, e)
-      did_keymap = res or did_keymap
+      if type == "textinput" and did_keymap then
+        did_keymap = false
+      elseif type == "mousemoved" then
+        core.try(core.on_event, type, a, b, c, d)
+      else
+        local _, res = core.try(core.on_event, type, a, b, c, d, e)
+        did_keymap = res or did_keymap
+      end
+      core.redraw = true
     end
-    core.redraw = true
   end
 
   local width, height = renderer.get_size()
@@ -1428,6 +1509,11 @@ function core.run()
       did_step = true
     end
     if core.restart_request or core.quit_request then break end
+    -- threads woken by this step's events (or by other threads) run before any wait
+    if threads_woken then
+      threads_woken = false
+      time_to_wake = 0
+    end
 
     if not did_redraw then
       if system.window_has_focus() or not did_step or run_threads_full < 2 then

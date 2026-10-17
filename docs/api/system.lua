@@ -51,6 +51,11 @@ system = {}
 --- * "touchreleased" -> x, y, finger_id
 --- * "touchmoved" -> x, y, distance_x, distance_y, finger_id
 ---
+---Background events (core.step wakes the threads waiting for them):
+--- * "dirchange" -> a dirmonitor has changes to check
+--- * "readable" -> source: a watched source has data to read, or ended
+---   (see system.watch_readable)
+---
 ---@return string type
 ---@return any? arg1
 ---@return any? arg2
@@ -66,6 +71,25 @@ function system.poll_event() end
 ---
 ---@return boolean status True on success or false if there was an error or if no event was received.
 function system.wait_event(timeout) end
+
+---
+---Arm a one-shot watch on a source of input: once it has data to read, or
+---is closed, system.poll_event() returns "readable", source. Re-arm it after
+---reading. Watching is done by a thread on a duplicate of the source, so the
+---source can be closed while watched. Threads use core.watch_readable().
+---
+---@param source integer What process:watch_source() returns: a file
+---descriptor, or on Windows an event handle.
+---
+---@return boolean | nil ok
+---@return string? errmsg
+function system.watch_readable(source) end
+
+---
+---Drop the watch on a source, if any.
+---
+---@param source integer
+function system.unwatch_readable(source) end
 
 ---
 ---Change the cursor type displayed on screen.

@@ -126,6 +126,18 @@ function dirwatch:check(change_callback, scan_time, wait_time)
   return had_change
 end
 
+-- Designed to be run inside a core thread, between checks: waits until a
+-- dirmonitor reports a change (they wake the threads waiting for "dirchange";
+-- any of them, so the next check may find nothing), or `interval` seconds
+-- while some directories can't be watched and are scanned instead.
+function dirwatch:wait(interval)
+  if next(self.scanned) then
+    coroutine.yield(interval)
+  else
+    require("core").wait_for("dirchange")
+  end
+end
+
 
 -- inspect config.ignore_files patterns and prepare ready to use entries.
 local function compile_ignore_files()

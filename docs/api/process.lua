@@ -195,6 +195,16 @@ function process:write(data) end
 function process:close_stream(stream) end
 
 ---
+---What system.watch_readable() takes to wake when stdout or stderr has data
+---to read or ends: the pipe's file descriptor, or on Windows the event of
+---its overlapped reads (a read is started if none is pending).
+---
+---@param stream process.streamtype STREAM_STDOUT or STREAM_STDERR
+---
+---@return integer | nil source nil if the stream is closed
+function process:watch_source(stream) end
+
+---
 ---Wait the specified amount of time for the process to exit.
 ---
 ---@param timeout integer | process.waittype Time to wait in milliseconds,

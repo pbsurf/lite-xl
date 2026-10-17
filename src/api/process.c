@@ -484,6 +484,11 @@ static int process_start(lua_State* L) {
         self->child_pipes[i][1] = self->child_pipes[new_fds[i]][1];
       }
     }
+    // signaled when an overlapped read completes: what process:watch_source() returns
+    for (int i = STDOUT_FD; i <= STDERR_FD; ++i) {
+      if (self->child_pipes[i][0] && self->child_pipes[i][0] != INVALID_HANDLE_VALUE)
+        self->overlapped[i - 1].hEvent = CreateEvent(NULL, TRUE, FALSE, NULL);
+    }
     STARTUPINFOW siStartInfo;
     memset(&self->process_information, 0, sizeof(self->process_information));
     memset(&siStartInfo, 0, sizeof(siStartInfo));
@@ -599,6 +604,15 @@ static int process_start(lua_State* L) {
   return retval;
 }
 
+#if _WIN32
+// clears an OVERLAPPED for the next read, keeping its event
+static void reset_overlapped(OVERLAPPED* overlapped) {
+  HANDLE event = overlapped->hEvent;
+  memset(overlapped, 0, sizeof(*overlapped));
+  overlapped->hEvent = event;
+}
+#endif
+
 static int g_read(lua_State* L, int stream, unsigned long read_size) {
   process_t* self = (process_t*) luaL_checkudata(L, 1, API_TYPE_PROCESS);
   long length = 0;
@@ -613,7 +627,14 @@ static int g_read(lua_State* L, int stream, unsigned long read_size) {
         if (GetOverlappedResult(self->child_pipes[stream][0], &self->overlapped[writable_stream_idx], &bytesTransferred, false)) {
           self->reading[writable_stream_idx] = false;
           length = bytesTransferred;
-          memset(&self->overlapped[writable_stream_idx], 0, sizeof(self->overlapped[writable_stream_idx]));
+          reset_overlapped(&self->overlapped[writable_stream_idx]);
+        } else if (GetLastError() != ERROR_IO_INCOMPLETE) {
+          // the pending read failed (the pipe was closed): end of stream, as when
+          // ReadFile itself fails below, rather than "" forever
+          self->reading[writable_stream_idx] = false;
+          reset_overlapped(&self->overlapped[writable_stream_idx]);
+          signal_process(self, SIGNAL_TERM);
+          return 0;
         }
       } else if (GetLastError() != ERROR_HANDLE_EOF || !poll_process(self, WAIT_NONE)) {
         // emulate POSIX behavior in the code below by returning empty string until process exits
@@ -622,7 +643,7 @@ static int g_read(lua_State* L, int stream, unsigned long read_size) {
       }
     } else {
       length = self->overlapped[writable_stream_idx].InternalHigh;
-      memset(&self->overlapped[writable_stream_idx], 0, sizeof(self->overlapped[writable_stream_idx]));
+      reset_overlapped(&self->overlapped[writable_stream_idx]);
     }
     lua_pushlstring(L, self->buffer[writable_stream_idx], length);
   #else
@@ -668,6 +689,37 @@ static int f_write(lua_State* L) {
     }
   #endif
   lua_pushinteger(L, length);
+  return 1;
+}
+
+/*
+** process:watch_source(stream): what system.watch_readable() takes to wake
+** when stream (STREAM_STDOUT or STREAM_STDERR) has data to read or ends: the
+** pipe's file descriptor, or on Windows the event of its overlapped reads (a
+** read is started if none is pending). nil if the stream is closed.
+*/
+static int f_watch_source(lua_State* L) {
+  process_t* self = (process_t*) luaL_checkudata(L, 1, API_TYPE_PROCESS);
+  int stream = luaL_checkinteger(L, 2);
+  if (stream != STDOUT_FD && stream != STDERR_FD)
+    return luaL_error(L, "error: only stdout and stderr can be watched");
+  #if _WIN32
+    int idx = stream - 1;
+    HANDLE pipe = self->child_pipes[stream][0];
+    if (!self->overlapped[idx].hEvent || !pipe || pipe == INVALID_HANDLE_VALUE)
+      return 0;
+    if (!self->reading[idx]) {
+      if (ReadFile(pipe, self->buffer[idx], READ_BUF_SIZE, NULL, &self->overlapped[idx]) || GetLastError() == ERROR_IO_PENDING)
+        self->reading[idx] = true;
+      else
+        SetEvent(self->overlapped[idx].hEvent); // ended or failed: the next read tells
+    }
+    lua_pushinteger(L, (lua_Integer) (intptr_t) self->overlapped[idx].hEvent);
+  #else
+    if (self->child_pipes[stream][0] == HANDLE_INVALID)
+      return 0;
+    lua_pushinteger(L, self->child_pipes[stream][0]);
+  #endif
   return 1;
 }
 
@@ -766,6 +818,12 @@ static int f_gc(lua_State* L) {
   close_fd(&self->child_pipes[STDIN_FD ][1]);
   close_fd(&self->child_pipes[STDOUT_FD][0]);
   close_fd(&self->child_pipes[STDERR_FD][0]);
+  #if _WIN32
+    for (int i = 0; i < 2; ++i) {
+      if (self->overlapped[i].hEvent) CloseHandle(self->overlapped[i].hEvent);
+      self->overlapped[i].hEvent = NULL;
+    }
+  #endif
   return 0;
 }
 
@@ -796,6 +854,7 @@ static const struct luaL_Reg process_metatable[] = {
   {"read_stderr", f_read_stderr},
   {"write", f_write},
   {"close_stream", f_close_stream},
+  {"watch_source", f_watch_source},
   {"wait", f_wait},
   {"terminate", f_terminate},
   {"kill", f_kill},

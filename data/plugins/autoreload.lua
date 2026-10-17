@@ -145,7 +145,7 @@ core.add_thread(function()
     -- because we already hook this function above; we only
     -- need to check the file.
     watch:check(function() end)
-    coroutine.yield(0.05)
+    watch:wait(0.05)
   end
 end)
 

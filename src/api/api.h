@@ -14,4 +14,12 @@
 
 void api_load_libs(lua_State *L);
 
+// SDL event types pushed by background threads (0 until first used), which
+// system.poll_event() returns as "dirchange" and "readable"
+extern unsigned int DIR_EVENT_TYPE;
+extern unsigned int READWATCH_EVENT_TYPE;
+
+int f_watch_readable(lua_State *L);
+int f_unwatch_readable(lua_State *L);
+
 #endif

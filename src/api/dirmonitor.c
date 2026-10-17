@@ -5,7 +5,7 @@
 #include <string.h>
 #include <stdbool.h>
 
-static unsigned int DIR_EVENT_TYPE = 0;
+unsigned int DIR_EVENT_TYPE = 0;
 
 struct dirmonitor {
   SDL_Thread* thread;

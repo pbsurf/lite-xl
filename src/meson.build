@@ -4,6 +4,7 @@ lite_sources = [
     'api/regex.c',
     'api/system.c',
     'api/process.c',
+    'api/readwatch.c',
     'api/utf8.c',
     'arena_allocator.c',
     'renderer.c',

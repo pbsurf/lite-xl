@@ -39,6 +39,8 @@ upstream's `release/v2.1.x`. Additions to the editor:
   (`style.popup_shadow`).
 * **Status bar:** items that don't fit are dropped by priority, and items can open
   menus (e.g. indentation and line endings).
+* **Idle means idle:** background work (language servers, terminals, file watching)
+  wakes the editor only when there's data, so an idle editor uses no CPU.
 * **Touch:** tap to click, drag to scroll.
 * **Block select:** `doc:select-block`, bound to a click (e.g.
   `keymap.add { ["alt+1lclick"] = "doc:select-block" }`), selects a rectangle
@@ -50,8 +52,10 @@ upstream's `release/v2.1.x`. Additions to the editor:
   for key bindings (not listed by Do Command or menus),
   `View:get_name_style` (the font of a view's name in tabs and tab lists),
   `View:get_icon` (the icon shown with it; the treeview gives docs their file's),
-  `View:is_transient` (views the workspace doesn't restore), and
-  `system.open_url` (opens a URL with the system's default handler).
+  `View:is_transient` (views the workspace doesn't restore),
+  `system.open_url` (opens a URL with the system's default handler), and
+  threads that wait for events rather than time (`core.wait_for`, `core.wake`,
+  `core.watch_readable` with `process:watch_source`).
 
 ### Add-ons
 

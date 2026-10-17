@@ -182,6 +182,19 @@ top:
     return 0;
   }
 
+  // background threads' events (registered at run time, so not switch cases)
+  if (DIR_EVENT_TYPE && e.type == DIR_EVENT_TYPE) {
+    // a dirmonitor posts one every millisecond until its changes are checked
+    SDL_FlushEvent(DIR_EVENT_TYPE);
+    lua_pushstring(L, "dirchange");
+    return 1;
+  }
+  if (READWATCH_EVENT_TYPE && e.type == READWATCH_EVENT_TYPE) {
+    lua_pushstring(L, "readable");
+    lua_pushinteger(L, (lua_Integer) (intptr_t) e.user.data1);
+    return 2;
+  }
+
   switch (e.type) {
     case SDL_EVENT_QUIT:
       lua_pushstring(L, "quit");
@@ -1096,6 +1109,8 @@ static int f_path_compare(lua_State *L) {
 static const luaL_Reg lib[] = {
   { "poll_event",          f_poll_event          },
   { "wait_event",          f_wait_event          },
+  { "watch_readable",      f_watch_readable      },
+  { "unwatch_readable",    f_unwatch_readable    },
   { "set_cursor",          f_set_cursor          },
   { "set_window_title",    f_set_window_title    },
   { "set_window_mode",     f_set_window_mode     },
