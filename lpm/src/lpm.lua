@@ -572,7 +572,7 @@ global({
 global({ 
   "HOME", "USERDIR", "CACHEDIR", "CONFIGDIR", "BOTTLEDIR", "JSON", "TABLE", "HEADER", "RAW", "VERBOSE", "FILTRATION", "UPDATE", "MOD_VERSION", "QUIET", "FORCE", "REINSTALL", "CONFIG",
   "NO_COLOR", "AUTO_PULL_REMOTES", "ARCH", "ASSUME_YES", "NO_INSTALL_OPTIONAL", "TMPDIR", "DATADIR", "BINARY", "POST", "PROGRESS", "SYMLINK", "REPOSITORY", "EPHEMERAL",
-  "MASK", "settings", "repositories", "lite_xls", "system_bottle", "primary_lite_xl", "progress_bar_label", "write_progress_bar" 
+  "MASK", "UNINSTALL_NAMED", "UNINSTALLED", "settings", "repositories", "lite_xls", "system_bottle", "primary_lite_xl", "progress_bar_label", "write_progress_bar" 
 })
 global({ Addon = {}, Repository = {}, LiteXL = {}, Bottle = {}, lpm = {}, log = {} })
 
@@ -640,6 +640,7 @@ local function prompt(message)
     end
     if ASSUME_YES then return true end
     local response = io.stdin:read("*line")
+    if not response then error("no answer to \"" .. message .. "\" (no input); run in a terminal or pass --assume-yes") end
     if (response == "" or response:lower() == "y" or response:lower() == "n") then
       return not response:find("%S") or response:find("^%s*[yY]%s*$")
     end
@@ -1096,13 +1097,15 @@ function Addon:uninstall(bottle, uninstalling)
     return false
   end
   common.each(orphans, function(e) e:uninstall(bottle, common.merge(uninstalling or {}, { [self.id] = true })) end)
-  if self.type == "meta" then
-    log.action("Uninstalling meta " .. self.id .. ".", "green")
-  else
-    log.action("Uninstalling " .. self.type .. " located at " .. install_path, "green")
-  end
   local incompatible_addons = common.grep(bottle:installed_addons(), function(p) return p:depends_on(self) and (not uninstalling or not uninstalling[p.id]) end)
   local should_uninstall = #incompatible_addons == 0 or uninstalling
+  -- dependents named for uninstall too (or with --force) go without asking; others are
+  -- asked about, and --assume-yes doesn't answer for them
+  local unnamed = common.grep(incompatible_addons, function(p) return not (UNINSTALL_NAMED and UNINSTALL_NAMED[p.id]) end)
+  if not should_uninstall and (#unnamed == 0 or FORCE) then should_uninstall = true end
+  if not should_uninstall and ASSUME_YES then
+    error(self.id .. " is depended upon by " .. common.join(", ", common.map(unnamed, function(p) return p.id end)) .. "; name them to uninstall them too, or pass --force")
+  end
   if not should_uninstall then
     should_uninstall = prompt(self.id .. " is depended upon by " .. common.join(", ", common.map(incompatible_addons, function(p) return p.id end)) .. ". Remove as well?")
     if not should_uninstall and self:is_explicitly_installed(bottle) and prompt(self.id .. " is explicitly installed. Mark as non-explicit?") then
@@ -1114,7 +1117,13 @@ function Addon:uninstall(bottle, uninstalling)
     for i,addon in ipairs(incompatible_addons) do
       if not addon:uninstall(bottle, common.merge(uninstalling or {}, { [self.id] = true })) then return false end
     end
+    if self.type == "meta" then
+      log.action("Uninstalling meta " .. self.id .. ".", "green")
+    else
+      log.action("Uninstalling " .. self.type .. " located at " .. install_path, "green")
+    end
     common.rmrf(install_path)
+    if UNINSTALLED then UNINSTALLED[self.id] = true end
     return true
   end
   return false
@@ -2482,17 +2491,23 @@ end
 
 
 function lpm.addon_uninstall(type, ...)
-  for i, id in ipairs({ ... }) do
-    local addons = { system_bottle:get_addon(id, nil, { type = type }) }
-    if #addons == 0 then error("can't find addon " .. id) end
-    local installed_addons = common.grep(addons, function(e) return e:is_installed(system_bottle) and not e:is_core(system_bottle) end)
-    if #installed_addons == 0 then error("addon " .. id .. " not installed") end
-    for i, addon in ipairs(installed_addons) do
-      addon:uninstall(system_bottle)
-      settings.installed = common.grep(settings.installed, function(e) return e ~= addon.id end)
+  UNINSTALL_NAMED, UNINSTALLED = {}, {}
+  for i, id in ipairs({ ... }) do UNINSTALL_NAMED[id] = true end
+  local ok, err = pcall(function(...)
+    for i, id in ipairs({ ... }) do
+      local addons = { system_bottle:get_addon(id, nil, { type = type }) }
+      if #addons == 0 then error("can't find addon " .. id) end
+      local installed_addons = common.grep(addons, function(e) return e:is_installed(system_bottle) and not e:is_core(system_bottle) end)
+      -- a named addon may have gone already, as a dependent of one named before it
+      if #installed_addons == 0 and not UNINSTALLED[id] then error("addon " .. id .. " not installed") end
+      for i, addon in ipairs(installed_addons) do
+        addon:uninstall(system_bottle)
+      end
     end
-  end
+  end, ...)
+  settings.installed = common.grep(settings.installed, function(e) return not UNINSTALLED[e] end)
   lpm.settings_save()
+  if not ok then error(err, 0) end
 end
 
 function lpm.addon_reinstall(type, ...) for i, id in ipairs({ ... }) do pcall(lpm.addon_uninstall, type, id) end lpm.install(type, ...) end
