@@ -2742,6 +2742,20 @@ command.add(nil, {
   end
 })
 
+-- ctrl+click: the definition of the symbol under the mouse
+command.add(function(x, y)
+  local dv = get_active_docview()
+  if not (x and y and dv and dv.doc.lsp_open) then return false end
+  return x >= dv.position.x + dv:get_gutter_width(), dv, x, y
+end, {
+  ["lsp:goto-definition-at-mouse"] = function(dv, x, y)
+    local line, col = dv:resolve_screen_position(x, y)
+    dv.doc:set_selection(line, col)
+    lsp.goto_symbol(dv.doc, line, col)
+  end
+})
+command.hidden["lsp:goto-definition-at-mouse"] = true
+
 --
 -- Default Keybindings
 --
@@ -2752,6 +2766,7 @@ keymap.add {
   ["alt+shift+a"]       = "lsp:show-symbol-info-in-tab",
   ["alt+d"]             = "lsp:goto-definition",
   ["alt+shift+d"]       = "lsp:goto-implementation",
+  ["ctrl+1lclick"]      = "lsp:goto-definition-at-mouse",
   ["alt+s"]             = "lsp:view-document-symbols",
   ["alt+shift+s"]       = "lsp:find-workspace-symbol",
   ["alt+f"]             = "lsp:find-references",

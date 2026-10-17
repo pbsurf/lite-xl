@@ -39,7 +39,7 @@ Stuff that is currently implemented:
 * Code auto completion (**ctrl+space**)
 * Function signatures tooltip (**ctrl+shift+space**)
 * Current cursor symbol details tooltip on mouse hover or shortcut (**alt+a**)
-* Goto definition (**alt+d**)
+* Goto definition (**alt+d**, **ctrl+click**)
 * Goto implementation (**alt+shift+d**)
 * View/jump to current document symbols (**alt+s**)
 * Find workspace symbols (**alt+shift+s**)

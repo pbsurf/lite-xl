@@ -252,7 +252,7 @@ if menu_found then
   })
 end
 
--- before doc:split-cursor, which still gets ctrl+clicks off links
+-- added after lsp (plugins load by name), so links win over its ctrl+click
 keymap.add { ["ctrl+1lclick"] = "open-url:open-at-mouse" }
 
 
