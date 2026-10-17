@@ -63,8 +63,18 @@ config.plugins.search_ui = common.merge({
   }
 }, config.plugins.search_ui)
 
+-- The view searched: a DocView, or another view providing get_search_doc(),
+-- returning a read-only doc-like object (lines, get_selection, set_selection,
+-- get_text, sanitize_position, optionally search_backward: next and previous
+-- swapped), and scroll_to_line(line) (a terminal)
 ---@type core.docview
 local doc_view = nil
+
+---@return core.doc?
+local function target_doc(view)
+  if view.get_search_doc then return view:get_search_doc() end
+  return view.doc
+end
 
 ---@type widget
 local widget = Widget(nil, false)
@@ -368,7 +378,7 @@ local function toggle_scope(idx, not_set)
     filepicker:hide()
 
     if view_is_open(doc_view) and findtext:get_text() ~= "" then
-      Results:find(findtext:get_text(), doc_view.doc)
+      Results:find(findtext:get_text(), target_doc(doc_view))
     else
       Results:clear()
     end
@@ -442,7 +452,10 @@ local function project_search()
 end
 
 local find_enabled = true
-local function find(reverse)
+---@param reverse? boolean
+---@param typing? boolean the search text changed: a backward search should
+---still find the current match as it grows
+local function find(reverse, typing)
   if
     not view_is_open(doc_view) or findtext:get_text() == "" or not find_enabled
   then
@@ -450,15 +463,26 @@ local function find(reverse)
     return
   end
 
-  if core.last_active_view and core.last_active_view:is(DocView) then
-    doc_view = core.last_active_view
+  local last = core.last_active_view
+  if last and (last:is(DocView) or last.get_search_doc) then
+    doc_view = last
   end
 
-  local doc = doc_view.doc
+  local doc = target_doc(doc_view)
+  if not doc then return end
+  if doc.search_backward then reverse = not reverse end
   local cline1, ccol1, cline2, ccol2 = doc:get_selection()
   local line, col = cline1, ccol1
   if reverse and ccol2 < ccol1 then
     col = ccol2
+  end
+  -- going up, from where the current match would end with the new text, so
+  -- it's found again if it still matches
+  if typing and reverse and (cline1 ~= cline2 or ccol1 ~= ccol2) then
+    if cline2 < cline1 or (cline2 == cline1 and ccol2 < ccol1) then
+      cline1, ccol1 = cline2, ccol2
+    end
+    line, col = cline1, ccol1 + #findtext:get_text()
   end
 
   local query, use_pattern, use_regex = search_query()
@@ -512,7 +536,11 @@ local function find_replace()
   if core.last_active_view:is(DocView) then
     doc_view = core.last_active_view
   end
-  local doc = doc_view.doc
+  local doc = target_doc(doc_view)
+  if not doc.replace then
+    status:set_label("Read only")
+    return
+  end
 
   if not replaceinselection:is_checked() then
     local line1, col1, line2, col2 = doc:get_selection()
@@ -577,7 +605,7 @@ local function step_history(box, dir)
   box:set_text(idx == 0 and pos.draft or list[idx])
   stepping, find_enabled = false, true
   box.textview.doc:set_selection(1, math.huge)
-  if box == findtext and scope:get_selected() == 1 then find(false) end
+  if box == findtext and scope:get_selected() == 1 then find(false, true) end
 end
 
 local inside_node = false
@@ -652,17 +680,14 @@ local function show_find(av, toggle)
 
     widget:swap_active_child(findtext)
     doc_view = av
-    if view_is_open(doc_view) and doc_view.doc then
-      local doc_text = doc_view.doc:get_text(
-        table.unpack({ doc_view.doc:get_selection() })
-      )
+    local doc = view_is_open(doc_view) and target_doc(doc_view)
+    if doc then
+      local doc_text = doc:get_text(table.unpack({ doc:get_selection() }))
       if not matchcase:is_checked() then doc_text = doc_text:ulower() end
       local current_text = findtext:get_text()
       if not matchcase:is_checked() then current_text = current_text:ulower() end
       if doc_text and doc_text ~= "" and current_text ~= doc_text then
-        local original_text = doc_view.doc:get_text(
-          table.unpack({ doc_view.doc:get_selection() })
-        )
+        local original_text = doc:get_text(table.unpack({ doc:get_selection() }))
         find_enabled = false
         findtext:set_text(original_text)
         find_enabled = true
@@ -674,7 +699,7 @@ local function show_find(av, toggle)
       if findtext:get_text() ~= "" then
         findtext.textview.doc:set_selection(1, math.huge, 1, 1)
         if scope:get_selected() == 1 then
-          Results:find(findtext:get_text(), doc_view.doc)
+          Results:find(findtext:get_text(), doc)
         else
           Results:clear()
         end
@@ -697,7 +722,7 @@ end
 function findtext:on_change(text)
   if not stepping then history_pos[findtext].idx = 0 end
   if scope:get_selected() == 1 then
-    find(false)
+    find(false, true)
   end
 end
 
@@ -834,23 +859,34 @@ local function is_selected(doc, line, col1, col2)
   return false
 end
 
-local get_line_marks = DocView.get_line_marks
-function DocView:get_line_marks(line)
-  local marks = get_line_marks(self, line)
+---For Highlight All in a view that isn't a DocView (search_ui's module is the
+---pane widget): a matcher as get_matcher's and the color to mark matches,
+---while the view's matches are highlighted.
+---@return function? match
+---@return renderer.color? color
+function widget.highlight_matcher(view)
   if
     not highlightall:is_checked() or not widget:is_visible()
-    or scope:get_selected() ~= 1 or self:is(CommandView)
-    or not doc_view or self.doc ~= doc_view.doc
+    or scope:get_selected() ~= 1 or view ~= doc_view
   then
-    return marks
+    return nil
   end
-  local match = get_matcher()
-  if not match then return marks end
   local color = style.search_match
   if not color then
     local a = style.accent
     color = { a[1], a[2], a[3], 80 }
   end
+  return get_matcher(), color
+end
+
+local get_line_marks = DocView.get_line_marks
+function DocView:get_line_marks(line)
+  local marks = get_line_marks(self, line)
+  if self:is(CommandView) or not doc_view or self.doc ~= doc_view.doc then
+    return marks
+  end
+  local match, color = widget.highlight_matcher(doc_view)
+  if not match then return marks end
   for _, m in ipairs(match(self.doc.lines[line])) do
     if not is_selected(self.doc, line, m[1], m[2]) then
       table.insert(marks, { m[1], m[2], color })
@@ -1050,13 +1086,17 @@ function core.set_active_view(...)
     and
     widget:is_visible()
     and
-    view:extends(DocView)
-    and
-    view ~= findtext.textview
-    and
-    view ~= replacetext.textview
-    and
-    view.doc.filename
+    (
+      view:extends(DocView)
+      and
+      view ~= findtext.textview
+      and
+      view ~= replacetext.textview
+      and
+      view.doc.filename
+      or
+      view.get_search_doc
+    )
   then
     doc_view = view
     Results:clear()
@@ -1068,7 +1108,7 @@ end
 --------------------------------------------------------------------------------
 command.add(
   function()
-    if core.active_view:is(DocView) then
+    if core.active_view:is(DocView) or core.active_view.get_search_doc then
       return true, core.active_view
     elseif widget:is_visible() then
       return true, doc_view
@@ -1103,12 +1143,6 @@ command.add(function() return widget:is_visible() and not core.active_view:is(Co
     end
   end,
 
-  ["search-replace:file-search"] = function()
-    set_replace_shown(false)
-    toggle_scope(1)
-    command.perform "search-replace:show"
-  end,
-
   ["search-replace:next"] = function()
     remember_find()
     find(false)
@@ -1131,6 +1165,18 @@ command.add(function() return widget:is_visible() and not core.active_view:is(Co
 
   ["search-replace:toggle-in-selection"] = function()
     replaceinselection:set_checked(not replaceinselection:is_checked())
+  end
+})
+
+-- also from a view searched without being a DocView (a terminal binds it)
+command.add(function()
+  return widget:is_visible() and not core.active_view:is(CommandView)
+    or core.active_view.get_search_doc ~= nil
+end, {
+  ["search-replace:file-search"] = function()
+    set_replace_shown(false)
+    toggle_scope(1)
+    command.perform "search-replace:show"
   end
 })
 
@@ -1173,7 +1219,7 @@ command.add(
       if scope:get_selected() == 1 then
         if widget.child_active == findtext then
           ---@type core.doc
-          local doc = doc_view.doc
+          local doc = target_doc(doc_view)
           local line1, col1, line2, col2 = doc:get_selection()
           -- correct cursor position to properly search next result
           if line1 ~= line2 or col1 ~= col2 then

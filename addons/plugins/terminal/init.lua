@@ -9,6 +9,7 @@ local keymap = require "core.keymap"
 local StatusView = require "core.statusview"
 
 local terminal_native = require "plugins.terminal.libterminal"
+local search = require "plugins.terminal.search"
 
 
 local default_shell =  os.getenv("SHELL") or (PLATFORM == "Windows" and os.getenv("COMSPEC")) or (PLATFORM == "Windows" and "c:\\windows\\system32\\cmd.exe" or "sh")
@@ -42,6 +43,9 @@ local default_config = {
   delete = "\x1B[3~",
   -- the amount of lines you can emit before we start cutting them off
   scrollback_limit = 10000,
+  -- searching (the search_ui plugin) goes up from the bottom of what's shown:
+  -- newest output first; shift+enter/shift+f3 then go down
+  search_backward = true,
   -- the default height of the console drawer
   drawer_height = 300,
   -- the default console font. non-monsospace is unsupported
@@ -186,6 +190,11 @@ default_config.config_spec = set_config_default_values {
     path = "scrollback_limit", type = "NUMBER"
   },
   {
+    label = "Search Backward",
+    description = "Search from the bottom of what's shown upward, newest output first (search_ui plugin).",
+    path = "search_backward", type = "TOGGLE"
+  },
+  {
     label = "Change Other Options",
     description = "For other options such as the color palette, you can change them in the user module.",
     icon = "PLATFORM", type = "BUTTON", on_click = "core:open-user-module", path = "",
@@ -309,6 +318,8 @@ end
 function TerminalView:shift_selection_update()
   local shifts = self.terminal:update()
   if shifts and not self.focused then self.modified_since_last_focus = true end
+  -- counts output read, so a cached search doc knows it's out of date
+  if shifts then self.output_count = (self.output_count or 0) + 1 end
   if self.selection and shifts then
     self.selection[2] = self.selection[2] - shifts
     self.selection[4] = self.selection[4] - shifts
@@ -478,8 +489,11 @@ function TerminalView:draw()
 
 
     local selection = self:sorted_selection()
+    local matches, match_color = self:get_search_matches()
     for line_idx, line in ipairs(self.terminal:lines()) do
       local x = self.position.x + padding_x
+      local row_matches = matches and matches[line_idx - 1 - self.terminal:scrollback()]
+      local col = 0
       local should_draw_cursor = false
       if mode ~= "hidden" and core.active_view == self and line_idx - 1 == cursor_y and self.terminal:scrollback() == 0 then
         if mode == "blinking" then
@@ -552,9 +566,17 @@ function TerminalView:draw()
         for i, section in ipairs(sections) do
           if section then
             local background, foreground, text = table.unpack(section)
+            local chars = text:ulen() or #text
             if background and background ~= self.options.background then
-              renderer.draw_rect(x, y, (text:ulen() or #text)*space_width, lh, background)
+              renderer.draw_rect(x, y, chars*space_width, lh, background)
             end
+            for _, m in ipairs(row_matches or {}) do
+              local c1, c2 = math.max(m[1], col), math.min(m[2], col + chars)
+              if c2 > c1 then
+                renderer.draw_rect(x + (c1 - col)*space_width, y, (c2 - c1)*space_width, lh, match_color)
+              end
+            end
+            col = col + chars
             x = renderer.draw_text(font, text, x, y + text_y, foreground)
           end
         end
@@ -564,6 +586,41 @@ function TerminalView:draw()
     end
   end
   TerminalView.super.draw_scrollbar(self)
+end
+
+-- the search_ui plugin's Highlight All: the matches on screen, as lists of
+-- { col1, col2 (exclusive) } by row, and the color to mark them; nil if none
+function TerminalView:get_search_matches()
+  local search_ui = package.loaded["plugins.search_ui"]
+  local match, color = nil, nil
+  if search_ui and search_ui.highlight_matcher then
+    match, color = search_ui.highlight_matcher(self)
+  end
+  if not match then return nil end
+  local scrollback, total = self.terminal:scrollback()
+  local first, last = -scrollback, -scrollback + self.lines - 1
+  -- with rows around the screen, for lines wrapped over its edges
+  local margin = 20
+  local doc = search.snapshot(self, math.max(first - margin, -total),
+    math.min(last + margin, self.lines - 1))
+  local selection = self:sorted_selection()
+  local rows = {}
+  for line, text in ipairs(doc.lines) do
+    for _, m in ipairs(match(text)) do
+      local row1, col1 = doc:to_row_col(line, m[1])
+      local row2, col2 = doc:to_row_col(line, m[2], true)
+      local selected = selection and selection[1] == col1 and selection[2] == row1
+        and selection[3] == col2 and selection[4] == row2
+      if not selected and row2 >= first and row1 <= last then
+        for row = math.max(row1, first), math.min(row2, last) do
+          rows[row] = rows[row] or {}
+          table.insert(rows[row], { row == row1 and col1 or 0,
+            row == row2 and col2 or doc.row_segment[row].chars })
+        end
+      end
+    end
+  end
+  return rows, color
 end
 
 function TerminalView:convert_coordinates(x, y)
@@ -792,6 +849,36 @@ function TerminalView:get_text(line1, col1, line2, col2)
 end
 
 
+-- for the search_ui plugin: the text as a doc, rebuilt after new output
+function TerminalView:get_search_doc()
+  if not self.terminal then return nil end
+  local _, total = self.terminal:scrollback()
+  local key = table.concat({ self.output_count or 0, total, self.columns, self.lines }, ":")
+  if self.search_doc_key ~= key then
+    self.search_doc = search.snapshot(self, -total, self.lines - 1)
+    self.search_doc_key = key
+  end
+  self.search_doc.search_backward = config.plugins.terminal.search_backward
+  return self.search_doc
+end
+
+-- scrolls a line of the search doc into view: where the selection starts, if on it
+function TerminalView:scroll_to_line(line)
+  local doc = self:get_search_doc()
+  if not doc or not doc.lines[line] then return end
+  local row = doc:get_line_row(line)
+  local selection = self:sorted_selection()
+  if selection and doc.row_segment[selection[2]] and doc.row_segment[selection[2]].line == line then
+    row = selection[2]
+  end
+  local scrollback, total = self.terminal:scrollback()
+  if row < -scrollback or row > -scrollback + self.lines - 1 then
+    self.terminal:scrollback(common.clamp(math.floor(self.lines / 2) - row, 0, total))
+  end
+  core.redraw = true
+end
+
+
 command.add(function(amount)
   -- core.root_view.overlapping_view is not in any release yet (as of 2.1.3)
   local view = core.root_view.overlapping_view
@@ -893,7 +980,13 @@ command.add(active_terminal_predicate, {
   ["terminal:file-separator"] = function(view) view:input("\x1C") end,
   ["terminal:group-separator"] = function(view) view:input("\x1D") end,
   ["terminal:clear"] = function(view) view.terminal:clear() view:input(view.options.newline) end,
-  ["terminal:close-tab"] = function(view) view:close() end
+  ["terminal:close-tab"] = function(view) view:close() end,
+  -- the search_ui plugin's pane, searching this terminal
+  ["terminal:find"] = function(view)
+    if command.map["search-replace:file-search"] then
+      command.perform("search-replace:file-search")
+    end
+  end
 });
 if system.get_primary_selection then -- check for master vs. 2.1.7
   command.add(active_terminal_predicate, {
@@ -1002,6 +1095,7 @@ local keys = {
   ["alt+backspace"] = "terminal:alt-backspace",
   ["ctrl+shift+c"] = "terminal:copy",
   ["ctrl+shift+v"] = "terminal:paste",
+  ["ctrl+shift+f"] = "terminal:find",
   ["mclick"] = "terminal:primary-paste",
   ["wheel"] = "terminal:scroll",
   ["tab"] = "terminal:tab",

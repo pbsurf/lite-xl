@@ -74,8 +74,9 @@ another repository's version, uninstalls removing dependents under `--assume-yes
   match in `style.search_match`; the replace row shows only when wanted (ctrl+r,
   or the chevron left of the search box).
 * **terminal** (imported from lite-xl-terminal, with our changes): an integrated
-  terminal, as a drawer (shift+alt+t) or a tab (ctrl+shift+\`). Its C module is
-  built by our meson build and linked into the user dir by `scripts/run.sh`.
+  terminal, as a drawer (shift+alt+t) or a tab (ctrl+shift+\`). ctrl+shift+f
+  searches it in search_ui's pane, newest output first (`search_backward`). Its C
+  module is built by our meson build and linked into the user dir by `scripts/run.sh`.
 * **ephemeral_tabs** (imported, with our changes): a file opened from the tree
   replaces the previous preview tab until edited or double-clicked; preview tabs
   show their name in italic (in tabs, the tab menu and the ctrl+tab list) and
