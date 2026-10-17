@@ -1247,8 +1247,12 @@ static terminal_t* terminal_new(int columns, int lines, int scrollback_limit, co
       }
       if (!terminal->pid) {
         setenv("TERM", term_env, 1);
-        for (int i = 0; i < 256 && environment[i]; i += 2)
-          setenv(environment[i], environment[i+1], 1);
+        for (int i = 0; i < 256 && environment[i]; i += 2) {
+          if (environment[i+1])
+            setenv(environment[i], environment[i+1], 1);
+          else
+            unsetenv(environment[i]);
+        }
         // start in $PWD (shells trust PWD only if it names the current directory)
         const char* pwd = getenv("PWD");
         if (pwd && chdir(pwd)) {}
@@ -1435,7 +1439,8 @@ static int f_terminal_new(lua_State* L) {
     int i = 0;
     while (lua_next(L, 7) != 0 && i < 255) {
       environment[i] = strdup(lua_tostring(L, -2));
-      environment[i+1] = strdup(lua_tostring(L, -1));
+      // false unsets the variable
+      environment[i+1] = lua_isboolean(L, -1) && !lua_toboolean(L, -1) ? NULL : strdup(lua_tostring(L, -1));
       i = i + 2;
       lua_pop(L, 1);
     }
@@ -1444,8 +1449,14 @@ static int f_terminal_new(lua_State* L) {
   terminal_t* terminal = terminal_new(x, y, scrollback_limit, term_env, path, (const char**)arguments, (const char**)environment);
   for (int i = 1; i < 256 && arguments[i]; ++i)
     free(arguments[i]);
-  for (int i = 1; i < 256 && environment[i]; ++i)
-    free(environment[i]);
+  #if _WIN32
+    free(environment[0]);
+  #else
+    for (int i = 0; i < 256 && environment[i]; i += 2) {
+      free(environment[i]);
+      free(environment[i+1]);
+    }
+  #endif
   if (!terminal)
     return luaL_error(L, "error creating terminal: %s", terminal_get_last_error());
   terminal->debug = debug;

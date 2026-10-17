@@ -27,9 +27,16 @@ local default_config = {
   shell = default_shell,
   -- the arguments to pass to your shell; does not work on windows.
   arguments = { },
-  -- the environmental variable to set on shell instantiation
-  environment = { 
+  -- the environmental variable to set on shell instantiation; false unsets one
+  environment = {
     PWD = function() return core.root_project and core.root_project().path or core.project_dir end,
+    -- what the editor was started from isn't what its shells run in (e.g. a
+    -- shell in tmux would talk to the editor's tmux session)
+    TMUX = false,
+    TMUX_PANE = false,
+    TERM_PROGRAM = "lite-xl",
+    TERM_PROGRAM_VERSION = VERSION,
+    COLORTERM = "truecolor",
   },
   -- the amount of time between line scrolling when we're dragging offscreen
   scrolling_speed = 0.01,
@@ -304,7 +311,7 @@ function TerminalView:new(options)
   if PLATFORM == "Windows" then
     local t = {}
     for k,v in pairs(common.merge(terminal_native.getenv(), self.options.environment)) do
-      table.insert(t, k .. "=" .. v)
+      if v ~= false then table.insert(t, k .. "=" .. v) end
     end
     self.options.environment = table.concat(t, "\0") .. "\0\0"
   end
