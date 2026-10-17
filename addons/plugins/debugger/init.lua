@@ -197,7 +197,10 @@ config.plugins.debugger = common.merge({
   -- syntax names of the files that get a breakpoint column; languages gdb debugs
   breakpoint_syntaxes = {
     "C", "C++", "Objective-C", "D", "Go", "Rust", "Fortran", "Zig", "Odin", "Nim"
-  }
+  },
+  -- bind the keys that work without a debug session: f8 (start), f9 (toggle
+  -- breakpoint), f12 (toggle the drawer); the commands stay available
+  idle_keys = true
 }, config.plugins.debugger)
 
 for i,v in ipairs(config.plugins.debugger.skip_files) do table.insert(model.skip_files, v) end
@@ -791,11 +794,17 @@ keymap.add {
   ["f7"]                 = "debugger:step-over",
   ["shift+f7"]           = "debugger:step-into",
   ["ctrl+f7"]            = "debugger:step-out",
-  ["f8"]                 = { "debugger:start-or-continue", "debugger:halt" },
+  ["f8"]                 = { "debugger:continue", "debugger:halt" },
   ["shift+f8"]           = "debugger:terminate",
-  ["f9"]                 = "debugger:toggle-line-breakpoint",
-  ["f12"]                = "debugger:toggle-drawer",
 }
+
+if config.plugins.debugger.idle_keys then
+  keymap.add {
+    ["f8"]               = "debugger:start-or-continue",
+    ["f9"]               = "debugger:toggle-line-breakpoint",
+    ["f12"]              = "debugger:toggle-drawer",
+  }
+end
 
 if has_terminal then
   command.add(function()
