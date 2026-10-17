@@ -25,6 +25,24 @@ local function check_directory_path(path)
     return abs_path
 end
 
+-- the system's file dialogs: callback gets the paths picked
+local function dialog_result(callback)
+  return function(status, result)
+    if status == "accept" then
+      callback(result)
+    elseif status == "error" then
+      core.error("Error while opening dialog: %s", result or "")
+    end
+  end
+end
+
+local function open_directory_dialog(title, allow_many, callback)
+  core.open_directory_dialog(dialog_result(callback), {
+    title = title, allow_many = allow_many,
+    default_location = common.dirname(core.project_dir),
+  })
+end
+
 command.add(nil, {
   ["core:quit"] = function()
     core.quit()
@@ -175,6 +193,46 @@ command.add(nil, {
           end
         end,
     })
+  end,
+
+  ["core:open-file-picker"] = function()
+    local doc = core.active_view.doc
+    core.open_file_dialog(dialog_result(function(filenames)
+      for _, filename in ipairs(filenames) do
+        core.root_view:open_doc(core.open_doc(filename))
+      end
+    end), {
+      allow_many = true,
+      default_location = doc and doc.abs_filename and common.dirname(doc.abs_filename)
+        or core.project_dir,
+    })
+  end,
+
+  ["core:change-project-folder-picker"] = function()
+    open_directory_dialog("Change Project Folder", false, function(dirs)
+      if dirs[1] == core.project_dir then return end
+      core.confirm_close_docs(core.docs, function(dirpath)
+        core.open_folder_project(dirpath)
+      end, dirs[1])
+    end)
+  end,
+
+  ["core:open-project-folder-picker"] = function()
+    open_directory_dialog("Open Project", false, function(dirs)
+      if dirs[1] == core.project_dir then
+        core.error("Directory %q is currently opened", dirs[1])
+        return
+      end
+      system.exec(string.format("%q %q", EXEFILE, dirs[1]))
+    end)
+  end,
+
+  ["core:add-directory-picker"] = function()
+    open_directory_dialog("Add Directory", true, function(dirs)
+      for _, dir in ipairs(dirs) do
+        core.add_project_directory(system.absolute_path(dir))
+      end
+    end)
   end,
 
   ["core:open-log"] = function()

@@ -1502,6 +1502,9 @@ function core.try(fn, ...)
   return false, err
 end
 
+-- the open file dialogs' callbacks, by id (see core.open_file_dialog)
+local file_dialogs = {}
+
 function core.on_event(type, ...)
   local did_keymap = false
   -- typing, clicking or scrolling hides a message (before the event, which may
@@ -1556,6 +1559,11 @@ function core.on_event(type, ...)
     core.window_mode = type == "restored" and "normal" or type
   elseif type == "filedropped" then
     core.root_view:on_file_dropped(...)
+  elseif type == "dialogfinished" then
+    local id, status, result = ...
+    local callback = file_dialogs[id]
+    file_dialogs[id] = nil
+    if callback then callback(status, result) end
   elseif type == "focuslost" then
     core.root_view:on_focus_lost(...)
   elseif type == "quit" then
@@ -1742,6 +1750,34 @@ end
 
 function core.blink_reset()
   core.blink_start = system.get_time()
+end
+
+
+-- The system's file dialogs (from upstream f580d020). They return at once; the
+-- callback gets status "accept" and a list of paths, "cancel", or "error" and a
+-- message. Options (all optional): default_location, title, accept_label,
+-- cancel_label; allow_many for the open dialogs; filters for the file dialogs,
+-- a list of { name = "Lua", pattern = "lua;luac" } (* for all).
+local last_dialog_id = 0
+local function open_dialog(fn, callback, options)
+  last_dialog_id = last_dialog_id + 1
+  file_dialogs[last_dialog_id] = callback
+  fn(last_dialog_id, options)
+end
+
+---@param callback fun(status: "accept"|"cancel"|"error", result: string[]|string|nil)
+function core.open_file_dialog(callback, options)
+  open_dialog(system.open_file_dialog, callback, options)
+end
+
+---@param callback fun(status: "accept"|"cancel"|"error", result: string[]|string|nil)
+function core.open_directory_dialog(callback, options)
+  open_dialog(system.open_directory_dialog, callback, options)
+end
+
+---@param callback fun(status: "accept"|"cancel"|"error", result: string[]|string|nil)
+function core.save_file_dialog(callback, options)
+  open_dialog(system.save_file_dialog, callback, options)
 end
 
 

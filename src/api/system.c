@@ -208,6 +208,38 @@ static void push_win32_error(lua_State *L, DWORD rc) {
 }
 #endif
 
+// posted by file dialogs (SDL calls their callbacks from any thread)
+static unsigned int DIALOG_EVENT_TYPE = 0;
+typedef enum { DIALOG_OK, DIALOG_CANCEL, DIALOG_ERROR } DialogState;
+
+static int push_dialog_event(lua_State *L, SDL_Event *e) {
+  lua_pushstring(L, "dialogfinished");
+  lua_pushinteger(L, (lua_Integer) (intptr_t) e->user.data1);
+  switch ((DialogState) e->user.code) {
+    case DIALOG_OK: {
+      // the paths, one after another, each NUL-terminated; an empty one ends them
+      lua_pushstring(L, "accept");
+      lua_newtable(L);
+      const char *path = e->user.data2;
+      for (int i = 1; *path; i++) {
+        lua_pushstring(L, path);
+        lua_rawseti(L, -2, i);
+        path += strlen(path) + 1;
+      }
+      SDL_free(e->user.data2);
+      return 4;
+    }
+    case DIALOG_CANCEL:
+      lua_pushstring(L, "cancel");
+      return 3;
+    default:
+      lua_pushstring(L, "error");
+      lua_pushstring(L, e->user.data2 ? e->user.data2 : "out of memory");
+      SDL_free(e->user.data2);
+      return 4;
+  }
+}
+
 static int f_poll_event(lua_State *L) {
   char buf[16];
   float mx, my;
@@ -232,6 +264,8 @@ top:
     lua_pushinteger(L, (lua_Integer) (intptr_t) e.user.data1);
     return 2;
   }
+  if (DIALOG_EVENT_TYPE && e.type == DIALOG_EVENT_TYPE)
+    return push_dialog_event(L, &e);
 
   switch (e.type) {
     case SDL_EVENT_QUIT:
@@ -1197,6 +1231,118 @@ static int f_path_compare(lua_State *L) {
 }
 
 
+// File dialogs, from upstream lite-xl f580d020 (without its window argument and
+// custom event registry): they return at once, and the result comes as a
+// "dialogfinished" event with the id given; see core.open_file_dialog.
+
+typedef struct {
+  intptr_t id;
+  SDL_DialogFileFilter *filters;
+  int n_filters;
+} DialogData;
+
+static void free_dialog_data(DialogData *dd) {
+  for (int i = 0; i < dd->n_filters; i++) {
+    SDL_free((char *) dd->filters[i].name);
+    SDL_free((char *) dd->filters[i].pattern);
+  }
+  SDL_free(dd->filters);
+  SDL_free(dd);
+}
+
+static void dialog_callback(void *userdata, const char * const *filelist, int filter) {
+  DialogData *dd = userdata;
+  SDL_Event event;
+  SDL_zero(event);
+  event.type = DIALOG_EVENT_TYPE;
+  event.user.data1 = (void *) dd->id;
+  // the filters had to last until now
+  free_dialog_data(dd);
+  if (filelist == NULL) {
+    event.user.code = DIALOG_ERROR;
+    event.user.data2 = SDL_strdup(SDL_GetError());
+  } else {
+    // empty paths are left out (zenity's cancel can give one); none is a cancel
+    size_t bytes = 1;
+    for (int i = 0; filelist[i]; i++) if (*filelist[i]) bytes += strlen(filelist[i]) + 1;
+    char *data = event.user.data2 = bytes > 1 ? SDL_malloc(bytes) : NULL;
+    if (bytes == 1) {
+      event.user.code = DIALOG_CANCEL;
+    } else if (!data) {
+      event.user.code = DIALOG_ERROR;
+    } else {
+      event.user.code = DIALOG_OK;
+      for (int i = 0; filelist[i]; i++) {
+        if (!*filelist[i]) continue;
+        size_t len = strlen(filelist[i]) + 1;
+        memcpy(data, filelist[i], len);
+        data += len;
+      }
+      *data = '\0';
+    }
+  }
+  if (!SDL_PushEvent(&event)) SDL_free(event.user.data2);
+}
+
+static int open_dialog(lua_State *L, SDL_FileDialogType type) {
+  intptr_t id = luaL_checkinteger(L, 1);
+  bool has_options = !lua_isnoneornil(L, 2);
+  if (has_options) luaL_checktype(L, 2, LUA_TTABLE);
+  DialogData *dd = SDL_calloc(1, sizeof(DialogData));
+  if (!dd) return luaL_error(L, "out of memory");
+  dd->id = id;
+  SDL_PropertiesID props = SDL_CreateProperties();
+  if (!props) {
+    SDL_free(dd);
+    return luaL_error(L, "cannot create SDL properties: %s", SDL_GetError());
+  }
+  SDL_SetPointerProperty(props, SDL_PROP_FILE_DIALOG_WINDOW_POINTER, window_renderer.window);
+  if (has_options) {
+    // SDL copies the strings; the filters must last until the callback
+    static const struct { const char *field, *prop; } strings[] = {
+      { "default_location", SDL_PROP_FILE_DIALOG_LOCATION_STRING },
+      { "title",            SDL_PROP_FILE_DIALOG_TITLE_STRING },
+      { "accept_label",     SDL_PROP_FILE_DIALOG_ACCEPT_STRING },
+      { "cancel_label",     SDL_PROP_FILE_DIALOG_CANCEL_STRING },
+    };
+    for (size_t i = 0; i < sizeof(strings) / sizeof(*strings); i++) {
+      lua_getfield(L, 2, strings[i].field);
+      if (lua_isstring(L, -1)) SDL_SetStringProperty(props, strings[i].prop, lua_tostring(L, -1));
+      lua_pop(L, 1);
+    }
+    if (type != SDL_FILEDIALOG_SAVEFILE) {
+      lua_getfield(L, 2, "allow_many");
+      SDL_SetBooleanProperty(props, SDL_PROP_FILE_DIALOG_MANY_BOOLEAN, lua_toboolean(L, -1));
+      lua_pop(L, 1);
+    }
+    if (type != SDL_FILEDIALOG_OPENFOLDER) {
+      lua_getfield(L, 2, "filters");
+      int n = lua_istable(L, -1) ? (int) luaL_len(L, -1) : 0;
+      if (n > 0 && (dd->filters = SDL_calloc(n, sizeof(SDL_DialogFileFilter)))) {
+        for (int i = 0; i < n; i++, dd->n_filters++) {
+          lua_geti(L, -1, i + 1);
+          lua_getfield(L, -1, "name");
+          lua_getfield(L, -2, "pattern");
+          dd->filters[i].name = SDL_strdup(luaL_optstring(L, -2, ""));
+          dd->filters[i].pattern = SDL_strdup(luaL_optstring(L, -1, "*"));
+          lua_pop(L, 3);
+        }
+        SDL_SetPointerProperty(props, SDL_PROP_FILE_DIALOG_FILTERS_POINTER, dd->filters);
+        SDL_SetNumberProperty(props, SDL_PROP_FILE_DIALOG_NFILTERS_NUMBER, dd->n_filters);
+      }
+      lua_pop(L, 1);
+    }
+  }
+  SDL_ShowFileDialogWithProperties(type, dialog_callback, dd, props);
+  SDL_DestroyProperties(props);
+  return 0;
+}
+
+static int f_open_file_dialog(lua_State *L) { return open_dialog(L, SDL_FILEDIALOG_OPENFILE); }
+static int f_save_file_dialog(lua_State *L) { return open_dialog(L, SDL_FILEDIALOG_SAVEFILE); }
+static int f_open_directory_dialog(lua_State *L) { return open_dialog(L, SDL_FILEDIALOG_OPENFOLDER); }
+
+
 static const luaL_Reg lib[] = {
   { "poll_event",          f_poll_event          },
   { "wait_event",          f_wait_event          },
@@ -1233,11 +1379,15 @@ static const luaL_Reg lib[] = {
   { "load_native_plugin",  f_load_native_plugin  },
   { "path_compare",        f_path_compare        },
   { "get_fs_type",         f_get_fs_type         },
+  { "open_file_dialog",      f_open_file_dialog      },
+  { "save_file_dialog",      f_save_file_dialog      },
+  { "open_directory_dialog", f_open_directory_dialog },
   { NULL, NULL }
 };
 
 
 int luaopen_system(lua_State *L) {
+  DIALOG_EVENT_TYPE = SDL_RegisterEvents(1);
   luaL_newmetatable(L, API_TYPE_NATIVE_PLUGIN); 
   lua_pushcfunction(L, f_library_gc);
   lua_setfield(L, -2, "__gc");

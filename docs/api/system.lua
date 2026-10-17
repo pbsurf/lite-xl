@@ -366,4 +366,34 @@ function system.load_native_plugin(name, path) end
 function system.path_compare(path1, type1, path2, type2) end
 
 
+---
+---Opens the system's file picker and returns at once; when it closes, a
+---"dialogfinished" event brings `id`, a status ("accept", "cancel" or "error")
+---and the paths picked or an error message.
+---
+---**NOTE**: don't use this directly, use `core.open_file_dialog` instead.
+---
+---Options (all optional): default_location, title, accept_label, cancel_label,
+---allow_many (open dialogs), filters (file dialogs): a list of
+---`{ name = string, pattern = string }`, patterns being extensions separated
+---by `;`, or `*`.
+---
+---@param id integer
+---@param options? table
+function system.open_file_dialog(id, options) end
+
+---
+---Opens the system's directory picker; see `system.open_file_dialog`.
+---
+---@param id integer
+---@param options? table
+function system.open_directory_dialog(id, options) end
+
+---
+---Opens the system's save file picker; see `system.open_file_dialog`.
+---
+---@param id integer
+---@param options? table
+function system.save_file_dialog(id, options) end
+
 return system

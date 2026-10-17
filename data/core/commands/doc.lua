@@ -526,6 +526,23 @@ local commands = {
     core.save_doc_as(dv.doc)
   end,
 
+  -- Save As with the system's file dialog
+  ["doc:save-as-picker"] = function(dv)
+    local doc = dv.doc
+    local last_doc = core.last_active_view and core.last_active_view.doc
+    core.save_file_dialog(function(status, result)
+      if status == "accept" then
+        core.save_doc(doc, result[1])
+      elseif status == "error" then
+        core.error("Error while opening dialog: %s", result or "")
+      end
+    end, {
+      default_location = doc.abs_filename
+        or last_doc and last_doc.abs_filename and common.dirname(last_doc.abs_filename)
+        or core.project_dir,
+    })
+  end,
+
   ["doc:save"] = function(dv)
     if dv.doc.filename then
       core.save_doc(dv.doc)
