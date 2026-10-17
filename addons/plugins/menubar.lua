@@ -872,13 +872,16 @@ function keymap.on_key_released(k, ...)
   on_key_released(k, ...)
   if is_alt(k) and alt_down then
     alt_down = false
-    if not alt_used then
+    -- Alt+Tab: losing focus, SDL releases the keys held before telling us
+    -- (focuslost, below), so this release comes first; but focus is gone
+    if not alt_used and system.window_has_focus() then
       if state.active then menubar.hide() else menubar.show(true) end
     end
   end
 end
 
--- Alt+Tab: the window loses focus with Alt down
+-- Alt+Tab: the window loses focus with Alt down (where Alt's release comes
+-- after)
 local root_on_focus_lost = RootView.on_focus_lost
 function RootView:on_focus_lost(...)
   alt_used = true
