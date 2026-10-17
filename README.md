@@ -41,6 +41,10 @@ upstream's `release/v2.1.x`. Additions to the editor:
   menus (e.g. indentation and line endings).
 * **Idle means idle:** background work (language servers, terminals, file watching)
   wakes the editor only when there's data, so an idle editor uses no CPU.
+* **Key bindings:** those made in the user module come before plugins'
+  (no matter that plugins load later), and `config.plugin_keys` chooses which
+  of a plugin's bindings to keep (`{ build = { "f6" }, debugger = false }`);
+  `keymap.origin` records which plugin added each.
 * **Touch:** tap to click, drag to scroll.
 * **Block select:** `doc:select-block`, bound to a click (e.g.
   `keymap.add { ["alt+1lclick"] = "doc:select-block" }`), selects a rectangle

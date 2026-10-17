@@ -118,22 +118,106 @@ local function remove_duplicates(map)
   end
 end
 
----Add bindings by replacing commands that were previously assigned to a shortcut.
----@param map keymap.map
-function keymap.add_direct(map)
-  for stroke, commands in pairs(map) do
-    stroke = normalize_stroke(stroke)
+---Where each binding came from: `keymap.origin[stroke][command]` is the name
+---of the plugin that added it, "user" for the user and project modules, or
+---"core".
+---@type table<keymap.shortcut, table<keymap.command, string>>
+keymap.origin = {}
 
-    if type(commands) == "string" or type(commands) == "function" then
-      commands = { commands }
-    end
-    if keymap.map[stroke] then
-      for _, cmd in ipairs(keymap.map[stroke]) do
-        remove_only(keymap.reverse_map, cmd, stroke)
+-- chunk names, with "/" separators: package.path mixes them on Windows
+local function slashes(path) return (path:gsub("\\", "/")) end
+local plugin_dirs = { slashes(USERDIR .. "/plugins/"), slashes(DATADIR .. "/plugins/") }
+local user_module = slashes("@" .. USERDIR .. "/init.lua")
+
+---Who is adding bindings: the first plugin or user module in the call stack.
+---@return string
+local function get_origin()
+  local level = 3 -- the caller of keymap.add
+  while true do
+    local info = debug.getinfo(level, "S")
+    if not info then return "core" end
+    local source = slashes(info.source)
+    for _, dir in ipairs(plugin_dirs) do
+      if source:sub(2, #dir + 1) == dir then
+        return (source:sub(#dir + 2):match("^[^/]+"):gsub("%.lua$", ""))
       end
     end
-    keymap.map[stroke] = commands
-    for _, cmd in ipairs(commands) do
+    if source == user_module or source:find("%.lite_project%.lua$") then
+      return "user"
+    end
+    level = level + 1
+  end
+end
+
+
+---@param stroke string
+---@return string
+local function to_stroke(stroke)
+  if macos then
+    stroke = stroke:gsub("%f[%a]ctrl%f[%A]", "cmd")
+  end
+  return normalize_stroke(stroke)
+end
+
+
+---Whether config.plugin_keys keeps a binding a plugin adds.
+local function is_kept(origin, stroke, cmd)
+  local keep = config.plugin_keys and config.plugin_keys[origin]
+  if keep == nil or keep == true or origin == "user" or origin == "core" then
+    return true
+  end
+  for _, k in ipairs(keep or {}) do
+    if k == cmd or (type(k) == "string" and to_stroke(k) == stroke) then
+      return true
+    end
+  end
+  return false
+end
+
+
+---Binds commands to a normalized stroke, before (or, overwriting, instead of)
+---those bound to it already; but a plugin's go after the user's, which stay.
+---The user overwrites only core's and their own, the same whether plugins have
+---loaded yet or not: config.plugin_keys removes plugins' bindings.
+---@param origin string
+---@param stroke keymap.shortcut
+---@param commands keymap.command[]
+---@param overwrite? boolean
+local function bind(origin, stroke, commands, overwrite)
+  local kept = {}
+  for _, cmd in ipairs(commands) do
+    if is_kept(origin, stroke, cmd) then table.insert(kept, cmd) end
+  end
+  -- all left out: don't overwrite with nothing (an empty list still clears)
+  if #kept == 0 and #commands > 0 then return end
+  local list = keymap.map[stroke] or {}
+  local origins = keymap.origin[stroke] or {}
+  keymap.map[stroke], keymap.origin[stroke] = list, origins
+  if overwrite then
+    for i = #list, 1, -1 do
+      local cmd = list[i]
+      local user = origins[cmd] == "user"
+      local plugin = origins[cmd] and not user and origins[cmd] ~= "core"
+      if (origin == "user" and not plugin) or (origin ~= "user" and not user) then
+        remove_only(keymap.reverse_map, cmd, stroke)
+        origins[cmd] = nil
+        table.remove(list, i)
+      end
+    end
+  end
+  local pos = 1
+  if origin ~= "user" then
+    for i, cmd in ipairs(list) do
+      if origins[cmd] == "user" then pos = i + 1 end
+    end
+  end
+  for _, cmd in ipairs(kept) do
+    local bound = false
+    for _, c in ipairs(list) do bound = bound or c == cmd end
+    if not bound then
+      table.insert(list, pos, cmd)
+      pos = pos + 1
+      origins[cmd] = origin
       keymap.reverse_map[cmd] = keymap.reverse_map[cmd] or {}
       table.insert(keymap.reverse_map[cmd], stroke)
     end
@@ -141,37 +225,32 @@ function keymap.add_direct(map)
 end
 
 
+---Add bindings by replacing commands that were previously assigned to a shortcut.
+---@param map keymap.map
+function keymap.add_direct(map)
+  local origin = get_origin()
+  for stroke, commands in pairs(map) do
+    if type(commands) == "string" or type(commands) == "function" then
+      commands = { commands }
+    end
+    bind(origin, normalize_stroke(stroke), commands, true)
+  end
+end
+
+
 ---Adds bindings by appending commands to already registered shortcut or by
----replacing currently assigned commands if overwrite is specified.
+---replacing currently assigned commands if overwrite is specified. Bindings
+---plugins add go after the user's, and are filtered by config.plugin_keys.
 ---@param map keymap.map
 ---@param overwrite? boolean
 function keymap.add(map, overwrite)
+  local origin = get_origin()
   -- when appending, commands already bound to a stroke aren't added again; when
   -- overwriting they are the new list, so must stay
   if not overwrite then remove_duplicates(map) end
   for stroke, commands in pairs(map) do
     if type(commands) ~= "table" then commands = { commands } end
-    if macos then
-      stroke = stroke:gsub("%f[%a]ctrl%f[%A]", "cmd")
-    end
-    stroke = normalize_stroke(stroke)
-    if overwrite then
-      if keymap.map[stroke] then
-        for _, cmd in ipairs(keymap.map[stroke]) do
-          remove_only(keymap.reverse_map, cmd, stroke)
-        end
-      end
-      keymap.map[stroke] = commands
-    else
-      keymap.map[stroke] = keymap.map[stroke] or {}
-      for i = #commands, 1, -1 do
-        table.insert(keymap.map[stroke], 1, commands[i])
-      end
-    end
-    for _, cmd in ipairs(commands) do
-      keymap.reverse_map[cmd] = keymap.reverse_map[cmd] or {}
-      table.insert(keymap.reverse_map[cmd], stroke)
-    end
+    bind(origin, to_stroke(stroke), commands, overwrite)
   end
 end
 
@@ -183,6 +262,9 @@ function keymap.unbind(shortcut, cmd)
   shortcut = normalize_stroke(shortcut)
   remove_only(keymap.map, shortcut, cmd)
   remove_only(keymap.reverse_map, cmd, shortcut)
+  if keymap.origin[shortcut] then
+    if cmd then keymap.origin[shortcut][cmd] = nil else keymap.origin[shortcut] = nil end
+  end
 end
 
 

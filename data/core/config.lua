@@ -61,6 +61,13 @@ config.borderless = false
 config.tab_close_button = true
 config.max_clicks = 3
 
+-- key bindings of plugins, by plugin name: false for none of them, or a list
+-- of the strokes and commands to keep (e.g. { "f6", "build:clean" }); plugins
+-- not listed keep all their bindings. Set it in the user module, which loads
+-- before plugins; their commands remain, for the command palette and menus.
+---@type table<string, false|string[]>
+config.plugin_keys = {}
+
 -- set as true to be able to test non supported plugins
 config.skip_plugins_version = false
 
