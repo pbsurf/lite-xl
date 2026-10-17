@@ -146,6 +146,47 @@ end
 
 local git_watch = dirwatch.new()
 
+local function same_set(a, b)
+  for k in pairs(a) do if not b[k] then return false end end
+  for k in pairs(b) do if not a[k] then return false end end
+  return true
+end
+
+-- The directory's submodules (initialized ones, nested ones too) in it, as
+-- NUL-terminated pairs of path (relative to the directory) and git directory
+local function submodules_args(dir_name)
+  return { "git", "-C", dir_name, "submodule", "--quiet", "foreach", "--recursive",
+           'printf "%s\\0%s\\0" "$displaypath" "$(git rev-parse --absolute-git-dir)"' }
+end
+
+-- Asks git about the directory with run (read_command or run_command): sets
+-- the repo's ignored, untracked, summary and changes. git status doesn't look
+-- into submodules, so each is asked too, and what it says about its files is
+-- added to the sets (the summary stays the directory's repository's). Returns
+-- whether the sets of ignored paths changed.
+local function query(repo, dir_name, run)
+  local status = run(status_args(dir_name))
+  if not status then return false end
+  local ignored, untracked, summary, changes = parse_status(status, repo.prefix)
+  local subs = run(submodules_args(dir_name)) or ""
+  for path, git_dir in subs:gmatch("([^\0]*)\0([^\0]*)\0") do
+    if path:sub(1, 3) ~= "../" then
+      local sub_status = run(status_args(dir_name .. PATHSEP .. path))
+      if sub_status then
+        local base = (PATHSEP ~= "/" and path:gsub("/", PATHSEP) or path) .. PATHSEP
+        local sub_ignored, sub_untracked, _, sub_changes = parse_status(sub_status, "")
+        for p in pairs(sub_ignored) do ignored[base .. p] = true end
+        for p in pairs(sub_untracked) do untracked[base .. p] = true end
+        for p, xy in pairs(sub_changes) do changes[base .. p] = xy end
+      end
+      git_watch:watch(git_dir)
+    end
+  end
+  local changed = not repo.ignored or not same_set(ignored, repo.ignored)
+  repo.ignored, repo.untracked, repo.summary, repo.changes = ignored, untracked, summary, changes
+  return changed
+end
+
 local function get_repo(dir_name)
   local repo = repos[dir_name]
   if repo ~= nil then return repo end
@@ -153,10 +194,10 @@ local function get_repo(dir_name)
   local out = read_command({ "git", "-C", dir_name, "rev-parse", "--show-prefix", "--absolute-git-dir" })
   local prefix, git_dir = (out or ""):match("^([^\n]*)\n([^\n]+)\n")
   if git_dir then
-    local status = read_command(status_args(dir_name))
-    if status then
-      repo = { git_dir = git_dir, prefix = prefix }
-      repo.ignored, repo.untracked, repo.summary, repo.changes = parse_status(status, prefix)
+    local r = { git_dir = git_dir, prefix = prefix }
+    query(r, dir_name, read_command)
+    if r.ignored then
+      repo = r
       -- the index and HEAD change with add, rm, commit, checkout...
       git_watch:watch(git_dir)
     end
@@ -177,12 +218,6 @@ function dirwatch.project_file_filter(dir, info, ignore_compiled)
 end
 
 
-local function same_set(a, b)
-  for k in pairs(a) do if not b[k] then return false end end
-  for k in pairs(b) do if not a[k] then return false end end
-  return true
-end
-
 local function is_project_dir(dir_name)
   for _, dir in ipairs(core.project_directories) do
     if dir.name == dir_name then return true end
@@ -196,13 +231,8 @@ local function update()
   local rescan = false
   for dir_name, repo in pairs(repos) do
     if repo and is_project_dir(dir_name) then
-      local out = run_command(status_args(dir_name))
-      if out then
-        local ignored, untracked, summary, changes = parse_status(out, repo.prefix)
-        rescan = rescan or not same_set(ignored, repo.ignored)
-        repo.ignored, repo.untracked, repo.summary, repo.changes = ignored, untracked, summary, changes
-        core.redraw = true
-      end
+      rescan = query(repo, dir_name, run_command) or rescan
+      core.redraw = true
     end
   end
   if rescan then core.rescan_project_directories() end
