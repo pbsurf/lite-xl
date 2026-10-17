@@ -1286,7 +1286,9 @@ static void output_line(lua_State* L, buffer_char_t* start, buffer_char_t* end, 
       );
       lua_pushinteger(L, packed);
       lua_rawseti(L, -2, ++group);
-      lua_pushlstring(L, text_buffer, last_nonzero_codepoint);
+      // cells never written to are spaces, trimmed only at the end of the line:
+      // a later run (e.g. after a cursor move) starts where its cells are
+      lua_pushlstring(L, text_buffer, start >= end ? last_nonzero_codepoint : block_size);
       if (!overflows && start >= end) {
         lua_pushliteral(L, "\n");
         lua_concat(L, 2);
