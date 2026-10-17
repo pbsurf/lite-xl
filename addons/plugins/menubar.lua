@@ -540,6 +540,12 @@ function menubar.hide()
   core.redraw = true
 end
 
+-- after an error handling an event: closed without calling into the dropdowns
+table.insert(core.popup_closers, function()
+  for j = #stack, 1, -1 do stack[j] = nil end
+  state.active, state.open, state.hovered, state.popup = false, nil, nil, nil
+end)
+
 ---Drops the menus down from x, y (the top left), as one menu with a submenu
 ---each, rather than on the bar.
 function menubar.popup(x, y)

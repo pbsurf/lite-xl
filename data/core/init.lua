@@ -1489,6 +1489,24 @@ function core.get_log(i)
 end
 
 
+---Functions closing popups that take input before the views (menus), without
+---calling into them; see core.close_popups.
+core.popup_closers = {}
+
+---Called when handling an event fails: closes the popups, since one left broken
+---by the error would take every event after it and fail again, leaving the
+---editor unusable.
+function core.close_popups()
+  local menu = core.context_menu
+  if menu then
+    core.context_menu = nil
+    menu.show_context_menu, menu.items, menu.selected = false, nil, -1
+  end
+  for _, close in ipairs(core.popup_closers) do pcall(close) end
+  core.redraw = true
+end
+
+
 function core.try(fn, ...)
   local err
   local ok, res = xpcall(fn, function(msg)
@@ -1598,9 +1616,10 @@ function core.step()
       if type == "textinput" and did_keymap then
         did_keymap = false
       elseif type == "mousemoved" then
-        core.try(core.on_event, type, a, b, c, d)
+        if not core.try(core.on_event, type, a, b, c, d) then core.close_popups() end
       else
-        local _, res = core.try(core.on_event, type, a, b, c, d, e)
+        local ok, res = core.try(core.on_event, type, a, b, c, d, e)
+        if not ok then core.close_popups() end
         did_keymap = res or did_keymap
       end
       core.redraw = true
