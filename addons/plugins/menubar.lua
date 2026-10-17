@@ -280,6 +280,8 @@ end
 ---submenus (rows with `rows`), opened to the right
 ---@class plugins.menubar.dropdown : core.contextmenu
 local Dropdown = ContextMenu:extend()
+-- the menubar handles the keys for its dropdowns
+Dropdown.modal = false
 
 ---Size of the checkmark, and of the column for it left of the rows' text.
 local function check_size()

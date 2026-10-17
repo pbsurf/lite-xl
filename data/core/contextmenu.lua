@@ -32,7 +32,12 @@ local DIVIDER = {}
 ---@field selected number
 ---@field position core.view.position
 ---@field current_scale number
+---@field modal boolean
 local ContextMenu = Object:extend()
+
+---A modal menu takes the keyboard while shown (see ContextMenu:on_key_pressed).
+---Menus that are part of something handling keys itself (the menubar's) aren't.
+ContextMenu.modal = true
 
 function ContextMenu:__tostring() return "ContextMenu" end
 
@@ -126,7 +131,7 @@ function ContextMenu:show(x, y)
 
     self.position.x, self.position.y = x, y
     self.show_context_menu = true
-    core.context_menu = self
+    if self.modal then core.context_menu = self end
     core.request_cursor("arrow")
     return true
   end
