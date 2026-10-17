@@ -73,6 +73,10 @@ upstream's `release/v2.1.x`. Additions to the editor:
   replaces the previous preview tab until edited or double-clicked; preview tabs
   show their name in italic (in tabs, the tab menu and the ctrl+tab list) and
   aren't restored with the workspace.
+* **openurl:** ctrl+click opens the URL or DOI under the mouse in the browser
+  (DOIs via `config.plugins.openurl.doi_url`), or a `[[wiki link]]` to a local file
+  (`name`, `name.md`, ... in the file's directory or a parent; `[[name#Heading]]`
+  jumps to the heading); links are underlined unless `underline = false`.
 * **shapes:** antialiased shape helpers (squiggly underlines) for plugins.
 * **qtcreator:** a light color theme matching Qt Creator's.
 

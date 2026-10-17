@@ -114,6 +114,13 @@
       "path": "addons/plugins/terminal"
     },
     {
+      "id": "openurl",
+      "description": "Ctrl+click opens URLs, DOIs and [[wiki links]] to local files; links can be underlined.",
+      "version": "0.1",
+      "mod_version": "3",
+      "path": "addons/plugins/openurl.lua"
+    },
+    {
       "id": "widget",
       "type": "library",
       "description": "Widget toolkit (lite-xl-widgets) that doesn't queue redraws when showing a visible widget.",
