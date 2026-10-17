@@ -227,7 +227,7 @@ core.status_view:add_item({
   alignment = StatusView.Item.RIGHT,
   priority = -5,
   get_item = function()
-    return { core.active_view.doc.spellcheck and style.accent or style.dim, "Spell" }
+    return { core.active_view.doc.spellcheck and style.text or style.dim, "Spell" }
   end,
   command = "spell-check:toggle",
   tooltip = function()
