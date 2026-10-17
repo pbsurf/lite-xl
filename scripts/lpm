@@ -20,15 +20,15 @@
 # Environment:
 #   LITE_BUILD    meson build dir (default: build/), as for run.sh
 #   LITE_USERDIR  user config dir (default: user/ next to this repo), as for run.sh
-#   LPM           lpm binary (default: lpm/lpm next to this repo, built from source:
-#                 lite-xl-plugin-manager v1.4.9, `./build.sh -DLPM_STATIC` there)
+#   LPM           lpm binary (default: our fork's, lpm/ here, built by meson as
+#                 <build>/lpm/lpm; it loads lpm/src/lpm.lua at start)
 set -e
 
 src=$(dirname "$(dirname "$(readlink -f "$0")")")
 top=$(dirname "$src")
 build=${LITE_BUILD:-$src/build}
 userdir=${LITE_USERDIR:-$top/user}
-lpm=${LPM:-$top/lpm/lpm}
+lpm=${LPM:-$build/lpm/lpm}
 
 args=(--userdir="$userdir" --configdir="$userdir/lpm" --tmpdir="$userdir/lpm/tmp"
       --cachedir="$top/tools/lpm-cache"

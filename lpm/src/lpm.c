@@ -2139,6 +2139,10 @@ static const luaL_Reg system_lib[] = {
 #endif
 
 
+#ifndef LPM_LUA_PATH
+  #define LPM_LUA_PATH "src/lpm.lua"
+#endif
+
 #ifndef LPM_VERSION
   #define LPM_VERSION "unknown"
 #endif
@@ -2278,7 +2282,7 @@ int main(int argc, char* argv[]) {
   lua_pushliteral(L, LPM_DEFAULT_RELEASE);
   lua_setglobal(L, "DEFAULT_RELEASE_URL");
   #ifndef LPM_STATIC
-  if (luaL_loadfile(L, "src/lpm.lua") || lua_pcall(L, 0, 1, 0)) {
+  if (luaL_loadfile(L, LPM_LUA_PATH) || lua_pcall(L, 0, 1, 0)) {
   #else
   if (luaL_loadbuffer(L, lpm_luac, lpm_luac_len, "lpm.lua") || lua_pcall(L, 0, 1, 0)) {
   #endif
