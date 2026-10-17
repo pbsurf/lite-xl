@@ -96,6 +96,18 @@ local function move(step, in_doc)
   end
 end
 
+---Whether moving back (step -1) or forward (1) would go somewhere.
+function navigate.can_move(step)
+  local dv = get_doc_view()
+  if not dv then return false end
+  local list, i = navigate.list, navigate.index
+  -- back from the newest entry first records where we are, unless it's there
+  if step < 0 and i > #list and #list > 0 and same_place(list[#list], dv.doc, (dv.doc:get_selection())) then
+    i = #list
+  end
+  return list[i + step] ~= nil
+end
+
 function navigate.prev() move(-1) end
 function navigate.next() move(1) end
 function navigate.prev_in_doc() move(-1, true) end
