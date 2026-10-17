@@ -56,7 +56,10 @@ upstream's `release/v2.1.x`. Additions to the editor:
 ### Add-ons
 
 `addons/` holds the add-ons we changed or wrote, as an [lpm] repository (listed in
-`manifest.json`, each entry saying what we changed). Ours:
+`manifest.json`, each entry saying what we changed). `scripts/lpm` runs our fork of
+lpm (`lpm/`, built with the editor), which fixes installs replacing an add-on with
+another repository's version, uninstalls removing dependents under `--assume-yes`,
+2.1's mod-version, and symlinked installs across filesystems. Ours:
 
 * **menubar:** a menu bar of commands, toggled by tapping Alt. Menus are
   `config.plugins.menubar.menus`; commands from plugins not placed in a menu are
