@@ -810,17 +810,41 @@ function ListBox:on_mouse_moved(x, y, dx, dy)
   self.hovered_row = 0
 end
 
+function ListBox:on_mouse_pressed(button, x, y, clicks)
+  -- for on_row_click, called on release, which doesn't get the count
+  self.press_clicks = clicks
+  return ListBox.super.on_mouse_pressed(self, button, x, y, clicks)
+end
+
 function ListBox:on_click(button, x, y)
   if button == "left" and self.hovered_row > 0 then
     self.selected_row = self.hovered_row
-    self:on_row_click(self.hovered_row, self.row_data[self.hovered_row])
+    self:on_row_click(
+      self.hovered_row, self.row_data[self.hovered_row], self.press_clicks or 1
+    )
   end
 end
 
 ---You can overwrite this to listen to item clicks
 ---@param idx integer
 ---@param data any Data associated with the row
-function ListBox:on_row_click(idx, data) end
+---@param clicks integer 1, 2 for a double click, ...
+function ListBox:on_row_click(idx, data, clicks) end
+
+---Scrolls the list just enough to show the given row in full.
+---@param idx integer
+function ListBox:scroll_to_row(idx)
+  local row = self.rows[idx]
+  if not row or not row.y then return end
+  -- the column headers stay on top of the rows
+  local top = #self.columns > 0
+    and self:get_font():get_height() + style.padding.y or 0
+  if row.y - top < self.scroll.to.y then
+    self.scroll.to.y = row.y - top
+  elseif row.y + row.h > self.scroll.to.y + self.size.y then
+    self.scroll.to.y = row.y + row.h - self.size.y
+  end
+end
 
 function ListBox:update()
   if not ListBox.super.update(self) then return false end
