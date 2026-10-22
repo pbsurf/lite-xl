@@ -90,15 +90,22 @@ local function get_last_visited_node(node)
 end
 
 
+---The unlocked node used last, preferring one showing a session's doc, else the
+---primary node: where a doc picked from a panel opens. Doesn't change focus.
+---@return core.node
+function RootView:get_last_used_node()
+  return get_last_visited_node(self.root_node) or self:get_primary_node()
+end
+
+
 ---The active node, or, when that's locked (a panel like the tree view's),
----the node used last (else the primary one), which then becomes active: where
----a doc picked from the panel opens.
+---get_last_used_node(), which then becomes active.
 ---@return core.node
 function RootView:get_active_node_default()
   local node = self.root_node:get_node_for_view(core.active_view)
   if not node then node = self:get_primary_node() end
   if node.locked then
-    node = get_last_visited_node(self.root_node) or self:get_primary_node()
+    node = self:get_last_used_node()
     local default_view = node.active_view or node.views[1]
     assert(default_view, "internal error: cannot find original document node.")
     core.set_active_view(default_view)
