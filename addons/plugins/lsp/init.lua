@@ -1854,8 +1854,9 @@ function lsp.request_workspace_symbol(doc, symbol)
   for _, name in pairs(lsp.get_active_servers(doc.filename, true)) do
     local server = lsp.servers_running[name]
     if server.capabilities.workspaceSymbolProvider then
-      local rs = SymbolResults(symbol)
-      core.root_view:get_active_node_default():add_view(rs)
+      local rs = SymbolResults.open(symbol)
+      -- a later search reuses the panel: this one's results are dropped then
+      local generation = rs.generation
       server:push_request('workspace/symbol', {
         params = {
           query = symbol,
@@ -1865,11 +1866,13 @@ function lsp.request_workspace_symbol(doc, symbol)
           -- partialResultToken = "some-other-identifier"
         },
         callback = function(server, response)
+          if rs.generation ~= generation then return end
           if response.result and #response.result > 0 then
             for index, result in ipairs(response.result) do
               rs:add_result(result)
               if index % 100 == 0 then
                 coroutine.yield()
+                if rs.generation ~= generation then return end
                 rs.list:resize_to_parent()
               end
             end
