@@ -10,6 +10,16 @@ local PanelHeader = require "core.panelheader"
 ---@class plugins.projectsearch.resultsview : core.view
 local ResultsView = View:extend()
 
+-- The results are a panel below the pane used last, reused by each search.
+-- Selecting a result (arrow keys, a click) shows it in that pane, with the
+-- match selected, while the focus stays here; Enter or a double click moves the
+-- focus there, Escape closes the panel. Its header's button moves it into a
+-- tab, keeping the results; the next search opens a new panel. In a tab sharing
+-- a pane with the docs, showing a result would hide the list, so there a click,
+-- double click or Enter opens it.
+---@type plugins.projectsearch.resultsview?
+local panel
+
 function ResultsView:__tostring() return "ResultsView" end
 
 ResultsView.context = "session"
@@ -19,13 +29,27 @@ function ResultsView:new(path, text, fn)
   self.scrollable = true
   self.brightness = 0
   self.max_h_scroll = 0
+  self.hovered_idx = 0
+  self.generation = 0
   self.header = PanelHeader(self)
+  -- moved into a tab: no longer the panel, which the next search opens anew
+  self.header.on_move_to_tab = function()
+    if panel == self then panel = nil end
+  end
   self:begin_search(path, text, fn)
 end
 
 
 function ResultsView:get_name()
-  return "Search Results"
+  return "Search: " .. self.query
+end
+
+
+-- As a panel, resized by the user (a locked node, resizable)
+function ResultsView:set_target_size(axis, value)
+  if axis ~= "y" then return false end
+  self.size.y = value
+  return true
 end
 
 
@@ -34,14 +58,15 @@ local function find_all_matches_in_file(t, filename, fn)
   if not fp then return t end
   local n = 1
   for line in fp:lines() do
-    local s = fn(line)
+    -- e: the column after the match, nil if unknown
+    local s, e = fn(line)
     if s then
       -- Insert maximum 256 characters. If we insert more, for compiled files, which can have very long lines
       -- things tend to get sluggish. If our line is longer than 80 characters, begin to truncate the thing.
       local start_index = math.max(s - 80, 1)
       local text = (start_index > 1 and "..." or "") .. line:sub(start_index, 256 + start_index)
       if #line > 256 + start_index then text = text .. "..." end
-      table.insert(t, { file = filename, text = text, line = n, col = s })
+      table.insert(t, { file = filename, text = text, line = n, col = s, col2 = e })
       core.redraw = true
     end
     if n % 100 == 0 then coroutine.yield() end
@@ -59,21 +84,27 @@ function ResultsView:begin_search(path, text, fn)
   self.query = text
   self.searching = true
   self.selected_idx = 0
+  self.hovered_idx = 0
+  -- a search still running when another starts in this view stops
+  self.generation = self.generation + 1
+  local generation, results = self.generation, self.results
 
   core.add_thread(function()
     local i = 1
     for dir_name, file in core.get_project_files() do
+      if self.generation ~= generation then return end
       if file.type == "file" and (not path or (dir_name .. "/" .. file.filename):find(path, 1, true) == 1) then
         local truncated_path = (dir_name == core.project_dir and "" or (dir_name .. PATHSEP))
-        find_all_matches_in_file(self.results, truncated_path .. file.filename, fn)
+        find_all_matches_in_file(results, truncated_path .. file.filename, fn)
       end
       self.last_file_idx = i
       i = i + 1
     end
+    if self.generation ~= generation then return end
     self.searching = false
     self.brightness = 100
     core.redraw = true
-  end, self.results)
+  end, results)
 
   self.scroll.to.y = 0
 end
@@ -86,37 +117,66 @@ end
 
 function ResultsView:on_mouse_moved(mx, my, ...)
   ResultsView.super.on_mouse_moved(self, mx, my, ...)
-  self.selected_idx = 0
+  self.hovered_idx = 0
   if self.header:on_mouse_moved(mx, my) then return end
   for i, item, x,y,w,h in self:each_visible_result() do
     if mx >= x and my >= y and mx < x + w and my < y + h then
-      self.selected_idx = i
+      self.hovered_idx = i
       break
     end
   end
 end
 
 
-function ResultsView:on_mouse_pressed(button, x, y, ...)
+function ResultsView:on_mouse_pressed(button, x, y, clicks)
   if self.header:on_mouse_pressed(button, x, y) then return true end
-  local caught = ResultsView.super.on_mouse_pressed(self, button, x, y, ...)
-  if not caught then
-    return self:open_selected_result()
+  local caught = ResultsView.super.on_mouse_pressed(self, button, x, y, clicks)
+  if not caught and button == "left" and self.hovered_idx > 0 then
+    self:select(self.hovered_idx)
+    if clicks > 1 or not core.root_view:can_peek(self) then
+      self:open_selected_result()
+    end
+    return true
   end
 end
 
 
-function ResultsView:open_selected_result()
-  local res = self.results[self.selected_idx]
-  if not res then
-    return
+function ResultsView:on_mouse_left()
+  ResultsView.super.on_mouse_left(self)
+  self.hovered_idx = 0
+  self.header:on_mouse_left()
+end
+
+
+---Shows a result in the pane used last, with the match selected (the line,
+---for a fuzzy match), leaving the focus here.
+---@return core.docview?
+local function show_result(res)
+  return core.root_view:peek_file(res.file, res.line, res.col, res.line, res.col2 or math.huge)
+end
+
+
+---Selects a result (clamped to the list) and shows it, if that can be done
+---without hiding the list.
+---@param idx integer
+function ResultsView:select(idx)
+  if #self.results == 0 then return end
+  self.selected_idx = common.clamp(idx, 1, #self.results)
+  self:scroll_to_make_selected_visible()
+  self.shown = nil
+  if core.root_view:can_peek(self) then
+    self.shown = show_result(self.results[self.selected_idx])
   end
-  core.try(function()
-    local dv = core.root_view:open_doc(core.open_doc(res.file), { preview = true })
-    core.root_view.root_node:update_layout()
-    dv.doc:set_selection(res.line, res.col)
-    dv:scroll_to_line(res.line, false, true)
-  end)
+end
+
+
+---Shows the selected result, or the first, and focuses it.
+function ResultsView:open_selected_result()
+  if self.selected_idx == 0 then self:select(1) end
+  local res = self.results[self.selected_idx]
+  if not res then return end
+  local dv = self.shown or show_result(res)
+  if dv then core.set_active_view(dv) end
   return true
 end
 
@@ -124,12 +184,6 @@ end
 function ResultsView:update()
   self:move_towards("brightness", 0, 0.1)
   ResultsView.super.update(self)
-end
-
-
-function ResultsView:on_mouse_left()
-  ResultsView.super.on_mouse_left(self)
-  self.header:on_mouse_left()
 end
 
 
@@ -229,11 +283,15 @@ function ResultsView:draw()
     local color = style.text
     if i == self.selected_idx then
       color = style.accent
+      renderer.draw_rect(x, y, w, h, style.selection)
+    elseif i == self.hovered_idx then
       renderer.draw_rect(x, y, w, h, style.line_highlight)
     end
     x = x + style.padding.x
     local text = string.format("%s at line %d (col %d): ", item.file, item.line, item.col)
-    x = common.draw_text(style.font, style.dim, text, "left", x, y, w, h)
+    -- dim is hard to read on the selection's color
+    local info_color = i == self.selected_idx and style.text or style.dim
+    x = common.draw_text(style.font, info_color, text, "left", x, y, w, h)
     x = common.draw_text(style.code_font, color, item.text, "left", x, y, w, h)
     self.max_h_scroll = math.max(self.max_h_scroll, x)
   end
@@ -251,9 +309,18 @@ local function begin_search(path, text, fn)
     core.error("Expected non-empty string")
     return
   end
-  local rv = ResultsView(path, text, fn)
-  core.root_view:get_active_node_default():add_view(rv)
-  return rv
+  if panel then
+    panel:begin_search(path, text, fn)
+  else
+    panel = ResultsView(path, text, fn)
+    -- a third of the window at first; then as the user resizes it
+    panel.size.y = math.floor(core.root_view.size.y / 3)
+  end
+  if not core.root_view.root_node:get_node_for_view(panel) then
+    core.root_view:get_last_used_node():split("down", panel, { y = true }, true)
+  end
+  core.set_active_view(panel)
+  return panel
 end
 
 
@@ -290,11 +357,14 @@ projectsearch.ResultsView = ResultsView
 function projectsearch.search_plain(text, path, insensitive)
   if insensitive then text = text:lower() end
   return begin_search(path, text, function(line_text)
+    local s, e
     if insensitive then
-      return line_text:lower():find(text, nil, true)
+      s, e = line_text:lower():find(text, nil, true)
     else
-      return line_text:find(text, nil, true)
+      s, e = line_text:find(text, nil, true)
     end
+    -- the column after the match, as regex.cmatch gives
+    return s, e and e + 1
   end)
 end
 
@@ -365,14 +435,12 @@ command.add(nil, {
 command.add(ResultsView, {
   ["project-search:select-previous"] = function()
     local view = core.active_view
-    view.selected_idx = math.max(view.selected_idx - 1, 1)
-    view:scroll_to_make_selected_visible()
+    view:select(view.selected_idx - 1)
   end,
 
   ["project-search:select-next"] = function()
     local view = core.active_view
-    view.selected_idx = math.min(view.selected_idx + 1, #view.results)
-    view:scroll_to_make_selected_visible()
+    view:select(view.selected_idx + 1)
   end,
 
   ["project-search:open-selected"] = function()
@@ -404,7 +472,16 @@ command.add(ResultsView, {
   end
 })
 
+-- Escape closes the panel; a tab is closed as any other
+command.add(function()
+  return core.active_view:is(ResultsView) and core.active_view.header:is_panel(),
+    core.active_view
+end, {
+  ["project-search:close"] = function(view) view.header:close() end,
+})
+
 keymap.add {
+  ["escape"]             = "project-search:close",
   ["f5"]                 = "project-search:refresh",
   ["ctrl+shift+f"]       = "project-search:find",
   ["up"]                 = "project-search:select-previous",
