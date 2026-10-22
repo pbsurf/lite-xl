@@ -66,14 +66,17 @@ function SymbolResults:add_result(result)
   local container_name = result.containerName and
     result.containerName .. "\n" or ""
 
+  -- code (the symbol and the line it's on) in the code font
+  local code_font = { container = style, name = "code_font" }
   local row = {
     tostring(self.num),
     ListBox.COLEND,
-    style.syntax.keyword, container_name .. result.name,
+    code_font, style.syntax.keyword, container_name .. result.name,
     ListBox.COLEND,
     style.syntax.literal, Server.get_symbol_kind(result.kind),
     ListBox.COLEND,
-    style.text, position, ListBox.NEWLINE, style.accent, preview
+    style.text, position, ListBox.NEWLINE,
+    code_font, style.accent, preview
   }
 
   self.num = self.num + 1
