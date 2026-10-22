@@ -1701,7 +1701,9 @@ function lsp.request_hover(doc, line, col, in_tab, prefix)
                 local title = doc:get_text(line1, col1, line2, col2):gsub("%s*", "")
                 title = "Help:" .. title .. ".md"
                 ---@type lsp.helpdoc
-                local helpdoc = HelpDoc(title, title)
+                -- no abs_filename: it's not a file (autoreload would watch
+                -- its "directory"); the name still selects the syntax
+                local helpdoc = HelpDoc(title)
                 helpdoc:set_text(text)
                 local helpview = DocView(helpdoc)
                 helpview.context = "application"
