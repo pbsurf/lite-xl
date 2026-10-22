@@ -1030,6 +1030,10 @@ function Widget:on_mouse_moved(x, y, dx, dy)
 
     if hovered then
       hovered:on_mouse_moved(x, y, dx, dy)
+      -- a child with children of its own doesn't set this itself when one of
+      -- them is hovered: without it, it wouldn't be told the mouse left (nor
+      -- they, e.g. a ListBox in a container, which then kept its hovered row)
+      hovered.mouse_is_hovering = true
       if last_hovered_child and not last_hovered_child:mouse_on_top(x, y) then
         last_hovered_child:on_mouse_leave(x, y, dx, dy)
         last_hovered_child.mouse_is_hovering = false
@@ -1093,6 +1097,7 @@ function Widget:on_mouse_leave(x, y, dx, dy)
   for _, child in pairs(self.childs) do
     if child.mouse_is_hovering then
       child:on_mouse_leave(x, y, dx, dy)
+      child.mouse_is_hovering = false
     end
   end
 end

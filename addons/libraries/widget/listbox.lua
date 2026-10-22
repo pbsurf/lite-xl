@@ -803,6 +803,8 @@ end
 function ListBox:on_mouse_leave(x, y, dx, dy)
   ListBox.super.on_mouse_leave(self, x, y, dx, dy)
   self.hovered_row = 0
+  -- draw_row finds the hovered row from the last position: not this one
+  self.mouse.x, self.mouse.y = -1, -1
 end
 
 function ListBox:on_mouse_moved(x, y, dx, dy)
