@@ -6,6 +6,9 @@
 -- A panel below the pane used last. Selecting a result (arrow keys, a click)
 -- shows it in that pane, with the symbol's name selected, while the focus stays
 -- here; Enter or a double click moves the focus there, Escape closes the panel.
+-- Its header's button moves it into a tab, keeping the results; the next search
+-- opens a new panel. In a tab sharing a pane with the docs, showing a result
+-- would hide the list, so there a click, double click or Enter opens it.
 --
 
 local core = require "core"
@@ -13,9 +16,8 @@ local common = require "core.common"
 local command = require "core.command"
 local keymap = require "core.keymap"
 local style = require "core.style"
+local PanelHeader = require "core.panelheader"
 local Widget = require "libraries.widget"
-local Label = require "libraries.widget.label"
-local Line = require "libraries.widget.line"
 local ListBox = require "libraries.widget.listbox"
 local Server = require "plugins.lsp.server"
 local util = require "plugins.lsp.util"
@@ -24,8 +26,7 @@ local util = require "plugins.lsp.util"
 ---@field public searching boolean
 ---@field public symbol string
 ---@field public generation integer Incremented by each search shown
----@field private title widget.label
----@field private line widget.line
+---@field private header core.panelheader
 ---@field private list_container widget
 ---@field private list widget.listbox
 local SymbolResults = Widget:extend()
@@ -39,8 +40,11 @@ function SymbolResults:new()
   self.name = "Symbols Search"
   self.defer_draw = false
 
-  self.title = Label(self, "")
-  self.line = Line(self, 2, style.padding.x)
+  self.header = PanelHeader(self)
+  -- moved into a tab: no longer the panel, which the next search opens anew
+  self.header.on_move_to_tab = function()
+    if panel == self then panel = nil end
+  end
 
   self.list_container = Widget(self)
   self.list_container.border.width = 0
@@ -57,7 +61,7 @@ function SymbolResults:new()
 
   self.list.on_row_click = function(_, idx, _, clicks)
     self:select(idx)
-    if clicks > 1 then self:open_selected() end
+    if clicks > 1 or not self:can_peek() then self:open_selected() end
   end
 
   -- valid before a first reset() too (e.g. made by an older workspace save)
@@ -96,7 +100,10 @@ function SymbolResults:reset(symbol)
   self.list:clear()
   self.list.scroll.x, self.list.scroll.to.x = 0, 0
   self.list.scroll.y, self.list.scroll.to.y = 0, 0
-  self.title:set_label("Searching symbols for: " .. symbol)
+end
+
+function SymbolResults:get_name()
+  return "Symbols: " .. self.symbol
 end
 
 -- Not restored with the workspace: it would come back without its results
@@ -153,27 +160,35 @@ local function show_location(location)
   return dv
 end
 
----Selects a result (clamped to the list) and shows it.
+---Whether a result can be shown without hiding this list: not when the pane
+---it would be shown in is this tab's own.
+---@return boolean
+function SymbolResults:can_peek()
+  return core.root_view:get_last_used_node()
+    ~= core.root_view.root_node:get_node_for_view(self)
+end
+
+---Selects a result (clamped to the list) and shows it, if that can be done
+---without hiding the list.
 ---@param idx integer
 function SymbolResults:select(idx)
   if #self.list.rows == 0 then return end
   idx = common.clamp(idx, 1, #self.list.rows)
   self.list:set_selected(idx)
   self.list:scroll_to_row(idx)
-  self.shown = show_location(self.list:get_row_data(idx).location)
+  self.shown = nil
+  if self:can_peek() then
+    self.shown = show_location(self.list:get_row_data(idx).location)
+  end
 end
 
 ---Shows the selected result, or the first, and focuses it.
 function SymbolResults:open_selected()
-  if not self.list:get_selected() then self:select(1) end
-  if self.shown then core.set_active_view(self.shown) end
-end
-
-function SymbolResults:close()
-  local target = core.root_view:get_last_used_node()
-  local node = core.root_view.root_node:get_node_for_view(self)
-  if node then node:remove_view(core.root_view.root_node, self) end
-  core.set_active_view(target.active_view)
+  local idx = self.list:get_selected()
+  if not idx then self:select(1) idx = self.list:get_selected() end
+  if not idx then return end
+  local dv = self.shown or show_location(self.list:get_row_data(idx).location)
+  if dv then core.set_active_view(dv) end
 end
 
 ---Results per page, by the first row's height (each is about as tall).
@@ -187,27 +202,41 @@ function SymbolResults:update()
   if not SymbolResults.super.update(self) then return end
   -- update the positions and sizes
   self.background_color = style.background
-  self.title:set_position(style.padding.x, style.padding.y)
-  if not self.searching or #self.list.rows > 0 then
-    local label = "Finished: "
-    if self.searching then
-      label = "Searching: "
-    end
-    self.title:set_label(
-      label
-        .. #self.list.rows
-        .. " results found for "
-        .. '"'
-        .. self.symbol
-        .. '"'
-    )
+  if self.searching and #self.list.rows == 0 then
+    self.header.text = string.format("Searching symbols for %q...", self.symbol)
+  else
+    self.header.text = string.format("%s %d results found for %q",
+      self.searching and "Searching:" or "Finished:", #self.list.rows, self.symbol)
   end
-  self.line:set_position(0, self.title:get_bottom() + 10)
-  self.list_container:set_position(style.padding.x, self.line:get_bottom() + 10)
+  local top = self.header:get_height()
+  self.list_container:set_position(style.padding.x, top)
   self.list_container:set_size(
     self.size.x - (style.padding.x * 2),
-    self.size.y - self.line:get_bottom()
+    self.size.y - top
   )
+end
+
+function SymbolResults:draw()
+  if not SymbolResults.super.draw(self) then return false end
+  self.header:draw(self.position.x, self.position.y, self.size.x)
+  return true
+end
+
+function SymbolResults:on_mouse_moved(x, y, ...)
+  -- the widgets too, also when it's over the header: the list then learns the
+  -- mouse left it
+  local over_header = self.header:on_mouse_moved(x, y)
+  return SymbolResults.super.on_mouse_moved(self, x, y, ...) or over_header
+end
+
+function SymbolResults:on_mouse_pressed(button, x, y, ...)
+  if self.header:on_mouse_pressed(button, x, y) then return true end
+  return SymbolResults.super.on_mouse_pressed(self, button, x, y, ...)
+end
+
+function SymbolResults:on_mouse_left()
+  SymbolResults.super.on_mouse_left(self)
+  self.header:on_mouse_left()
 end
 
 local function step(rs, n)
@@ -223,7 +252,14 @@ command.add(SymbolResults, {
   ["symbol-results:select-first"] = function(rs) rs:select(1) end,
   ["symbol-results:select-last"] = function(rs) rs:select(#rs.list.rows) end,
   ["symbol-results:open-selected"] = function(rs) rs:open_selected() end,
-  ["symbol-results:close"] = function(rs) rs:close() end,
+})
+
+-- Escape closes the panel; a tab is closed as any other
+command.add(function()
+  return core.active_view:is(SymbolResults) and core.active_view.header:is_panel(),
+    core.active_view
+end, {
+  ["symbol-results:close"] = function(rs) rs.header:close() end,
 })
 
 keymap.add {
