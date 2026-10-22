@@ -66,12 +66,40 @@ local function get_primary_node(node)
 end
 
 
+---The unlocked node whose active view was visited last, preferring one showing
+---a session's doc (not a help or a results split, say); nil if none was.
+---@param node core.node
+---@return core.node?
+local function get_last_visited_node(node)
+  local best, best_visit, best_doc
+  local function visit(n)
+    if n.type ~= "leaf" then
+      visit(n.a)
+      visit(n.b)
+    elseif not n.locked and n.active_view then
+      local v = core.view_visit_order[n.active_view]
+      local doc = n.active_view:is(DocView) and n.active_view.context == "session"
+      if v and (not best or (doc and not best_doc)
+         or (doc == best_doc and v > best_visit)) then
+        best, best_visit, best_doc = n, v, doc
+      end
+    end
+  end
+  visit(node)
+  return best
+end
+
+
+---The active node, or, when that's locked (a panel like the tree view's),
+---the node used last (else the primary one), which then becomes active: where
+---a doc picked from the panel opens.
 ---@return core.node
 function RootView:get_active_node_default()
   local node = self.root_node:get_node_for_view(core.active_view)
   if not node then node = self:get_primary_node() end
   if node.locked then
-    local default_view = self:get_primary_node().views[1]
+    node = get_last_visited_node(self.root_node) or self:get_primary_node()
+    local default_view = node.active_view or node.views[1]
     assert(default_view, "internal error: cannot find original document node.")
     core.set_active_view(default_view)
     node = self:get_active_node()
