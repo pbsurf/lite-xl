@@ -84,6 +84,12 @@ function SymbolResults:add_result(result)
   self.list:add_row(row, result)
 end
 
+-- Not restored with the workspace: it would come back without its results
+-- (and without the symbol searched for, which SymbolResults:new needs)
+function SymbolResults:is_transient()
+  return true
+end
+
 function SymbolResults:stop_searching()
   self.searching = false
 end
