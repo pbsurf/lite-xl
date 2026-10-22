@@ -35,7 +35,10 @@ local function consume_workspace_file(project_dir)
     local load_f = loadfile(filename)
     local workspace = load_f and load_f()
     if workspace and workspace.path == project_dir then
-      os.remove(filename)
+      -- kept as a backup, not loaded by itself (it might be what crashes): if
+      -- the editor dies before saving anew, renaming it back restores this
+      os.remove(filename .. ".bak")
+      os.rename(filename, filename .. ".bak")
       return workspace
     end
   end
