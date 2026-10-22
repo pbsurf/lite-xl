@@ -370,6 +370,24 @@ local function get_active_docview()
   return nil
 end
 
+---The active doc view, or else the one visited last (as from a results view,
+---which has no doc): for requests about the whole workspace, which a doc's
+---servers answer.
+---@return core.docview?
+local function get_last_docview()
+  local last, last_visit = get_active_docview(), math.huge
+  if last then return last end
+  for _, view in ipairs(core.root_view.root_node:get_children()) do
+    local visit = core.view_visit_order[view]
+    if getmetatable(view) == DocView and view.doc.filename and visit
+      and (not last or visit > last_visit)
+    then
+      last, last_visit = view, visit
+    end
+  end
+  return last
+end
+
 ---Generates a code preview of a location
 ---@param location table
 local function get_location_preview(location)
@@ -2711,10 +2729,15 @@ command.add(nil, {
   end,
 
   ["lsp:find-workspace-symbol"] = function()
-    local dv = get_active_docview()
-    local doc = dv and dv.doc or nil
-    -- typed after a prefix in Ctrl+P: don't replace what follows it
-    local symbol = not core.command_view.mode and doc
+    local dv = get_last_docview()
+    if not dv then
+      core.log("[LSP] Open a file of the project to search its symbols")
+      return
+    end
+    local doc = dv.doc
+    -- typed after a prefix in Ctrl+P: don't replace what follows it; and not
+    -- from a doc that isn't the active view
+    local symbol = not core.command_view.mode and dv == get_active_docview()
       and doc:get_text(doc:get_selection()) or nil
     core.command_view:enter("Find Workspace Symbol", {
       text = symbol,
