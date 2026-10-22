@@ -1258,7 +1258,8 @@ function core.set_active_view(view)
     core.next_active_view = nil
     if view.doc and view.doc.filename then
       core.set_visited(view.doc.filename)
-      add_recent_file(view.doc.abs_filename)
+      -- a named doc that isn't a file (LSP's help) has no abs_filename
+      if view.doc.abs_filename then add_recent_file(view.doc.abs_filename) end
     end
     core.last_active_view = core.active_view
     core.active_view = view
