@@ -98,6 +98,41 @@ function RootView:get_last_used_node()
 end
 
 
+---Whether a view (a panel, or a tab) can show results with peek_file()
+---without hiding itself: not when it's in the node they'd open in.
+---@param view core.view
+---@return boolean
+function RootView:can_peek(view)
+  return self:get_last_used_node() ~= self.root_node:get_node_for_view(view)
+end
+
+
+---Shows a range of a file in a preview tab of get_last_used_node(), selected
+---(an unfocused view draws the selection, not the caret) and scrolled into
+---view, leaving the focus as it is: for a panel showing its results.
+---@param filename string
+---@param line1 integer
+---@param col1 integer
+---@param line2? integer
+---@param col2? integer
+---@return core.docview? view nil on an error (logged)
+function RootView:peek_file(filename, line1, col1, line2, col2)
+  local av = core.active_view
+  local ok, dv = core.try(function()
+    core.set_active_view(self:get_last_used_node().active_view)
+    local dv = self:open_doc(core.open_doc(filename), { preview = true })
+    -- a tab just brought to the front has its size from when it last was:
+    -- scrolling needs the current one
+    self.root_node:get_node_for_view(dv):update_layout()
+    dv.doc:set_selection(line2 or line1, col2 or col1, line1, col1)
+    dv:scroll_to_line(line1, true)
+    return dv
+  end)
+  core.set_active_view(av)
+  return ok and dv or nil
+end
+
+
 ---The active node, or, when that's locked (a panel like the tree view's),
 ---get_last_used_node(), which then becomes active.
 ---@return core.node

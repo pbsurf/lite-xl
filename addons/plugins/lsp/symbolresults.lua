@@ -138,34 +138,24 @@ function SymbolResults:stop_searching()
   self.searching = false
 end
 
----Opens a location in the pane used last, with the symbol's name selected (an
----unfocused view draws the selection, not the caret), leaving the focus as is.
+---Shows a location in the pane used last (RootView:peek_file), with the
+---symbol's name selected.
 ---@return core.docview?
 local function show_location(location)
-  local av = core.active_view
-  local dv
-  core.try(function()
-    core.set_active_view(core.root_view:get_last_used_node().active_view)
-    local filename = common.home_expand(util.tofilename(location.uri))
-    dv = core.root_view:open_doc(core.open_doc(filename), { preview = true })
-    -- a WorkspaceSymbol (LSP 3.17) may give just the file
-    if not location.range then return end
-    local line1, col1, line2, col2 = util.toselection(location.range, dv.doc)
-    -- just the start of a range over several lines
-    if line2 ~= line1 then line2, col2 = line1, col1 end
-    dv.doc:set_selection(line2, col2, line1, col1)
-    dv:scroll_to_line(line1, true)
-  end)
-  core.set_active_view(av)
-  return dv
+  local filename = common.home_expand(util.tofilename(location.uri))
+  -- the doc converts the range's UTF-16 columns; peek_file logs a failed open
+  local ok, doc = pcall(core.open_doc, filename)
+  local line1, col1, line2, col2 = util.toselection(location.range, ok and doc or nil)
+  -- just the start of a range over several lines
+  if line2 ~= line1 then line2, col2 = line1, col1 end
+  return core.root_view:peek_file(filename, line1, col1, line2, col2)
 end
 
----Whether a result can be shown without hiding this list: not when the pane
----it would be shown in is this tab's own.
+---Whether a result can be shown without hiding this list (in a tab sharing
+---the docs' pane, it can't).
 ---@return boolean
 function SymbolResults:can_peek()
-  return core.root_view:get_last_used_node()
-    ~= core.root_view.root_node:get_node_for_view(self)
+  return core.root_view:can_peek(self)
 end
 
 ---Selects a result (clamped to the list) and shows it, if that can be done
