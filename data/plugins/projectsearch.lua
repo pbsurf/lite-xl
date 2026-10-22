@@ -5,6 +5,7 @@ local keymap = require "core.keymap"
 local command = require "core.command"
 local style = require "core.style"
 local View = require "core.view"
+local PanelHeader = require "core.panelheader"
 
 ---@class plugins.projectsearch.resultsview : core.view
 local ResultsView = View:extend()
@@ -18,6 +19,7 @@ function ResultsView:new(path, text, fn)
   self.scrollable = true
   self.brightness = 0
   self.max_h_scroll = 0
+  self.header = PanelHeader(self)
   self:begin_search(path, text, fn)
 end
 
@@ -85,6 +87,7 @@ end
 function ResultsView:on_mouse_moved(mx, my, ...)
   ResultsView.super.on_mouse_moved(self, mx, my, ...)
   self.selected_idx = 0
+  if self.header:on_mouse_moved(mx, my) then return end
   for i, item, x,y,w,h in self:each_visible_result() do
     if mx >= x and my >= y and mx < x + w and my < y + h then
       self.selected_idx = i
@@ -94,8 +97,9 @@ function ResultsView:on_mouse_moved(mx, my, ...)
 end
 
 
-function ResultsView:on_mouse_pressed(...)
-  local caught = ResultsView.super.on_mouse_pressed(self, ...)
+function ResultsView:on_mouse_pressed(button, x, y, ...)
+  if self.header:on_mouse_pressed(button, x, y) then return true end
+  local caught = ResultsView.super.on_mouse_pressed(self, button, x, y, ...)
   if not caught then
     return self:open_selected_result()
   end
@@ -123,8 +127,14 @@ function ResultsView:update()
 end
 
 
+function ResultsView:on_mouse_left()
+  ResultsView.super.on_mouse_left(self)
+  self.header:on_mouse_left()
+end
+
+
 function ResultsView:get_results_yoffset()
-  return style.font:get_height() + style.padding.y * 3
+  return self.header:get_height()
 end
 
 
@@ -188,7 +198,6 @@ function ResultsView:draw()
     renderer.draw_rect(self.position.x, self.position.y+yoffset, self.size.x, style.divider_size, style.divider)
   end
 
-  local x, y = ox + style.padding.x, oy + style.padding.y
   local files_number = core.project_files_number()
   local per = common.clamp(files_number and self.last_file_idx / files_number or 1, 0, 1)
   local text
@@ -205,18 +214,12 @@ function ResultsView:draw()
     text = string.format("Found %d matches for %q",
       #self.results, self.query)
   end
-  local color = common.lerp(style.text, style.accent, self.brightness / 100)
-  renderer.draw_text(style.font, text, x, y, color)
-
-  -- horizontal line
-  local x = ox + style.padding.x
-  local w = self.size.x - style.padding.x * 2
-  local h = style.divider_size
-  local color = common.lerp(style.dim, style.text, self.brightness / 100)
-  renderer.draw_rect(x, oy + yoffset - style.padding.y, w, h, color)
-  if self.searching then
-    renderer.draw_rect(x, oy + yoffset - style.padding.y, w * per, h, style.text)
-  end
+  local header = self.header
+  header.text = text
+  header.color = common.lerp(style.text, style.accent, self.brightness / 100)
+  header.divider_color = common.lerp(style.dim, style.text, self.brightness / 100)
+  header.progress = self.searching and per or nil
+  header:draw(ox, oy, self.size.x)
 
   -- results
   local _, _, bw = self:get_content_bounds()
