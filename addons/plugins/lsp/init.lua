@@ -42,6 +42,7 @@ local diagnostics = require "plugins.lsp.diagnostics"
 local Server = require "plugins.lsp.server"
 local Timer = require "plugins.lsp.timer"
 local SymbolResults = require "plugins.lsp.symbolresults"
+local ReferenceResults = SymbolResults.ReferenceResults
 local MessageBox = require "libraries.widget.messagebox"
 local snippets_found, snippets = pcall(require, "plugins.snippets")
 
@@ -417,21 +418,6 @@ local function get_location_preview(location)
   local position = filename .. ":" .. tostring(line1) .. ":" .. tostring(col1)
 
   return preview, position
-end
-
----Generate a list ready to use for the lsp.request_references() action.
----@param locations table
-local function get_references_lists(locations)
-  local references, reference_names = {}, {}
-
-  for _, location in pairs(locations) do
-    local preview, position = get_location_preview(location)
-    local name = preview .. "||" .. position
-    table.insert(reference_names, name)
-    references[name] = location
-  end
-
-  return references, reference_names
 end
 
 ---Apply an lsp textEdit to a document if possible.
@@ -1735,45 +1721,43 @@ function lsp.request_hover(doc, line, col, in_tab, prefix)
   end
 end
 
---- Sends a request to applicable LSP servers for a symbol references
+--- Sends a request to applicable LSP servers for a symbol references, shown
+--- in the References panel, by file and position
 function lsp.request_references(doc, line, col)
   if not doc.lsp_open then return end
 
   for _, name in pairs(lsp.get_active_servers(doc.filename, true)) do
     local server = lsp.servers_running[name]
     if server.capabilities.hoverProvider then
+      local l1, c1 = translate.start_of_word(doc, line, col)
+      local l2, c2 = translate.end_of_word(doc, line, col)
+      local rr = ReferenceResults:open(doc:get_text(l1, c1, l2, c2))
+      -- a later search reuses the panel: this one's results are dropped then
+      local generation = rr.generation
       local request_params = get_buffer_position_params(doc, line, col)
       request_params.context = {includeDeclaration = true}
       server:push_request('textDocument/references', {
         params = request_params,
         callback = function(server, response)
+          if rr.generation ~= generation then return end
           if response.result and #response.result > 0 then
-            local references, reference_names = get_references_lists(response.result)
-            core.command_view:enter("Filter References", {
-              submit = function(text, item)
-                if item then
-                  local reference = references[item.name]
-                    lsp.goto_location(reference)
-                end
-              end,
-              suggest = function(text)
-                local res = common.fuzzy_match(reference_names, text)
-                for i, name in ipairs(res) do
-                  local reference_info = util.split(name, "||")
-                  res[i] = {
-                    text = reference_info[1],
-                    info = reference_info[2],
-                    name = name,
-                    -- the text is the referencing line of code
-                    font = style.code_font
-                  }
-                end
-                return res
+            table.sort(response.result, function(a, b)
+              if a.uri ~= b.uri then return a.uri < b.uri end
+              local sa, sb = a.range.start, b.range.start
+              if sa.line ~= sb.line then return sa.line < sb.line end
+              return sa.character < sb.character
+            end)
+            for index, location in ipairs(response.result) do
+              rr:add_result(location)
+              if index % 100 == 0 then
+                coroutine.yield()
+                if rr.generation ~= generation then return end
+                rr.list:resize_to_parent()
               end
-            })
-          else
-            core.log("[LSP] No references found.")
+            end
+            rr.list:resize_to_parent()
           end
+          rr:stop_searching()
         end
       })
       break
@@ -1854,7 +1838,7 @@ function lsp.request_workspace_symbol(doc, symbol)
   for _, name in pairs(lsp.get_active_servers(doc.filename, true)) do
     local server = lsp.servers_running[name]
     if server.capabilities.workspaceSymbolProvider then
-      local rs = SymbolResults.open(symbol)
+      local rs = SymbolResults:open(symbol)
       -- a later search reuses the panel: this one's results are dropped then
       local generation = rs.generation
       server:push_request('workspace/symbol', {

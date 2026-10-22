@@ -10,6 +10,8 @@
 -- opens a new panel. In a tab sharing a pane with the docs, showing a result
 -- would hide the list, so there a click, double click or Enter opens it.
 --
+-- ReferenceResults, the same for the references to a symbol, is a subclass.
+--
 
 local core = require "core"
 local common = require "core.common"
@@ -31,8 +33,9 @@ local util = require "plugins.lsp.util"
 ---@field private list widget.listbox
 local SymbolResults = Widget:extend()
 
----@type lsp.symbolresults?
-local panel
+---The panel of each class (a subclass has its own), by class
+---@type table<lsp.symbolresults, lsp.symbolresults>
+local panels = {}
 
 function SymbolResults:new()
   SymbolResults.super.new(self)
@@ -43,7 +46,8 @@ function SymbolResults:new()
   self.header = PanelHeader(self)
   -- moved into a tab: no longer the panel, which the next search opens anew
   self.header.on_move_to_tab = function()
-    if panel == self then panel = nil end
+    local class = getmetatable(self)
+    if panels[class] == self then panels[class] = nil end
   end
 
   self.list_container = Widget(self)
@@ -54,10 +58,7 @@ function SymbolResults:new()
   self.list.border.width = 0
 
   self.list:enable_expand(true)
-  self.list:add_column("Num.")
-  self.list:add_column("Symbol")
-  self.list:add_column("Kind")
-  self.list:add_column("Location")
+  self:add_columns()
 
   self.list.on_row_click = function(_, idx, _, clicks)
     self:select(idx)
@@ -74,12 +75,22 @@ function SymbolResults:new()
   self:show()
 end
 
----Shows the panel, cleared for a new search, and focuses it.
+function SymbolResults:add_columns()
+  self.list:add_column("Num.")
+  self.list:add_column("Symbol")
+  self.list:add_column("Kind")
+  self.list:add_column("Location")
+end
+
+---Shows the class's panel, cleared for a new search, and focuses it.
+---Called on the class: `SymbolResults:open(symbol)`.
 ---@param symbol string
 ---@return lsp.symbolresults
-function SymbolResults.open(symbol)
+function SymbolResults:open(symbol)
+  local panel = panels[self]
   if not panel then
-    panel = SymbolResults()
+    panel = self()
+    panels[self] = panel
     -- a third of the window at first; then as the user resizes it
     panel:set_size(nil, math.floor(core.root_view.size.y / 3))
   end
@@ -132,6 +143,16 @@ function SymbolResults:add_result(result)
   self.num = self.num + 1
 
   self.list:add_row(row, result)
+end
+
+---The header's text.
+---@return string
+function SymbolResults:get_status()
+  if self.searching and #self.list.rows == 0 then
+    return string.format("Searching symbols for %q...", self.symbol)
+  end
+  return string.format("%s %d results found for %q",
+    self.searching and "Searching:" or "Finished:", #self.list.rows, self.symbol)
 end
 
 function SymbolResults:stop_searching()
@@ -192,12 +213,7 @@ function SymbolResults:update()
   if not SymbolResults.super.update(self) then return end
   -- update the positions and sizes
   self.background_color = style.background
-  if self.searching and #self.list.rows == 0 then
-    self.header.text = string.format("Searching symbols for %q...", self.symbol)
-  else
-    self.header.text = string.format("%s %d results found for %q",
-      self.searching and "Searching:" or "Finished:", #self.list.rows, self.symbol)
-  end
+  self.header.text = self:get_status()
   local top = self.header:get_height()
   self.list_container:set_position(style.padding.x, top)
   self.list_container:set_size(
@@ -246,7 +262,7 @@ command.add(SymbolResults, {
 
 -- Escape closes the panel; a tab is closed as any other
 command.add(function()
-  return core.active_view:is(SymbolResults) and core.active_view.header:is_panel(),
+  return core.active_view:extends(SymbolResults) and core.active_view.header:is_panel(),
     core.active_view
 end, {
   ["symbol-results:close"] = function(rs) rs.header:close() end,
@@ -262,6 +278,45 @@ keymap.add {
   ["return"] = "symbol-results:open-selected",
   ["escape"] = "symbol-results:close",
 }
+
+
+---The references to a symbol: a row for each, its location and line of code.
+---@class lsp.referenceresults : lsp.symbolresults
+local ReferenceResults = SymbolResults:extend()
+
+function ReferenceResults:new()
+  ReferenceResults.super.new(self)
+  self.name = "References"
+end
+
+function ReferenceResults:add_columns()
+  self.list:add_column("Location")
+  self.list:add_column("Code")
+end
+
+function ReferenceResults:get_name()
+  return "References: " .. self.symbol
+end
+
+---@param location table An LSP Location
+function ReferenceResults:add_result(location)
+  local preview, position = require("plugins.lsp").get_location_preview(location)
+  self.list:add_row({
+    style.text, position,
+    ListBox.COLEND,
+    { container = style, name = "code_font" }, style.accent, preview
+  }, { location = location })
+end
+
+function ReferenceResults:get_status()
+  if self.searching and #self.list.rows == 0 then
+    return string.format("Finding references to %q...", self.symbol)
+  end
+  return string.format("%s %d references to %q",
+    self.searching and "Searching:" or "Finished:", #self.list.rows, self.symbol)
+end
+
+SymbolResults.ReferenceResults = ReferenceResults
 
 
 return SymbolResults
