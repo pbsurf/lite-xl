@@ -364,6 +364,35 @@ function common.draw_text(font, color, text, align, x,y,w,h)
 end
 
 
+---Shortens text with an ellipsis so that it fits a width: its end is cut, or
+---its start with `from_start` (for a path, say, whose end matters most).
+---@param font renderer.font
+---@param text string
+---@param w number
+---@param from_start? boolean
+---@return string
+function common.truncate_text(font, text, w, from_start)
+  if font:get_width(text) <= w then return text end
+  w = w - font:get_width("…")
+  local len = utf8.len(text)
+  -- the first or last k characters (bytes, if text isn't valid UTF-8)
+  local function keep(k)
+    if k == 0 then return "" end
+    if from_start then
+      return text:sub(len and utf8.offset(text, -k) or -k)
+    end
+    return text:sub(1, len and utf8.offset(text, k + 1) - 1 or k)
+  end
+  -- the most characters that fit, by bisection
+  local lo, hi = 0, (len or #text) - 1
+  while lo < hi do
+    local mid = (lo + hi + 1) // 2
+    if font:get_width(keep(mid)) <= w then lo = mid else hi = mid - 1 end
+  end
+  return from_start and "…" .. keep(lo) or keep(lo) .. "…"
+end
+
+
 local function faded(color, alpha)
   if not alpha or alpha >= 1 then return color end
   return { color[1], color[2], color[3], (color[4] or 255) * alpha }

@@ -520,12 +520,19 @@ local function draw_suggestions_box(self)
     local item = self.suggestions[i]
     local color = (i == self.suggestion_idx) and style.accent or style.text
     local y = self.position.y - (i - first + 1) * lh - dh
-    common.draw_text(item.font or self:get_font(), color, item.text, nil, x, y, 0, lh)
-
+    local font = item.font or self:get_font()
+    local w = self.size.x - x - style.padding.x
+    local text = item.text
     if item.info then
-      local w = self.size.x - x - style.padding.x
-      common.draw_text(self:get_font(), style.dim, item.info, "right", x, y, w, lh)
+      -- too long for both: the info (often what tells items apart, as file:line
+      -- does) takes up to half the row, cut at its start; the text the rest
+      local info_w = math.max(w / 2, w - font:get_width(text) - style.padding.x)
+      local info = common.truncate_text(self:get_font(), item.info, info_w, true)
+      local text_w = w - self:get_font():get_width(info) - style.padding.x
+      text = common.truncate_text(font, text, text_w)
+      common.draw_text(self:get_font(), style.dim, info, "right", x, y, w, lh)
     end
+    common.draw_text(font, color, text, nil, x, y, 0, lh)
   end
   core.pop_clip_rect()
 end
