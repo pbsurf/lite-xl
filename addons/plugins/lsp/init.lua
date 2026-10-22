@@ -1763,7 +1763,9 @@ function lsp.request_references(doc, line, col)
                   res[i] = {
                     text = reference_info[1],
                     info = reference_info[2],
-                    name = name
+                    name = name,
+                    -- the text is the referencing line of code
+                    font = style.code_font
                   }
                 end
                 return res
