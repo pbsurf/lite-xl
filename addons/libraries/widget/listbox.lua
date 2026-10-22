@@ -719,7 +719,10 @@ function ListBox:draw_row(row, x, y, only_calc)
 
   if not only_calc and self.rows[row].w then
     w, h = self.rows[row].w, self.rows[row].h
-    w = self.largest_row > 0 and self.largest_row or w
+    -- the visible width, or the row's if wider: when scrolled horizontally,
+    -- the highlight reaches its end. With columns, all rows are as wide as
+    -- they are (a row's own w is as of when it was added: columns widen)
+    w = math.max(self.largest_row, self.columns_width or w)
 
     if self.selected_row == row then
       renderer.draw_rect(x, y, w, h, style.selection)
@@ -859,6 +862,7 @@ function ListBox:draw()
       new_width = new_width + col.width + style.padding.x
     end
   end
+  self.columns_width = #self.columns > 0 and new_width or nil
 
   if self.expand then
     self:resize_to_parent()
