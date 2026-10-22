@@ -2769,6 +2769,11 @@ command.add(nil, {
   end
 })
 
+-- found in Do Command by these words too (names of the panels they open, ...)
+command.keywords["lsp:find-workspace-symbol"] = "symbols search project"
+command.keywords["lsp:view-document-symbols"] = "symbols search file outline"
+command.keywords["lsp:find-references"] = "usages uses"
+
 -- ctrl+click: the definition of the symbol under the mouse
 command.add(function(x, y)
   local dv = get_active_docview()
