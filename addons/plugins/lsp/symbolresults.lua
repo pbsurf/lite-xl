@@ -7,7 +7,8 @@
 -- shows it in that pane, with the symbol's name selected, while the focus stays
 -- here; Enter or a double click moves the focus there, Escape closes the panel.
 -- Its header's button moves it into a tab, keeping the results; the next search
--- opens a new panel. In a tab sharing a pane with the docs, showing a result
+-- opens a new panel. In a tab, the button moves it back, replacing the panel.
+-- In a tab sharing a pane with the docs, showing a result
 -- would hide the list, so there a click, double click or Enter opens it.
 --
 -- ReferenceResults, the same for the references to a symbol, is a subclass.
@@ -33,10 +34,6 @@ local util = require "plugins.lsp.util"
 ---@field private list widget.listbox
 local SymbolResults = Widget:extend()
 
----The panel of each class (a subclass has its own), by class
----@type table<lsp.symbolresults, lsp.symbolresults>
-local panels = {}
-
 function SymbolResults:new()
   SymbolResults.super.new(self)
 
@@ -44,11 +41,6 @@ function SymbolResults:new()
   self.defer_draw = false
 
   self.header = PanelHeader(self)
-  -- moved into a tab: no longer the panel, which the next search opens anew
-  self.header.on_move_to_tab = function()
-    local class = getmetatable(self)
-    if panels[class] == self then panels[class] = nil end
-  end
 
   self.list_container = Widget(self)
   self.list_container.border.width = 0
@@ -82,21 +74,13 @@ function SymbolResults:add_columns()
   self.list:add_column("Location")
 end
 
----Shows the class's panel, cleared for a new search, and focuses it.
----Called on the class: `SymbolResults:open(symbol)`.
+---Shows the class's panel (a subclass has its own), cleared for a new search,
+---and focuses it. Called on the class: `SymbolResults:open(symbol)`.
 ---@param symbol string
 ---@return lsp.symbolresults
 function SymbolResults:open(symbol)
-  local panel = panels[self]
-  if not panel then
-    panel = self()
-    panels[self] = panel
-    -- a third of the window at first; then as the user resizes it
-    panel:set_size(nil, math.floor(core.root_view.size.y / 3))
-  end
-  if not core.root_view.root_node:get_node_for_view(panel) then
-    core.root_view:get_last_used_node():split("down", panel, { y = true }, true)
-  end
+  local panel = PanelHeader.get_panel(self) or self()
+  panel.header:show_panel()
   panel:reset(symbol)
   core.set_active_view(panel)
   return panel

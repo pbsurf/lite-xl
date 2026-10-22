@@ -14,12 +14,10 @@ local ResultsView = View:extend()
 -- Selecting a result (arrow keys, a click) shows it in that pane, with the
 -- match selected, while the focus stays here; Enter or a double click moves the
 -- focus there, Escape closes the panel. Its header's button moves it into a
--- tab, keeping the results; the next search opens a new panel. In a tab sharing
+-- tab, keeping the results; the next search opens a new panel. In a tab, the
+-- button moves it back, replacing the panel. In a tab sharing
 -- a pane with the docs, showing a result would hide the list, so there a click,
 -- double click or Enter opens it.
----@type plugins.projectsearch.resultsview?
-local panel
-
 function ResultsView:__tostring() return "ResultsView" end
 
 ResultsView.context = "session"
@@ -32,10 +30,6 @@ function ResultsView:new(path, text, fn)
   self.hovered_idx = 0
   self.generation = 0
   self.header = PanelHeader(self)
-  -- moved into a tab: no longer the panel, which the next search opens anew
-  self.header.on_move_to_tab = function()
-    if panel == self then panel = nil end
-  end
   self:begin_search(path, text, fn)
 end
 
@@ -309,16 +303,13 @@ local function begin_search(path, text, fn)
     core.error("Expected non-empty string")
     return
   end
+  local panel = PanelHeader.get_panel(ResultsView)
   if panel then
     panel:begin_search(path, text, fn)
   else
     panel = ResultsView(path, text, fn)
-    -- a third of the window at first; then as the user resizes it
-    panel.size.y = math.floor(core.root_view.size.y / 3)
   end
-  if not core.root_view.root_node:get_node_for_view(panel) then
-    core.root_view:get_last_used_node():split("down", panel, { y = true }, true)
-  end
+  panel.header:show_panel()
   core.set_active_view(panel)
   return panel
 end

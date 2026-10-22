@@ -7,27 +7,41 @@ local Object = require "core.object"
 ---The status line at the top of a results view (project search's, LSP's
 ---Symbols Search, ...): a text, then a divider that can show progress. When the
 ---view is a locked panel, it has buttons on the right to move the view into a
----tab and to close it, which also tell a panel from a tab.
+---tab and to close it, which also tell a panel from a tab; in a tab, a button
+---to move it back into a panel.
+---
+---Each kind of view (its class) has one panel, which a new search reuses:
+---get_panel() and show_panel(). Moving a view into a tab leaves its kind
+---without one, and moving a tab back replaces the panel there.
 ---
 ---The view sets the fields below, calls draw() and passes on mouse events.
 ---@class core.panelheader : core.object
 ---@field view core.view
+---@field kind core.object The view's class
 ---@field text string
 ---@field color renderer.color? Of the text; style.text if nil
 ---@field divider_color renderer.color? style.dim if nil
 ---@field progress number? 0 to 1: drawn over the divider while set
----@field on_move_to_tab fun(view: core.view)? Called after the view moved
----@field on_close fun(view: core.view)? Called after the panel closed
+---@field panel_height number? The view's height when it last was a panel
 local PanelHeader = Object:extend()
 
-local buttons = {
+local panel_buttons = {
   { icon = "w", action = "move_to_tab", tooltip = "Open in Tab" },
   { icon = "C", action = "close", tooltip = "Close" },
 }
+local tab_buttons = {
+  { icon = "w", action = "move_to_panel", tooltip = "Move to Panel" },
+}
+
+---Each kind's panel, kept while closed: shown again, it has its results and
+---the height the user gave it
+---@type table<core.object, core.view>
+local panels = {}
 
 ---@param view core.view
 function PanelHeader:new(view)
   self.view = view
+  self.kind = getmetatable(view)
   self.text = ""
   self.rects = {} -- each shown button's {button, x, y, w, h}, as last drawn
   self.hovered = nil
@@ -55,7 +69,9 @@ function PanelHeader:draw(x, y, w)
   -- buttons, from the right
   self.rects = {}
   local right = x + w - pad.x
-  if self:is_panel() then
+  -- none before the view is placed
+  if core.root_view.root_node:get_node_for_view(self.view) then
+    local buttons = self:is_panel() and panel_buttons or tab_buttons
     for i = #buttons, 1, -1 do
       local b = buttons[i]
       local bw = style.icon_font:get_width(b.icon)
@@ -133,26 +149,65 @@ function PanelHeader:on_mouse_left()
   tooltip.hover(self, nil)
 end
 
----Removes the view from its panel, focusing the pane used last.
-function PanelHeader:close()
-  local root = core.root_view.root_node
-  local node = root:get_node_for_view(self.view)
-  if node then node:remove_view(root, self.view) end
-  core.set_active_view(core.root_view:get_last_used_node().active_view)
-  self:on_mouse_left()
-  if self.on_close then self.on_close(self.view) end
+---The panel of a kind of view, shown or closed, if it has one.
+---@param kind core.object The views' class
+---@return core.view?
+function PanelHeader.get_panel(kind)
+  return panels[kind]
 end
 
----Moves the view from its panel into a tab of the pane used last.
-function PanelHeader:move_to_tab()
+---Removes the view from where it is, keeping its height if it's a panel.
+local function remove(self)
   local root = core.root_view.root_node
   local node = root:get_node_for_view(self.view)
-  if node then node:remove_view(root, self.view) end
+  if not node then return end
+  if node.locked then self.panel_height = self.view.size.y end
+  node:remove_view(root, self.view)
+end
+
+---Makes the view its kind's panel, shown below the pane used last unless it's
+---there already. The kind's previous panel is closed and dropped, its place
+---and height taken over.
+function PanelHeader:show_panel()
+  local old = panels[self.kind]
+  if old and old ~= self.view then
+    remove(old.header)
+    self.panel_height = old.header.panel_height
+  end
+  panels[self.kind] = self.view
+  local node = core.root_view.root_node:get_node_for_view(self.view)
+  if node and node.locked then return end
+  remove(self)
+  -- a third of the window at first; then as the user resizes it
+  self.view:set_target_size("y",
+    self.panel_height or math.floor(core.root_view.size.y / 3))
+  -- only now: removing a node replaces its sibling's node
+  core.root_view:get_last_used_node():split("down", self.view, { y = true }, true)
+end
+
+---Removes the view from its panel, focusing the pane used last.
+function PanelHeader:close()
+  remove(self)
+  core.set_active_view(core.root_view:get_last_used_node().active_view)
+  self:on_mouse_left()
+end
+
+---Moves the view from its panel into a tab of the pane used last; its kind
+---has no panel then, until the next search opens one.
+function PanelHeader:move_to_tab()
+  remove(self)
+  if panels[self.kind] == self.view then panels[self.kind] = nil end
   -- only now: removing the panel's node replaces its sibling's node
   core.root_view:get_last_used_node():add_view(self.view)
   core.set_active_view(self.view)
   self:on_mouse_left()
-  if self.on_move_to_tab then self.on_move_to_tab(self.view) end
+end
+
+---Moves the view from its tab into its kind's panel, replacing the one there.
+function PanelHeader:move_to_panel()
+  self:show_panel()
+  core.set_active_view(self.view)
+  self:on_mouse_left()
 end
 
 
