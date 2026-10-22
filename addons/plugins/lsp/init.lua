@@ -2242,43 +2242,47 @@ end
 core.add_thread(function()
   while true do
     for _,server in pairs(lsp.servers_running) do
-      -- Send raw data to server which is usually big and slow in a
-      -- non blocking way by creating a coroutine just for it.
-      if #server.raw_list > 0 then
-        local raw_send = coroutine.create(function()
-          server:process_raw()
-        end)
-        local _, wait = coroutine.resume(raw_send)
-        while coroutine.status(raw_send) ~= "dead" do
-          -- while sending raw request we only read from lsp to not
-          -- conflict with the written raw data so remember no calls
-          -- here to: server:process_client_responses()
-          -- or server:process_notifications()
-          server:process_errors(config.plugins.lsp.log_server_stderr)
-          server:process_responses()
-          -- pass on the wait requested by send_data() between retries of a
-          -- failed write, so its ~1s of backoff isn't used up in a few frames
-          coroutine.yield(wait)
-          _, wait = coroutine.resume(raw_send)
+      -- an error (say, in a response callback) is logged; uncaught, it would
+      -- end this thread and with it all communication with the servers
+      core.try(function()
+        -- Send raw data to server which is usually big and slow in a
+        -- non blocking way by creating a coroutine just for it.
+        if #server.raw_list > 0 then
+          local raw_send = coroutine.create(function()
+            server:process_raw()
+          end)
+          local _, wait = coroutine.resume(raw_send)
+          while coroutine.status(raw_send) ~= "dead" do
+            -- while sending raw request we only read from lsp to not
+            -- conflict with the written raw data so remember no calls
+            -- here to: server:process_client_responses()
+            -- or server:process_notifications()
+            server:process_errors(config.plugins.lsp.log_server_stderr)
+            server:process_responses()
+            -- pass on the wait requested by send_data() between retries of a
+            -- failed write, so its ~1s of backoff isn't used up in a few frames
+            coroutine.yield(wait)
+            _, wait = coroutine.resume(raw_send)
+          end
         end
-      end
 
-      if not config.plugins.lsp.more_yielding then
-        server:process_notifications()
-        server:process_requests()
-        server:process_responses()
-        server:process_client_responses()
-      else
-        server:process_notifications()
-        coroutine.yield()
-        server:process_requests()
-        coroutine.yield()
-        server:process_responses()
-        server:process_client_responses()
-        coroutine.yield()
-      end
+        if not config.plugins.lsp.more_yielding then
+          server:process_notifications()
+          server:process_requests()
+          server:process_responses()
+          server:process_client_responses()
+        else
+          server:process_notifications()
+          coroutine.yield()
+          server:process_requests()
+          coroutine.yield()
+          server:process_responses()
+          server:process_client_responses()
+          coroutine.yield()
+        end
 
-      server:process_errors(config.plugins.lsp.log_server_stderr)
+        server:process_errors(config.plugins.lsp.log_server_stderr)
+      end)
     end
 
     -- poll while there's something to send or a request awaits its answer
