@@ -460,12 +460,13 @@ local function project_search()
   if findtext:get_text() == "" then return end
   remember_find()
   local query, _, use_regex = search_query()
+  local rv
   if not use_regex then
-    projectsearch.search_plain(
+    rv = projectsearch.search_plain(
       query, filepicker:get_path(), not matchcase:is_checked()
     )
   else
-    local rv = projectsearch.search_regex(
+    rv = projectsearch.search_regex(
       query, filepicker:get_path(), not matchcase:is_checked()
     )
     -- the query is only shown (also after a refresh): show what was typed,
@@ -476,6 +477,8 @@ local function project_search()
     end
   end
   command.perform "search-replace:hide"
+  -- hiding focused the doc: back to the results, to step through them
+  if rv then core.set_active_view(rv) end
 end
 
 local find_enabled = true
