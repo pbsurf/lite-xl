@@ -21,8 +21,11 @@ style.scrollbar_track = { common.color "#252529" }
 style.nagbar = { common.color "#FF0000" }
 style.nagbar_text = { common.color "#FFFFFF" }
 style.nagbar_dim = { common.color "rgba(0, 0, 0, 0.45)" }
-style.drag_overlay = { common.color "rgba(255,255,255,0.1)" }
-style.drag_overlay_tab = { common.color "#93DDFA" }
+-- dragging a tab: the pane or half it goes to, and its place among other tabs;
+-- a mid blue, which shows on light backgrounds as on dark ones: themes that
+-- don't set these get them too
+style.drag_overlay = { common.color "rgba(48, 140, 198, 0.25)" }
+style.drag_overlay_tab = { common.color "#308cc6" }
 style.good = { common.color "#72b886" }
 style.warn = { common.color "#FFA94D" }
 style.error = { common.color "#FF3333" }
