@@ -7,6 +7,21 @@ local DocView = require "core.docview"
 local Doc = require "core.doc"
 local TreeView = require "plugins.treeview"
 
+-- A preview isn't added to the recent files (core.recent_files) when shown, only
+-- when its tab becomes normal. Core skips transient views, but open_doc makes a
+-- new view active before we mark it, so core's adds are dropped meanwhile.
+local opening_preview = false
+local core_add_recent_file = core.add_recent_file
+function core.add_recent_file(...)
+  if not opening_preview then core_add_recent_file(...) end
+end
+
+local function make_normal(view)
+  if not view.ephemeral then return end
+  view.ephemeral = false
+  if view.doc and view.doc.abs_filename then core.add_recent_file(view.doc.abs_filename) end
+end
+
 -- Only a doc opened with opts.preview (while browsing: tree view, go to
 -- definition, ...) gets a preview tab; other opens (ctrl+p, ctrl+o, ...) make a
 -- normal one
@@ -20,10 +35,13 @@ function RootView:open_doc(doc, opts)
   for _, v in ipairs(node.views) do
     if v.doc == doc then exists = true end
   end
-  local docview = RootView_open_doc(self, doc, opts)
+  opening_preview = opts and opts.preview and not exists
+  local ok, docview = pcall(RootView_open_doc, self, doc, opts)
+  opening_preview = false
+  if not ok then error(docview, 0) end
   if not (opts and opts.preview) then
     -- Opening a preview's doc otherwise makes it normal
-    if docview.ephemeral then docview.ephemeral = false end
+    make_normal(docview)
   elseif not exists then
     -- We assume that ephemeral tab is always the last one
     -- But user can drag and drop tabs so full check is needed
@@ -61,7 +79,7 @@ end
 -- and may be of a doc in another tab)
 local Doc_on_text_change = Doc.on_text_change
 function Doc:on_text_change(type)
-  if type ~= "reload" then core.active_view.ephemeral = false end
+  if type ~= "reload" then make_normal(core.active_view) end
   Doc_on_text_change(self, type)
 end
 
@@ -74,7 +92,7 @@ command.add(
   end, {
   ["ephemeral-tabs:treeview-select-and-open-normal"] = function()
     command.perform "treeview:select-and-open"
-    if core.active_view.doc then core.active_view.ephemeral = false end
+    if core.active_view.doc then make_normal(core.active_view) end
   end
 })
 
@@ -88,7 +106,7 @@ function RootView:on_mouse_pressed(button, x, y, clicks)
     local node = self.root_node:get_child_overlapping_point(x, y)
     local idx = node:get_tab_overlapping_point(x, y)
     if idx then
-      node.views[idx].ephemeral = false
+      make_normal(node.views[idx])
     end
   end
   return result
@@ -100,8 +118,7 @@ function RootView:on_mouse_released(button, x, y, ...)
   if self.dragged_node then
     if button == "left" then
       if self.dragged_node.dragging then
-        local view = self.dragged_node.node.views[self.dragged_node.idx]
-        view.ephemeral = false
+        make_normal(self.dragged_node.node.views[self.dragged_node.idx])
       end
     end
   end

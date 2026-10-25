@@ -39,10 +39,12 @@ end
 
 
 -- Files made active, absolute paths, newest first, kept between sessions (unlike
--- core.visited_files, which is for the project's files and kept per session)
+-- core.visited_files, which is for the project's files and kept per session).
+-- A transient view's file (a preview) isn't added; a plugin adds it when the view
+-- stops being transient.
 local MAX_RECENT_FILES = 50
 
-local function add_recent_file(abs_filename)
+function core.add_recent_file(abs_filename)
   local recents = core.recent_files
   for i = 1, #recents do
     if recents[i] == abs_filename then
@@ -1259,7 +1261,9 @@ function core.set_active_view(view)
     if view.doc and view.doc.filename then
       core.set_visited(view.doc.filename)
       -- a named doc that isn't a file (LSP's help) has no abs_filename
-      if view.doc.abs_filename then add_recent_file(view.doc.abs_filename) end
+      if view.doc.abs_filename and not view:is_transient() then
+        core.add_recent_file(view.doc.abs_filename)
+      end
     end
     core.last_active_view = core.active_view
     core.active_view = view

@@ -121,7 +121,8 @@ another repository's version, uninstalls removing dependents under `--assume-yes
   `{ preview = true }` to `RootView:open_doc`) replaces the previous preview tab
   until edited or double-clicked; ctrl+p and ctrl+o open normal tabs. Preview tabs
   show their name in italic (in tabs, the tab menu and the ctrl+tab list) and
-  aren't restored with the workspace.
+  aren't restored with the workspace or listed in File > Open Recent until they
+  become normal tabs.
 * **openurl:** ctrl+click opens the URL or DOI under the mouse in the browser
   (DOIs via `config.plugins.openurl.doi_url`), or a `[[wiki link]]` to a local file
   (`name`, `name.md`, ... in the file's directory or a parent; `[[name#Heading]]`
