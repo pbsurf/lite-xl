@@ -374,8 +374,9 @@ local function binding(name)
   return best
 end
 
----Commands no menu has, not hidden (by prefix, pattern or command.hidden), and not
----bound to a mouse action; sorted.
+---Commands no menu has, not hidden (by prefix, pattern or command.hidden), not
+---bound to a mouse action, and not the enable/disable or show/hide of a toggle a
+---menu has; sorted.
 local function unplaced_commands()
   local placed = {}
   local function mark(rows)
@@ -396,10 +397,16 @@ local function unplaced_commands()
       if name:match(pattern) then return true end
     end
   end
+  local toggle_parts = { enable = true, disable = true, show = true, hide = true }
+  local function placed_toggle_part(name)
+    local base, action = name:match("^(.*):(%a+)$")
+    return base and toggle_parts[action] and placed[base .. ":toggle"]
+  end
   local res = {}
   for name in pairs(command.map) do
     local b = keymap.get_binding(name) or ""
-    if not placed[name] and not hidden[name:match("^[^:]+")] and not hidden_command(name)
+    if not placed[name] and not placed_toggle_part(name)
+       and not hidden[name:match("^[^:]+")] and not hidden_command(name)
        and not command.hidden[name]
        and not b:match("click$") and not b:match("wheel") then
       table.insert(res, name)
