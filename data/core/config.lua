@@ -26,6 +26,9 @@ config.ignore_files = {
 config.symbol_pattern = "[%a_][%w_]*"
 config.non_word_chars = " \t\n/\\()\"':,.;<>~!@#$%^&*|+=[]{}`?-"
 config.undo_merge_timeout = 0.3
+-- Cut and copy leave out cursors without a selection, and do nothing if nothing
+-- is selected; if true, they take the whole line where nothing is selected
+config.copy_whole_line = false
 config.max_undos = 10000
 -- Tabs scroll once a split has more than max_tabs, or they would get narrower than
 -- min_tab_width (pixels at scale 1); 0 disables either limit

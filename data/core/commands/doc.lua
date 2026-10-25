@@ -32,23 +32,36 @@ local function append_line_if_last_line(line)
 end
 
 local function cut_or_copy(delete)
+  if not config.copy_whole_line and not doc():has_any_selection() then return end
   local full_text = ""
   local text = ""
   core.cursor_clipboard = {}
   core.cursor_clipboard_whole_line = {}
+  -- without copy_whole_line, cursors without a selection are left out, and the
+  -- others numbered among themselves (counting down: the loop goes in reverse)
+  local n_selected = 0
+  for _, line1, col1, line2, col2 in doc():get_selections() do
+    if line1 ~= line2 or col1 ~= col2 then n_selected = n_selected + 1 end
+  end
   for idx, line1, col1, line2, col2 in doc():get_selections(true, true) do
-    if line1 ~= line2 or col1 ~= col2 then
+    local selected = line1 ~= line2 or col1 ~= col2
+    local cb_idx = idx
+    if not config.copy_whole_line then
+      cb_idx, n_selected = n_selected, n_selected - (selected and 1 or 0)
+    end
+    if selected then
       text = doc():get_text(line1, col1, line2, col2)
       full_text = full_text == "" and text or (text .. " " .. full_text)
-      core.cursor_clipboard_whole_line[idx] = false
+      core.cursor_clipboard_whole_line[cb_idx] = false
       if delete then
         doc():delete_to_cursor(idx, 0)
       end
-    else -- Cut/copy whole line
+      core.cursor_clipboard[cb_idx] = text
+    elseif config.copy_whole_line then -- Cut/copy whole line
       -- Remove newline from the text. It will be added as needed on paste.
       text = string.sub(doc().lines[line1], 1, -2)
       full_text = full_text == "" and text .. "\n" or (text .. "\n" .. full_text)
-      core.cursor_clipboard_whole_line[idx] = true
+      core.cursor_clipboard_whole_line[cb_idx] = true
       if delete then
         if line1 < #doc().lines then
           doc():remove(line1, 1, line1 + 1, 1)
@@ -59,8 +72,8 @@ local function cut_or_copy(delete)
         end
         doc():set_selections(idx, line1, col1, line2, col2)
       end
+      core.cursor_clipboard[cb_idx] = text
     end
-    core.cursor_clipboard[idx] = text
   end
   if delete then doc():merge_cursors() end
   core.cursor_clipboard["full"] = full_text
