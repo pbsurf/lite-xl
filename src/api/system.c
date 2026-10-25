@@ -914,8 +914,67 @@ static int f_get_clipboard(lua_State *L) {
 }
 
 
+#if defined(__linux__) && __has_include(<X11/Xlib.h>)
+#include <X11/Xlib.h>
+#include <X11/Xatom.h>
+#include <dlfcn.h>
+
+/* SDL doesn't answer requests for the TIMESTAMP target of the clipboard, and
+** VMware's guest tools copy the clipboard to the host only when it answers
+** (otherwise they read PRIMARY, which we don't own). We answer for SDL, with the
+** time of the last input event before the copy, as ICCCM asks. We use the libX11
+** SDL loaded rather than linking it. */
+static struct {
+  Atom (*InternAtom)(Display*, const char*, Bool);
+  int (*ChangeProperty)(Display*, Window, Atom, Atom, int, int, const unsigned char*, int);
+  Status (*SendEvent)(Display*, Window, Bool, long, XEvent*);
+  Atom clipboard, timestamp;
+  Time last_event, owned_since;
+} x11clip;
+
+static bool x11_event_hook(void *userdata, XEvent *e) {
+  if (!x11clip.clipboard) {
+    x11clip.clipboard = x11clip.InternAtom(e->xany.display, "CLIPBOARD", False);
+    x11clip.timestamp = x11clip.InternAtom(e->xany.display, "TIMESTAMP", False);
+  }
+  switch (e->type) {
+    case KeyPress: case KeyRelease: x11clip.last_event = e->xkey.time; break;
+    case ButtonPress: case ButtonRelease: x11clip.last_event = e->xbutton.time; break;
+    case SelectionRequest: {
+      XSelectionRequestEvent *req = &e->xselectionrequest;
+      if (req->selection != x11clip.clipboard || req->target != x11clip.timestamp)
+        break;
+      XEvent reply = { .xselection = { .type = SelectionNotify, .display = req->display,
+        .requestor = req->requestor, .selection = req->selection, .target = req->target,
+        .property = req->property ? req->property : req->target, .time = req->time } };
+      long t = x11clip.owned_since;  /* format 32 is a long in Xlib */
+      x11clip.ChangeProperty(req->display, req->requestor, reply.xselection.property,
+        XA_INTEGER, 32, PropModeReplace, (unsigned char*) &t, 1);
+      x11clip.SendEvent(req->display, req->requestor, False, 0, &reply);
+      return false;
+    }
+  }
+  return true;
+}
+
+static void x11_clipboard_init(void) {
+  if (x11clip.InternAtom) { return; }
+  const char *driver = SDL_GetCurrentVideoDriver();
+  void *lib = dlopen("libX11.so.6", RTLD_NOW | RTLD_NOLOAD);
+  if (!driver || strcmp(driver, "x11") || !lib) { return; }
+  x11clip.InternAtom = dlsym(lib, "XInternAtom");
+  x11clip.ChangeProperty = dlsym(lib, "XChangeProperty");
+  x11clip.SendEvent = dlsym(lib, "XSendEvent");
+  if (!x11clip.InternAtom || !x11clip.ChangeProperty || !x11clip.SendEvent) { return; }
+  SDL_SetX11EventHook(x11_event_hook, NULL);
+}
+#endif
+
 static int f_set_clipboard(lua_State *L) {
   const char *text = luaL_checkstring(L, 1);
+#if defined(__linux__) && __has_include(<X11/Xlib.h>)
+  x11clip.owned_since = x11clip.last_event;
+#endif
   SDL_SetClipboardText(text);
   return 0;
 }
@@ -1388,6 +1447,9 @@ static const luaL_Reg lib[] = {
 
 int luaopen_system(lua_State *L) {
   DIALOG_EVENT_TYPE = SDL_RegisterEvents(1);
+#if defined(__linux__) && __has_include(<X11/Xlib.h>)
+  x11_clipboard_init();
+#endif
   luaL_newmetatable(L, API_TYPE_NATIVE_PLUGIN); 
   lua_pushcfunction(L, f_library_gc);
   lua_setfield(L, -2, "__gc");
