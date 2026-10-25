@@ -980,7 +980,7 @@ keymap.add {
   ["ctrl+e"]             = "build:run-or-term-or-kill",
   ["ctrl+shift+e"]       = "build:run-or-term-or-kill-with-arguments",
   ["ctrl+t"]             = "build:next-target",
-  ["ctrl+shift+t"]       = "build:select-target",
+  ["ctrl+shift+alt+t"]   = "build:select-target",
   ["ctrl+alt+e"]         = "build:select-target-and-run",
   ["ctrl+shift+alt+b"]   = "build:select-target-and-build",
   ["ctrl+shift+b"]       = "build:clean",
