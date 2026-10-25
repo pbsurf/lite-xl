@@ -152,6 +152,11 @@ command.add(nil, {
     core.root_view:open_doc(core.open_doc())
   end,
 
+  ["core:reopen-closed-tab"] = function()
+    local path = core.get_closed_recent_files()[1]
+    if path then core.reopen_file(path) else core.log("No closed file to reopen") end
+  end,
+
   ["core:new-named-doc"] = function()
     core.command_view:enter("File name", {
       submit = function(text)

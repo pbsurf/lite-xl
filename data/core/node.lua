@@ -122,6 +122,7 @@ function Node:split(dir, view, locked, resizable)
 end
 
 function Node:remove_view(root, view)
+  core.on_view_removed(self, view, self:get_view_idx(view))
   if #self.views > 1 then
     local idx = self:get_view_idx(view)
     if idx <= self.tab_scroll then
@@ -749,6 +750,7 @@ function Node:close_all_docviews(keep_active)
     while i <= #self.views do
       local view = self.views[i]
       if view.context == "session" and (not keep_active or view ~= self.active_view) then
+        core.on_view_removed(self, view, i)
         table.remove(self.views, i)
         if view == node_active_view then
           lost_active_view = true

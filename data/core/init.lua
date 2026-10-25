@@ -57,6 +57,127 @@ function core.add_recent_file(abs_filename)
 end
 
 
+-- Closing a file's last tab moves it to the top of core.recent_files, so the
+-- first entry that isn't open is the file closed last: core.reopen_file reopens
+-- it where its tab was, at the cursor and scroll it had (this session only).
+
+-- A tab's identity, which its view keeps and a reopened view takes over: a
+-- reopened tab goes beside its neighbor's tab, also when that was reopened too.
+-- Closed views aren't kept (a token is a small table), so their docs aren't.
+local tab_views = setmetatable({}, { __mode = "v" })
+local function tab_token(view)
+  if not view then return end
+  if not view.tab_token then
+    view.tab_token = {}
+    tab_views[view.tab_token] = view
+  end
+  return view.tab_token
+end
+
+-- Of each doc, where its last view removed from the tree was; a removal that
+-- leaves the doc open (moving a tab) is overwritten by the next one
+local removed_views = setmetatable({}, { __mode = "k" })
+local removal_count = 0
+-- Of each closed file (by absolute path), where its tab was
+local closed_tabs = {}
+
+---Called by a node before it removes the view at idx.
+---@param node core.node
+---@param view core.view
+---@param idx integer
+function core.on_view_removed(node, view, idx)
+  if not (view.doc and view.doc.abs_filename) then return end
+  removal_count = removal_count + 1
+  removed_views[view.doc] = {
+    seq = removal_count, transient = view:is_transient(), token = tab_token(view),
+    left = tab_token(node.views[idx - 1]), right = tab_token(node.views[idx + 1]),
+    -- weak: a reopen falls back when the node is gone
+    node = setmetatable({ node }, { __mode = "v" }),
+    scroll_x = view.scroll.to.x, scroll_y = view.scroll.to.y,
+  }
+end
+
+---Called with the docs closed at once (by Close All, ...).
+---@param docs core.doc[]
+local function on_docs_closed(docs)
+  local tabs = {}
+  for _, doc in ipairs(docs) do
+    local tab = removed_views[doc]
+    -- a preview's file isn't recent (a plugin adds it when it becomes normal)
+    if tab and not tab.transient and doc.abs_filename then
+      tab.line, tab.col = doc:get_selection()
+      tab.abs_filename = doc.abs_filename
+      table.insert(tabs, tab)
+    end
+  end
+  -- the tab removed last ends on top, as when closed one by one: reopening them
+  -- one by one puts each beside a neighbor's new tab
+  table.sort(tabs, function(a, b) return a.seq < b.seq end)
+  for _, tab in ipairs(tabs) do
+    closed_tabs[tab.abs_filename] = tab
+    core.add_recent_file(tab.abs_filename)
+  end
+end
+
+local function in_tree(node, root)
+  return root == node or root.type ~= "leaf" and (in_tree(node, root.a) or in_tree(node, root.b))
+end
+
+---Opens a file in a new tab where its tab was when it was closed this session,
+---at the cursor and scroll it had then: beside the tab that was next to it, or
+---in the same split; otherwise as a new tab in the active split.
+---@param abs_filename string
+---@return core.docview
+function core.reopen_file(abs_filename)
+  local tab = closed_tabs[abs_filename]
+  closed_tabs[abs_filename] = nil
+  local root = core.root_view.root_node
+  local node, idx
+  if tab then
+    local left, right = tab_views[tab.left], tab_views[tab.right]
+    node = left and root:get_node_for_view(left)
+    if node then
+      idx = node:get_view_idx(left) + 1
+    else
+      node = right and root:get_node_for_view(right)
+      if node then
+        idx = node:get_view_idx(right)
+      else
+        node = tab.node[1]
+        if node and not (node.type == "leaf" and in_tree(node, root)) then node = nil end
+      end
+    end
+  end
+  if not node or node.locked then node, idx = core.root_view:get_active_node_default(), nil end
+  local view = DocView(core.open_doc(abs_filename))
+  if tab then
+    view.tab_token = tab.token
+    tab_views[tab.token] = view
+  end
+  node:add_view(view, idx)
+  if tab then
+    view.doc:set_selection(tab.line, tab.col)
+    view.scroll.x, view.scroll.to.x = tab.scroll_x, tab.scroll_x
+    view.scroll.y, view.scroll.to.y = tab.scroll_y, tab.scroll_y
+  end
+  return view
+end
+
+---The files of core.recent_files that exist and aren't open, newest first.
+---@return string[]
+function core.get_closed_recent_files()
+  local open = {}
+  for _, view in ipairs(core.root_view.root_node:get_children()) do
+    if view.doc and view.doc.abs_filename then open[view.doc.abs_filename] = true end
+  end
+  local files = {}
+  for _, path in ipairs(core.recent_files) do
+    if not open[path] and system.get_file_info(path) then table.insert(files, path) end
+  end
+  return files
+end
+
+
 local function update_recents_project(action, dir_path_abs)
   local dirname = common.normalize_volume(dir_path_abs)
   if not dirname then return end
@@ -1643,13 +1764,16 @@ function core.step()
   core.redraw = false
 
   -- close unreferenced docs
+  local closed = {}
   for i = #core.docs, 1, -1 do
     local doc = core.docs[i]
     if #core.get_views_referencing_doc(doc) == 0 then
       table.remove(core.docs, i)
+      table.insert(closed, doc)
       doc:on_close()
     end
   end
+  if #closed > 0 then on_docs_closed(closed) end
 
   -- update window title
   local current_title = get_title_filename(core.active_view)

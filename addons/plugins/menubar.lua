@@ -48,6 +48,7 @@ config.plugins.menubar = common.merge({
       { command = "core:new-named-doc", text = "New Named File..." },
       { command = "core:open-file-picker", text = "Open File..." },
       { text = "Open Recent", rows = function() return menubar.recent_rows() end },
+      { command = "core:reopen-closed-tab", text = "Reopen Closed Tab" },
       "-",
       { command = "core:open-project-folder-picker", text = "Open Project Folder..." },
       { command = "core:change-project-folder-picker", text = "Change Project Folder..." },
@@ -460,8 +461,9 @@ end
 -- Of each list, the rows File > Open Recent shows at most
 local MAX_RECENT_SHOWN = 15
 
----Rows for File > Open Recent: the recent files that still exist, then the
----recent projects (names, with their directory on the right), and Clear Recent.
+---Rows for File > Open Recent: the recent files that exist and aren't open (the
+---one closed last first), then the recent projects (names, with their directory
+---on the right), and Clear Recent.
 function menubar.recent_rows()
   local rows = {}
   local function add(paths, open, skip)
@@ -478,10 +480,7 @@ function menubar.recent_rows()
       end
     end
   end
-  local doc = core.active_view.doc
-  add(core.recent_files, function(path)
-    core.root_view:open_doc(core.open_doc(path))
-  end, doc and doc.abs_filename)
+  add(core.get_closed_recent_files(), core.reopen_file)
   table.insert(rows, "-")
   add(core.recent_projects, function(path)
     core.confirm_close_docs(core.docs, core.open_folder_project, path)

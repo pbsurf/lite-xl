@@ -35,6 +35,10 @@ upstream's `release/v2.1.x`. Additions to the editor:
 * **Tab tooltips and menu:** hovering a tab shows the file's full path, size and
   age (and git state, with gitfiles); right clicking it offers close others / to
   the right / all and copy path.
+* **Reopen closed tab:** ctrl+shift+t reopens the file whose tab was closed last
+  (again for the one before), beside the tab that was next to it, at the cursor
+  and scroll it had. Recent files (`core.recent_files`, kept between sessions)
+  are ordered by when they were closed.
 * **Tooltips** behave alike and as usual elsewhere (`core.tooltip`): shown after
   `config.tooltip_delay`, kept while the pointer stays on their target, and shown
   at once when moving from one to another.
@@ -94,8 +98,8 @@ another repository's version, uninstalls removing dependents under `--assume-yes
 
 * **menubar:** a menu bar of commands, toggled by tapping Alt. Menus are
   `config.plugins.menubar.menus`; commands from plugins not placed in a menu are
-  listed per plugin under Tools. File > Open Recent lists recent files (kept in
-  `session.lua` between sessions, as `core.recent_files`) and projects.
+  listed per plugin under Tools. File > Open Recent lists recent files that aren't
+  open, the one closed last first, and projects.
 * **headerbar:** one strip at the top in place of the title bar and toolbars: a
   menu button (menubar's menus as one dropdown), a file browser toggle,
   back/forward (navigate, dimmed when there's nowhere to go) and, with
