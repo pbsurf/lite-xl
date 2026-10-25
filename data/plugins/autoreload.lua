@@ -132,10 +132,34 @@ local function delayed_reload(doc, mtime)
   end)
 end
 
+-- If the doc's file changed since it was loaded or saved: reloads it, or marks
+-- it for asking (deferred_reload, returning true). shown: it's being shown, so
+-- a change from a while ago (no longer being written) is reloaded at once.
+local function check_doc(doc, shown)
+  local info = system.get_file_info(doc.filename or "")
+  if info and info.type == "file" and times[doc] ~= info.modified then
+    if not doc:is_dirty() and not config.plugins.autoreload.always_show_nagview then
+      if shown and os.time() - info.modified >= 1 then
+        reload_doc(doc)
+      else
+        delayed_reload(doc, info.modified)
+      end
+    else
+      doc.deferred_reload = true
+      return true
+    end
+  end
+end
+
 local function doc_changes_visiblity(doc, visibility)
   if doc and visible[doc] ~= visibility and doc.abs_filename then
     visible[doc] = visibility
-    if visibility then check_prompt_reload(doc) end
+    -- unwatched while hidden (unless another doc in its directory was visible):
+    -- a change made then is found now
+    if visibility then
+      if not doc.deferred_reload then check_doc(doc, true) end
+      check_prompt_reload(doc)
+    end
     watch_doc(doc, visibility)
   end
 end
@@ -145,15 +169,7 @@ function dirwatch:check(change_callback, ...)
   on_check(self, function(dir)
     for _, doc in ipairs(core.docs) do
       if doc.abs_filename and (dir == common.dirname(doc.abs_filename) or dir == doc.abs_filename) then
-        local info = system.get_file_info(doc.filename or "")
-        if info and info.type == "file" and times[doc] ~= info.modified then
-          if not doc:is_dirty() and not config.plugins.autoreload.always_show_nagview then
-            delayed_reload(doc, info.modified)
-          else
-            doc.deferred_reload = true
-            if doc == core.active_view.doc then check_prompt_reload(doc) end
-          end
-        end
+        if check_doc(doc) and doc == core.active_view.doc then check_prompt_reload(doc) end
       end
     end
     change_callback(dir)
