@@ -281,9 +281,9 @@ function TreeView:get_item_info(item)
 end
 
 
----Draws an entry's tooltip below its row, from its name's x (tx) and the
----row's bottom (ty).
-function TreeView:draw_tooltip(item, tx, ty)
+---Draws an entry's tooltip at the tree view's right edge, beside its row (top ty,
+---height th), so that it doesn't cover the entries around it.
+function TreeView:draw_tooltip(item, ty, th)
   local text = common.home_encode(item.abs_filename)
   local info = table.concat(self:get_item_info(item), " · ")
   local font = style.font
@@ -292,9 +292,9 @@ function TreeView:draw_tooltip(item, tx, ty)
   local h = lh * (info ~= "" and 2 or 1) + style.padding.y
 
   local root = core.root_view.root_node
-  local x = math.max(0, math.min(tx - style.padding.x, root.size.x - w - 1))
-  local y = ty + 1
-  if y + h > root.size.y then y = ty - self:get_item_height() - h - 1 end -- above it
+  local x = self.position.x + self.size.x - style.padding.x / 2
+  x = math.max(0, math.min(x, root.size.x - w - 1))
+  local y = math.max(0, math.min(ty + (th - h) / 2, root.size.y - h - 1))
 
   common.draw_popup_box(x, y, w, h)
   local px, py = x + style.padding.x, y + style.padding.y / 2
@@ -384,7 +384,7 @@ function TreeView:draw()
   self:draw_background(style.background2)
   local _y, _h = self.position.y, self.size.y
 
-  local tooltip_item, tooltip_x, tooltip_y
+  local tooltip_item, tooltip_y, tooltip_h
   for item, x,y,w,h in self:each_item() do
     if y + h >= _y and y < _y + _h then
       self:draw_item(item,
@@ -392,15 +392,14 @@ function TreeView:draw()
         item == self.hovered_item,
         x, y, w, h)
       if item == self.hovered_item and tooltip.shown(self, item) then
-        tooltip_item, tooltip_x = item, self:get_text_bounding_box(item, x, y, w, h)
-        tooltip_y = y + h
+        tooltip_item, tooltip_y, tooltip_h = item, y, h
       end
     end
   end
 
   self:draw_scrollbar()
   if tooltip_item then
-    core.root_view:defer_draw(self.draw_tooltip, self, tooltip_item, tooltip_x, tooltip_y)
+    core.root_view:defer_draw(self.draw_tooltip, self, tooltip_item, tooltip_y, tooltip_h)
   end
 end
 
