@@ -226,6 +226,16 @@ function DocView:get_gutter_width()
   return self:get_font():get_width(#self.doc.lines) + padding, padding
 end
 
+---How much of the gutter acts as such for the mouse: up to the end of the line
+---numbers (draw_line_gutter); a click in the space after them acts as one on the
+---text, going to the line's start. All of it for views whose get_gutter_width
+---gives no padding.
+---@return number
+function DocView:get_gutter_click_width()
+  local width, padding = self:get_gutter_width()
+  return padding and width - padding + style.padding.x or width
+end
+
 ---The space between the gutter's fill (style.gutter) and the text:
 ---style.gutter_gap, by default half of style.padding.x.
 ---@return number
@@ -374,11 +384,11 @@ function DocView:on_mouse_moved(x, y, ...)
 
   self.mouse_position = { x = x, y = y }
   self.hovering_gutter = false
-  local gw = self:get_gutter_width()
+  local gw = self:get_gutter_click_width()
 
   if self:scrollbar_hovering() or self:scrollbar_dragging() then
     self.cursor = "arrow"
-  elseif gw > 0 and x >= self.position.x and x <= (self.position.x + gw) then
+  elseif gw > 0 and x >= self.position.x and x < self.position.x + gw then
     self.cursor = "arrow"
     self.hovering_gutter = true
   else
