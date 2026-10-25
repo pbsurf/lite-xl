@@ -597,8 +597,13 @@ view.node = node:split("left", view, {x = true}, true)
 -- plugin module that plug itself in the active node but it is plugged here
 -- in the treeview node.
 local toolbar_view = nil
-local toolbar_plugin, ToolbarView = pcall(require, "plugins.toolbarview")
-if config.plugins.toolbarview ~= false and toolbar_plugin then
+-- (not loaded while disabled: once it's loaded, disabling it again, as the user
+-- module does when it's run again on changing the project, warns)
+local toolbar_plugin, ToolbarView = false, nil
+if config.plugins.toolbarview ~= false then
+  toolbar_plugin, ToolbarView = pcall(require, "plugins.toolbarview")
+end
+if toolbar_plugin then
   toolbar_view = ToolbarView()
   view.node:split("down", toolbar_view, {y = true})
   local min_toolbar_width = toolbar_view:get_min_width()
