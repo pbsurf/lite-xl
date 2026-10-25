@@ -83,7 +83,9 @@ local function save_view(view)
     return {
       type = "doc",
       active = (core.active_view == view),
-      filename = view.doc.filename,
+      -- absolute: a name relative to the project is relative to the one the doc
+      -- was opened in (saves made before were relative, and still load)
+      filename = view.doc.abs_filename,
       selection = { view.doc:get_selection() },
       scroll = { x = view.scroll.to.x, y = view.scroll.to.y },
       crlf = view.doc.crlf,
