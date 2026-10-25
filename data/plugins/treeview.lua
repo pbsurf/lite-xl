@@ -265,7 +265,7 @@ function TreeView:get_scrollable_size()
 end
 
 
----Facts about an entry, for its tooltip and the status bar: a file's size
+---Facts about an entry, for its tooltip: a file's size
 ---and age, a folder's entry count. Plugins can add to them.
 ---@return string[]
 function TreeView:get_item_info(item)
@@ -972,8 +972,8 @@ command.add(function()
 })
 
 
--- Status bar items while the treeview is focused: the selected entry (its
--- get_item_info; click to copy its path), and how many files the project has
+-- Status bar items while the treeview is focused: the selected entry (click to
+-- copy its path), and how many files the project has
 
 local function is_treeview_focused()
   return core.active_view == view
@@ -989,22 +989,14 @@ core.status_view:add_item({
     local item = view.selected_item
     local name = item.depth > 0 and item.filename or item.name
     if item.type == "dir" then name = name .. PATHSEP end
-    local info = view:get_item_info(item)
-    return { style.text, name, style.dim, #info > 0 and "  " .. table.concat(info, "  ·  ") or "" }
+    return { style.text, name }
   end,
   command = function()
     system.set_clipboard(view.selected_item.abs_filename)
     core.log("Copied %s", common.home_encode(view.selected_item.abs_filename))
   end,
   tooltip = function()
-    local item = view.selected_item
-    local path = common.home_encode(item.abs_filename)
-    local info = item.type ~= "dir" and system.get_file_info(item.abs_filename)
-    if info then
-      path = string.format("%s, %s bytes, modified %s", path, common.format_count(info.size),
-        os.date("%Y-%m-%d %H:%M", info.modified))
-    end
-    return path .. " (click to copy the path)"
+    return common.home_encode(view.selected_item.abs_filename) .. " (click to copy the path)"
   end,
 })
 
