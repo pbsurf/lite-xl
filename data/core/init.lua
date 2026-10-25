@@ -119,6 +119,21 @@ local function on_docs_closed(docs)
   end
 end
 
+-- Closes the docs no view in the tree has (done once per frame, and on changing
+-- the project).
+local function close_unreferenced_docs()
+  local closed = {}
+  for i = #core.docs, 1, -1 do
+    local doc = core.docs[i]
+    if #core.get_views_referencing_doc(doc) == 0 then
+      table.remove(core.docs, i)
+      table.insert(closed, doc)
+      doc:on_close()
+    end
+  end
+  if #closed > 0 then on_docs_closed(closed) end
+end
+
 local function in_tree(node, root)
   return root == node or root.type ~= "leaf" and (in_tree(node, root.a) or in_tree(node, root.b))
 end
@@ -231,6 +246,9 @@ end
 function core.open_folder_project(dir_path_abs)
   if core.set_project_dir(dir_path_abs, core.on_quit_project) then
     core.root_view:close_all_docviews()
+    -- now, not next frame: opening a file again (as the new project's workspace
+    -- may) would get its old doc, with a filename relative to the old project
+    close_unreferenced_docs()
     reload_customizations()
     update_recents_project("add", dir_path_abs)
     core.add_project_directory(dir_path_abs)
@@ -1763,17 +1781,7 @@ function core.step()
   if not core.redraw then return false end
   core.redraw = false
 
-  -- close unreferenced docs
-  local closed = {}
-  for i = #core.docs, 1, -1 do
-    local doc = core.docs[i]
-    if #core.get_views_referencing_doc(doc) == 0 then
-      table.remove(core.docs, i)
-      table.insert(closed, doc)
-      doc:on_close()
-    end
-  end
-  if #closed > 0 then on_docs_closed(closed) end
+  close_unreferenced_docs()
 
   -- update window title
   local current_title = get_title_filename(core.active_view)
