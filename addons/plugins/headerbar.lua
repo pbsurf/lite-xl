@@ -5,7 +5,8 @@
 -- go) and, with config.borderless, the title and the window controls. Then it
 -- is the window's title bar: dragging the strip moves the window,
 -- double-clicking it maximizes or restores, and the window's edges resize.
--- Without borderless it sits under the OS title bar.
+-- Without borderless it sits under the OS title bar. While the window is
+-- unfocused, its title and icons are dimmed.
 --
 -- In a narrow window the title goes first, then back/forward, the file browser
 -- toggle and the menu button.
@@ -285,9 +286,17 @@ function HeaderBar:on_mouse_pressed(button, x, y, clicks)
 end
 
 
-function HeaderBar:draw_button(b)
+-- the color of text and icons: dimmed halfway while the window is unfocused
+local function text_color()
+  if system.window_has_focus() then return style.text end
+  local c = {}
+  for i = 1, 4 do c[i] = (style.text[i] + style.dim[i]) / 2 end
+  return c
+end
+
+function HeaderBar:draw_button(b, text)
   local on = enabled(b)
-  local color = on and style.text or style.dim
+  local color = on and text or style.dim
   local hover = { style.text[1], style.text[2], style.text[3], 0x20 }
   if b.close and b == self.hovered then
     renderer.draw_rect(b.x, b.y, b.w, b.h, close_hover)
@@ -322,11 +331,12 @@ end
 
 function HeaderBar:draw()
   self:draw_background(style.background2)
-  for _, b in ipairs(self.buttons) do self:draw_button(b) end
+  local text = text_color()
+  for _, b in ipairs(self.buttons) do self:draw_button(b, text) end
   if self.hovered and self.hovered.tooltip and tooltip.shown(self, self.hovered) then self:draw_tooltip(self.hovered) end
   if self.title_x then
     local y, h = self.position.y, self.size.y
-    local x = common.draw_text(style.font, style.text, self.title[1], "left", self.title_x, y, 0, h)
+    local x = common.draw_text(style.font, text, self.title[1], "left", self.title_x, y, 0, h)
     common.draw_text(style.font, style.dim, self.title[2], "left", x, y, 0, h)
   end
 end
