@@ -46,6 +46,7 @@ local function set_scale(scale)
 
     style.padding.x               = style.padding.x               * s
     style.padding.y               = style.padding.y               * s
+    if style.gutter_gap then style.gutter_gap = style.gutter_gap * s end
     style.divider_size            = style.divider_size            * s
     style.scrollbar_size          = style.scrollbar_size          * s
     style.expanded_scrollbar_size = style.expanded_scrollbar_size * s

@@ -55,7 +55,8 @@ style.log = {}
 -- wide). Without them, background3 and divider are used. style.popup_shadow,
 -- if set, is the color of their shadow at its darkest (common.draw_popup_box).
 -- style.gutter is the background of a document's gutter (line numbers), by
--- default the text's.
+-- default the text's; style.gutter_gap, if set, is the space between it and
+-- the text (DocView:get_gutter_gap).
 local fallbacks = {
   popup_background = "background3", popup_border = "divider", gutter = "background"
 }

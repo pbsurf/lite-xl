@@ -216,9 +216,21 @@ function DocView:get_line_height()
 end
 
 
+---The gutter's width, which the text starts after, and how much of it isn't
+---taken by the line numbers.
+---@return number width, number padding
 function DocView:get_gutter_width()
-  local padding = style.padding.x * 2
+  -- padding left of the numbers and right of them within style.gutter's fill,
+  -- then style.gutter_gap, unfilled, before the text
+  local padding = style.padding.x * 1.5 + self:get_gutter_gap()
   return self:get_font():get_width(#self.doc.lines) + padding, padding
+end
+
+---The space between the gutter's fill (style.gutter) and the text:
+---style.gutter_gap, by default half of style.padding.x.
+---@return number
+function DocView:get_gutter_gap()
+  return style.gutter_gap or math.floor(style.padding.x / 2)
 end
 
 
@@ -765,9 +777,8 @@ function DocView:draw()
   local x, y = self:get_line_screen_position(minline)
   local gw, gpad = self:get_gutter_width()
   if style.gutter ~= style.background then
-    -- short of the text, which starts where the gutter ends
-    local fw = gw - math.floor(style.padding.x / 2)
-    renderer.draw_rect(self.position.x, self.position.y, fw, self.size.y, style.gutter)
+    renderer.draw_rect(self.position.x, self.position.y, gw - self:get_gutter_gap(),
+      self.size.y, style.gutter)
   end
   for i = minline, maxline do
     y = y + (self:draw_line_gutter(i, self.position.x, y, gpad and gw - gpad or gw) or lh)
