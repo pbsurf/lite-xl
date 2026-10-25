@@ -1,7 +1,10 @@
 -- mod-version:3
 
 -- Back and forward through the positions the cursor jumped from: a change of
--- document, or a move of more than `jump_threshold` lines that wasn't an edit.
+-- document, or a move within one that leaves where the cursor was out of view
+-- (going to a line, a search result, a definition; a click after scrolling away),
+-- unless it was an edit or stepping with the cursor keys (page up/down, arrows,
+-- word and block moves; the start and end of the document do count).
 -- History is global; the *-in-doc commands step through this document's entries
 -- only. Going back from the newest entry first records where you are, so going
 -- forward again returns there.
@@ -17,8 +20,6 @@ local CommandView = require "core.commandview"
 local RootView = require "core.rootview"
 
 config.plugins.navigate = common.merge({
-  -- minimum change of line, within a document, that counts as a jump
-  jump_threshold = 20,
   -- oldest entries are dropped beyond this
   max_entries = 100,
 }, config.plugins.navigate)
@@ -32,6 +33,8 @@ local navigate = {
 
 -- active doc's position as of the last update: {doc, line, col, change_id}
 local last
+-- set by a cursor-key step since the last update
+local stepped
 
 local function get_doc_view()
   local av = core.active_view
@@ -113,7 +116,26 @@ function navigate.next() move(1) end
 function navigate.prev_in_doc() move(-1, true) end
 function navigate.next_in_doc() move(1, true) end
 
--- Once per frame, compare the active doc's position with the last one.
+-- Cursor-key steps: doc:move-to-* and doc:select-to-*, but for the doc's ends.
+local perform = command.perform
+function command.perform(name, ...)
+  if name:match("^doc:[a-z]+%-to%-") and not name:match("%-of%-doc$") then
+    stepped = true
+  end
+  return perform(name, ...)
+end
+
+-- Whether the line is in view once the view is done scrolling (the scroll's target).
+local function in_target_view(dv, line)
+  local y = dv.scroll.y
+  dv.scroll.y = dv.scroll.to.y
+  local first, last_line = dv:get_visible_line_range()
+  dv.scroll.y = y
+  return line >= first and line <= last_line
+end
+
+-- Once per frame (after the views scrolled to their cursors), compare the active
+-- doc's position with the last one.
 local root_view_update = RootView.update
 function RootView:update(...)
   root_view_update(self, ...)
@@ -122,13 +144,14 @@ function RootView:update(...)
   local doc = dv.doc
   if last and last.doc == doc then
     local line = doc:get_selection()
-    if doc:get_change_id() == last.change_id
-        and math.abs(line - last.line) > config.plugins.navigate.jump_threshold then
+    if line ~= last.line and doc:get_change_id() == last.change_id and not stepped
+        and not in_target_view(dv, last.line) then
       push(doc, last.line, last.col)
     end
   elseif last then
     push(last.doc, last.line, last.col)
   end
+  stepped = false
   update_last(doc)
 end
 

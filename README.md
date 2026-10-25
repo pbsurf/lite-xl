@@ -147,9 +147,9 @@ another repository's version, uninstalls removing dependents under `--assume-yes
   status bar shows the branch, ahead/behind and counts of changed and untracked
   files; tooltips show a file's git state.
 * **navigate** (imported, rewritten): alt+left / alt+right go back and forward
-  through the places the cursor jumped from (another file, or a move of more than
-  `config.plugins.navigate.jump_threshold` lines), alt+shift+left / alt+shift+right
-  within the current file only.
+  through the places the cursor jumped from (another file, or a move that took
+  the view away from where it was, other than with the cursor keys),
+  alt+shift+left / alt+shift+right within the current file only.
 * **shapes:** antialiased shape helpers (squiggly underlines) for plugins.
 * **qtcreator:** a light color theme matching Qt Creator's.
 
