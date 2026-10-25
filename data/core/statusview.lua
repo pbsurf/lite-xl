@@ -355,8 +355,13 @@ function StatusView:register_command_items()
         return string.format("%s, %d project files (what the file finder searches)",
           docs, n)
       end
-      return docs .. "; project too large to index: files are counted in expanded "
-        .. "folders only, and the file finder falls back to Open File"
+      for _, dir in ipairs(core.project_directories) do
+        if dir.files_limit and dir.scan then
+          return docs .. "; indexing project files: the file finder searches those found so far"
+        end
+      end
+      return docs .. "; project too large to index (see \"Core: Index Project\"): files are "
+        .. "counted in expanded folders only, and the file finder falls back to Open File"
     end
   })
 end

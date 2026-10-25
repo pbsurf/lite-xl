@@ -121,15 +121,46 @@ command.add(nil, {
   end,
 
   ["core:find-file"] = function()
-    if not core.project_files_number() then
+    -- the files of each project directory: those found so far while it's
+    -- being indexed the first time
+    local function dir_files(dir)
+      return not dir.files_limit and dir.files or dir.scan and dir.scan.files
+    end
+    local function is_indexing()
+      for _, dir in ipairs(core.project_directories) do
+        if dir.files_limit and dir.scan then return true end
+      end
+      return false
+    end
+    local indexing = is_indexing()
+    if not indexing and not core.project_files_number() then
        return command.perform "core:open-file"
     end
-    local files = {}
-    for dir, item in core.get_project_files() do
-      if item.type == "file" then
-        local path = (dir == core.project_dir and "" or dir .. PATHSEP)
-        table.insert(files, common.home_encode(path .. item.filename))
+    local files, files_state
+    local function get_files()
+      local state = {}
+      for _, dir in ipairs(core.project_directories) do
+        local list = dir_files(dir)
+        table.insert(state, list and #list or 0)
+        table.insert(state, tostring(list))
+        table.insert(state, dir.files_change_id or 0)
       end
+      state = table.concat(state, " ")
+      if state ~= files_state then
+        files, files_state = {}, state
+        for _, dir in ipairs(core.project_directories) do
+          local path = (dir.name == core.project_dir and "" or dir.name .. PATHSEP)
+          for _, item in ipairs(dir_files(dir) or {}) do
+            if item.type == "file" then
+              table.insert(files, common.home_encode(path .. item.filename))
+            end
+          end
+        end
+      end
+      return files
+    end
+    local function suggest(text)
+      return common.fuzzy_match_with_recents(get_files(), core.visited_files, text)
     end
     local hints = {}
     for _, mode in ipairs(command.find_file_modes) do
@@ -142,10 +173,19 @@ command.add(nil, {
         text = item and item.text or text
         core.root_view:open_doc(core.open_doc(common.home_expand(text)))
       end,
-      suggest = function(text)
-        return common.fuzzy_match_with_recents(files, core.visited_files, text)
-      end
+      suggest = suggest
     })
+    -- while indexing, the suggestions follow the files found
+    core.add_thread(function()
+      while indexing and core.command_view.state.suggest == suggest do
+        coroutine.yield(0.25)
+        indexing = is_indexing()
+        if core.command_view.state.suggest == suggest then
+          core.command_view:update_suggestions()
+          core.redraw = true
+        end
+      end
+    end)
   end,
 
   ["core:new-doc"] = function()
@@ -351,5 +391,24 @@ command.add(nil, {
         return common.home_encode_list(common.dir_list_suggest(text, dir_list))
       end
     })
+  end,
+})
+
+-- for project directories over config.max_project_files: index them all anyway,
+-- now and when opened again
+command.add(function()
+  for _, dir in ipairs(core.project_directories) do
+    if dir.over_limit then return true end
+  end
+  return false
+end, {
+  ["core:index-project"] = function()
+    local storage = require "core.storage"
+    for _, dir in ipairs(core.project_directories) do
+      if dir.over_limit then
+        storage.save("project_index", dir.name, true)
+        core.scan_project_directory(dir)
+      end
+    end
   end,
 })

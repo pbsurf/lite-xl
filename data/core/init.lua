@@ -274,16 +274,6 @@ function core.project_subdir_is_shown(dir, filename)
 end
 
 
-local function show_max_files_warning(dir)
-  local message = dir.slow_filesystem and
-    "Filesystem is too slow: project files will not be indexed." or
-    "Too many files in project directory: stopped reading at "..
-    config.max_project_files.." files. For more information see "..
-    "usage.md at https://github.com/lite-xl/lite-xl."
-  core.warn(message)
-end
-
-
 -- bisects the sorted file list to get to things in ln(n)
 local function file_bisect(files, is_superior, start_idx, end_idx)
   local inf, sup = start_idx or 1, end_idx or #files
@@ -398,12 +388,125 @@ local function refresh_directory(topdir, target)
 end
 
 
--- Predicate function to inhibit directory recursion in get_directory_files
--- based on a time limit and the number of files.
-local function timed_max_files_pred(dir, filename, entries_count, t_elapsed)
-  local n_limit = entries_count <= config.max_project_files
-  local t_limit = t_elapsed < 20 / config.fps
-  return n_limit and t_limit and core.project_subdir_is_shown(dir, filename)
+local function no_recursion() return false end
+
+
+-- Lists the top level of project directory `topdir` and the subdirectories
+-- shown (expanded in the treeview): what topdir.files holds in files_limit mode.
+local function list_shown_subdirs(topdir)
+  topdir.files = dirwatch.get_directory_files(topdir, topdir.name, "", 0, no_recursion) or {}
+  -- parents first, so that a subdirectory is listed when it's refreshed
+  local subdirs = {}
+  for subdir, shown in pairs(topdir.shown_subdir) do
+    if shown then table.insert(subdirs, subdir) end
+  end
+  table.sort(subdirs, function(a, b) return system.path_compare(a, "dir", b, "dir") end)
+  for _, subdir in ipairs(subdirs) do
+    local _, found = file_search(topdir.files, { filename = subdir, type = "dir" })
+    if found then refresh_directory(topdir, subdir) end
+  end
+  if topdir.name == core.project_dir then core.project_files = topdir.files end
+  topdir.is_dirty = true
+  topdir.files_change_id = (topdir.files_change_id or 0) + 1
+  core.redraw = true
+end
+
+
+local function is_project_directory(topdir)
+  for _, dir in ipairs(core.project_directories) do
+    if dir == topdir then return true end
+  end
+  return false
+end
+
+
+---Indexes project directory `topdir` (an entry of core.project_directories)
+---in a background thread: lists all its files, watching each directory, and
+---sets topdir.files to the list once complete. Meanwhile, topdir.scan holds
+---the progress (`files`, a growing prefix of the final list, and `n_files`),
+---and topdir.files stays as it was (in files_limit mode, only the top level
+---and the folders shown are listed, expanded on demand). The scan stops,
+---leaving topdir in files_limit mode with topdir.over_limit set, after
+---config.max_project_files entries, unless core:index-project lifted the limit
+---for the directory. A scan already running is replaced.
+---@param topdir table
+function core.scan_project_directory(topdir)
+  local index_all = require("core.storage").load("project_index", topdir.name)
+  local limit = not index_all and config.max_project_files
+  -- changed: absolute paths of the directories changed during the scan
+  local scan = { files = {}, n_files = 0, changed = {} }
+  topdir.scan = scan
+  local t0
+  -- false once the scan is stopped: "limit" or "cancelled" in scan.stopped
+  local function scan_dir(path)
+    topdir.watch:watch(path == "" and topdir.name or topdir.name .. PATHSEP .. path)
+    local entries = dirwatch.get_directory_files(topdir, topdir.name, path, 0, no_recursion) or {}
+    for _, info in ipairs(entries) do
+      if limit and #scan.files >= limit then
+        scan.stopped = "limit"
+        return false
+      end
+      table.insert(scan.files, info)
+      if info.type == "file" then scan.n_files = scan.n_files + 1 end
+      if system.get_time() - t0 > 0.5 / config.fps then
+        core.redraw = true
+        coroutine.yield(0)
+        if topdir.scan ~= scan or not is_project_directory(topdir) then
+          scan.stopped = "cancelled"
+          return false
+        end
+        t0 = system.get_time()
+      end
+      if info.type == "dir" and not scan_dir(info.filename) then return false end
+    end
+    return true
+  end
+
+  core.add_thread(function()
+    t0 = system.get_time()
+    scan_dir("")
+    if scan.stopped == "cancelled" then return end
+    topdir.scan = nil
+    if scan.stopped == "limit" then
+      if not topdir.files_limit then
+        topdir.files_limit = true
+        list_shown_subdirs(topdir)
+      end
+      -- in files_limit mode only the folders shown are watched
+      for path in pairs(common.merge(topdir.watch.watched, topdir.watch.scanned)) do
+        if path ~= topdir.name and not topdir.shown_subdir[path:sub(#topdir.name + 2)] then
+          topdir.watch:unwatch(path)
+        end
+      end
+      if not topdir.over_limit then
+        core.warn("%s has over %d files: only opened folders are indexed. "
+          .. "Run \"Core: Index Project\" to index it all.",
+          common.home_encode(topdir.name), config.max_project_files)
+      end
+      topdir.over_limit = true
+    else
+      topdir.files = scan.files
+      topdir.files_limit = false
+      topdir.over_limit = nil
+      if topdir.name == core.project_dir then core.project_files = topdir.files end
+      -- what changed in the directories already listed
+      local changed = {}
+      for path in pairs(scan.changed) do table.insert(changed, path) end
+      table.sort(changed, function(a, b) return system.path_compare(a, "dir", b, "dir") end)
+      for _, path in ipairs(changed) do
+        if path == topdir.name then
+          refresh_directory(topdir)
+        else
+          local subdir = path:sub(#topdir.name + 2)
+          local _, found = file_search(topdir.files, { filename = subdir, type = "dir" })
+          if found then refresh_directory(topdir, subdir) end
+        end
+      end
+    end
+    topdir.is_dirty = true
+    topdir.files_change_id = (topdir.files_change_id or 0) + 1
+    core.redraw = true
+  end)
 end
 
 
@@ -434,19 +537,11 @@ function core.add_project_directory(path)
 
   local fstype = PLATFORM == "Linux" and system.get_fs_type(topdir.name) or "unknown"
   topdir.force_scans = (fstype == "nfs" or fstype == "fuse")
-  local t, complete, entries_count = dirwatch.get_directory_files(topdir, topdir.name, "", 0, timed_max_files_pred)
-  topdir.files = t
-  if not complete then
-    topdir.slow_filesystem = not complete and (entries_count <= config.max_project_files)
-    topdir.files_limit = true
-    show_max_files_warning(topdir)
-    refresh_directory(topdir)
-  else
-    for i,v in ipairs(t) do
-      if v.type == "dir" then topdir.watch:watch(path .. PATHSEP .. v.filename) end
-    end
-  end
+  -- the top level now, the rest once indexed in the background
+  topdir.files_limit = true
+  list_shown_subdirs(topdir)
   topdir.watch:watch(topdir.name)
+  core.scan_project_directory(topdir)
   -- each top level directory gets a watch thread. if the project is small, or
   -- if the ablity to use directory watches hasn't been compromised in some way
   -- either through error, or amount of files, then this should be incredibly
@@ -456,6 +551,7 @@ function core.add_project_directory(path)
     while true do
       local changed = topdir.watch:check(function(target)
         core.on_project_directory_change(topdir, target)
+        if topdir.scan then topdir.scan.changed[target] = true end
         if target == topdir.name then return refresh_directory(topdir) end
         local dirpath = target:sub(#topdir.name + 2)
         local abs_dirpath = topdir.name .. PATHSEP .. dirpath
@@ -493,41 +589,9 @@ end
 -- The function below is needed to reload the project directories
 -- when the project's module changes.
 function core.rescan_project_directories()
-  local save_project_dirs = {}
-  local n = #core.project_directories
-  for i = 1, n do
-    local dir = core.project_directories[i]
-    save_project_dirs[i] = {name = dir.name, shown_subdir = dir.shown_subdir}
-  end
-  core.project_directories = {}
-  for i = 1, n do -- add again the directories in the project
-    local dir = core.add_project_directory(save_project_dirs[i].name)
-    if dir.files_limit then
-      -- We need to sort the list of shown subdirectories so that higher level
-      -- directories are populated first. We use the function system.path_compare
-      -- because it order the entries in the appropriate order.
-      -- TODO: we may consider storing the table shown_subdir as a sorted table
-      -- since the beginning.
-      local subdir_list = {}
-      for subdir in pairs(save_project_dirs[i].shown_subdir) do
-        table.insert(subdir_list, subdir)
-      end
-      table.sort(subdir_list, function(a, b) return system.path_compare(a, "dir", b, "dir") end)
-      for _, subdir in ipairs(subdir_list) do
-        local show = save_project_dirs[i].shown_subdir[subdir]
-        for j = 1, #dir.files do
-          if dir.files[j].filename == subdir then
-            -- The instructions below match when happens in TreeView:on_mouse_pressed.
-            -- We perform the operations only once iff the subdir is in dir.files.
-            -- In theory set_show below may fail and return false but is it is listed
-            -- there it means it succeeded before so we are optimistically assume it
-            -- will not fail for the sake of simplicity.
-            core.update_project_subdir(dir, subdir, show)
-            break
-          end
-        end
-      end
-    end
+  for _, dir in ipairs(core.project_directories) do
+    if dir.files_limit then list_shown_subdirs(dir) end
+    core.scan_project_directory(dir)
   end
 end
 
@@ -544,7 +608,8 @@ end
 function core.update_project_subdir(dir, filename, expanded)
   assert(dir.files_limit, "function should be called only when directory is in files limit mode")
   dir.shown_subdir[filename] = expanded
-  if expanded then
+  -- a scan watches every directory it lists
+  if expanded or dir.scan then
     dir.watch:watch(dir.name .. PATHSEP .. filename)
   else
     dir.watch:unwatch(dir.name .. PATHSEP .. filename)
@@ -985,12 +1050,6 @@ function core.init()
 
   -- We add the project directory now because the project's module is loaded.
   core.add_project_directory(project_dir_abs)
-
-  -- We assume we have just a single project directory here. Now that StatusView
-  -- is there show max files warning if needed.
-  if core.project_directories[1].files_limit then
-    show_max_files_warning(core.project_directories[1])
-  end
 
   for _, filename in ipairs(files) do
     core.root_view:open_doc(core.open_doc(filename))

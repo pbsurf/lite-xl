@@ -70,6 +70,11 @@ upstream's `release/v2.1.x`. Additions to the editor:
   Hovering an entry shows its path, size and age (a folder's entry count); while
   it's focused, the status bar shows the selected entry and the project's file
   count, warning when it's over `config.max_project_files`.
+* **Project indexing in the background:** opening a project lists its top level
+  and indexes the rest in a thread, so a large or slow tree no longer stops at a
+  time limit ("Filesystem is too slow"); Find File searches what's found so far.
+  A project over `config.max_project_files` is indexed anyway after
+  `core:index-project` (or a click on the file count), remembered per folder.
 * **Command view:** clicking a suggestion (ctrl+p, Do Command, ...) submits it.
 * **System file dialogs:** `core:open-file-picker`, `doc:save-as-picker` and the
   folder commands' `-picker` versions (from upstream master's SDL3 dialogs); the

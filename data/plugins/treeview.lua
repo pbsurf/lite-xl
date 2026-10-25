@@ -1032,11 +1032,15 @@ local function count_files(dir)
   return n
 end
 
-local function any_files_limit()
-  for _, dir in ipairs(core.project_directories) do
-    if dir.files_limit then return true end
-  end
-  return false
+-- whether a project directory is being indexed the first time (or after
+-- core:index-project): its files listed are those in opened folders
+local function is_indexing(dir)
+  return dir.files_limit and dir.scan ~= nil
+end
+
+-- the files counted in a project directory: those found so far while indexing
+local function dir_file_count(dir)
+  return is_indexing(dir) and dir.scan.n_files or count_files(dir)
 end
 
 core.status_view:add_item({
@@ -1044,25 +1048,34 @@ core.status_view:add_item({
   name = "treeview:files",
   alignment = StatusView.Item.RIGHT,
   get_item = function()
-    local n = 0
-    for _, dir in ipairs(core.project_directories) do n = n + count_files(dir) end
-    if any_files_limit() then
+    local n, indexing, over_limit = 0, false, false
+    for _, dir in ipairs(core.project_directories) do
+      n = n + dir_file_count(dir)
+      indexing = indexing or is_indexing(dir)
+      over_limit = over_limit or (dir.over_limit and not dir.scan)
+    end
+    if indexing then
+      return { style.dim, "indexing: " .. common.format_count(n) .. (n == 1 and " file" or " files") }
+    end
+    if over_limit then
       return { style.warn, style.icon_font, "!", style.font,
         " " .. common.format_count(n) .. "+ files (not all indexed)" }
     end
     return { style.text, common.format_count(n) .. (n == 1 and " file" or " files") }
   end,
+  command = function()
+    if command.is_valid("core:index-project") then command.perform("core:index-project") end
+  end,
   tooltip = function()
     local lines = {}
     for _, dir in ipairs(core.project_directories) do
-      table.insert(lines, string.format("%s: %s files", common.basename(dir.name),
-        common.format_count(count_files(dir))))
-      if dir.files_limit then
-        table.insert(lines, dir.slow_filesystem
-          and "  Filesystem too slow: only opened folders are scanned"
-          or string.format("  Over max_project_files (%d): only opened folders are scanned,",
-            config.max_project_files))
-        table.insert(lines, "  so Find File and project search miss files")
+      table.insert(lines, string.format("%s: %s files%s", common.basename(dir.name),
+        common.format_count(dir_file_count(dir)), is_indexing(dir) and " so far (indexing)" or ""))
+      if dir.over_limit and not dir.scan then
+        table.insert(lines, string.format("  Over max_project_files (%d): only opened folders are indexed,",
+          config.max_project_files))
+        table.insert(lines, "  so Find File and project search miss files.")
+        table.insert(lines, "  Click to index it all anyway (remembered for the folder).")
       end
     end
     return table.concat(lines, "\n")
