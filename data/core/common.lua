@@ -364,6 +364,36 @@ function common.draw_text(font, color, text, align, x,y,w,h)
 end
 
 
+---Draws a dot at the top right corner of an icon drawn with
+---`common.draw_text(font, color, icon, nil, x, y, 0, h)`, ringed with the
+---background color to set it apart from the icon.
+---@param color renderer.color
+---@param background renderer.color
+---@param font renderer.font
+---@param icon string
+---@param x number
+---@param y number
+---@param h number
+function common.draw_icon_badge(color, background, font, icon, x, y, h)
+  local th = font:get_height()
+  local cx = x + font:get_width(icon) - th * 0.1
+  local cy = common.round(y + (h - th) / 2) + th * 0.3
+  local function circle(r, c)
+    local k = r * 0.5523  -- control point distance for a quarter circle
+    renderer.draw_path({
+      "M", cx + r, cy,
+      "C", cx + r, cy + k, cx + k, cy + r, cx, cy + r,
+      "C", cx - k, cy + r, cx - r, cy + k, cx - r, cy,
+      "C", cx - r, cy - k, cx - k, cy - r, cx, cy - r,
+      "C", cx + k, cy - r, cx + r, cy - k, cx + r, cy, "Z",
+    }, c)
+  end
+  local r = th * 0.17
+  circle(r + 1.5 * SCALE, background)
+  circle(r, color)
+end
+
+
 ---Shortens text with an ellipsis so that it fits a width: its end is cut, or
 ---its start with `from_start` (for a path, say, whose end matters most).
 ---@param font renderer.font

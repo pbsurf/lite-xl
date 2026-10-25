@@ -114,6 +114,13 @@ function View:get_icon(hovered)
   return nil
 end
 
+---The color of a dot drawn on this view's icon (see common.draw_icon_badge), or
+---nil for none: e.g. for a file reloaded from disk while it wasn't looked at.
+---@return renderer.color?
+function View:get_icon_badge()
+  return nil
+end
+
 ---Whether this view is transient, like a preview tab: it isn't restored with the
 ---workspace.
 ---@return boolean

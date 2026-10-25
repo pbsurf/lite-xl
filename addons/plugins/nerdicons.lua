@@ -257,6 +257,11 @@ function Node:draw_tab_title(view, font, is_active, is_hovered, x, y, w, h)
     local group_w = icon_w + font:get_width(view:get_name())
     local ix = x + math.max(0, (w - group_w) / 2)
     common.draw_text(icon_font, color, icon, nil, ix, y, 0, h)
+    local badge = view:get_icon_badge()
+    if badge then
+      common.draw_icon_badge(badge, is_active and style.background or style.background2,
+        icon_font, icon, ix, y, h)
+    end
     Node_draw_tab_title(self, view, font, is_active, is_hovered, ix + icon_w, y, x + w - ix - icon_w, h)
   else
     Node_draw_tab_title(self, view, font, is_active, is_hovered, x, y, w, h)

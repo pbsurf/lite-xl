@@ -1,7 +1,9 @@
 -- mod-version:3
 local core = require "core"
 local config = require "core.config"
+local style = require "core.style"
 local Doc = require "core.doc"
+local DocView = require "core.docview"
 local Node = require "core.node"
 local common = require "core.common"
 local dirwatch = require "core.dirwatch"
@@ -56,6 +58,31 @@ local function reload_doc(doc)
   doc:reload()
   core.redraw = true
   core.log_quiet("Auto-reloaded doc \"%s\"", doc.filename)
+  -- not seen reloaded: its tabs get a badge until it's looked at
+  if doc ~= core.active_view.doc or not system.window_has_focus() then
+    doc.reloaded_unseen = true
+  end
+end
+
+function DocView:get_icon_badge()
+  return self.doc.reloaded_unseen and style.accent or nil
+end
+
+local function seen(doc)
+  if doc and doc.reloaded_unseen and system.window_has_focus() then
+    doc.reloaded_unseen = nil
+    core.redraw = true
+  end
+end
+
+-- The active doc reloaded while the window wasn't focused is seen at the first
+-- input once it is
+local on_event = core.on_event
+function core.on_event(type, ...)
+  if type == "keypressed" or type == "mousepressed" or type == "mousewheel" then
+    seen(core.active_view.doc)
+  end
+  return on_event(type, ...)
 end
 
 
@@ -137,6 +164,7 @@ local core_set_active_view = core.set_active_view
 function core.set_active_view(view)
   core_set_active_view(view)
   doc_changes_visiblity(view.doc, true)
+  seen(view.doc)
 end
 
 local node_set_active_view = Node.set_active_view

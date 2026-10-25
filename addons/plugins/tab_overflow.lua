@@ -37,6 +37,7 @@ local function show_menu(node, x, y)
     table.insert(items, {
       text = view:get_name(), font = view:get_name_style(style.font),
       icon = icon, icon_font = icon_font, icon_color = icon_color,
+      badge = view:get_icon_badge(),
       active = view == node.active_view,
       command = function()
         if node:get_view_idx(view) then node:set_active_view(view) end
@@ -89,6 +90,11 @@ function menu:draw_context_menu()
     local tx = x + style.padding.x
     if item.icon then
       common.draw_text(item.icon_font, item.icon_color, item.icon, nil, tx, y, 0, h)
+      if item.badge then
+        common.draw_icon_badge(item.badge,
+          i == self.selected and style.selection or style.popup_background,
+          item.icon_font, item.icon, tx, y, h)
+      end
     end
     local color = item.active and style.accent or style.text
     common.draw_text(item.font, color, item.text, "left", tx + self.icon_w, y, w, h)
