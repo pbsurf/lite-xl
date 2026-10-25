@@ -254,7 +254,11 @@ function Results:find(text, doc, force)
 
   -- the matches Highlight All marks, so the count agrees with them
   local match = get_matcher()
-  if not match then return end
+  if not match then
+    self.matches = {}
+    self:set_status()
+    return
+  end
 
   self.prev_search_id = core.add_thread(function()
     self.matches = {}
@@ -302,6 +306,8 @@ function Results:set_status()
     status:set_label(
       "Result: " .. tostring(current .. " of " .. tostring(total))
     )
+  elseif get_matcher() then -- (none for no text or an invalid regex)
+    status:set_label({ style.error, "0 results" })
   else
     status:set_label("")
   end
@@ -557,7 +563,7 @@ local function find(reverse, typing)
       doc_view:scroll_to_line(line1, true)
       Results:find(text, doc)
     else
-      Results:clear()
+      Results:find(findtext:get_text(), doc) -- "0 results"
     end
   end)
 end
