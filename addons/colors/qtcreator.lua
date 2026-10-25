@@ -26,6 +26,8 @@ style.caret = { common.color "#000000" }
 -- Qt draws selected text white on #308cc6; lite-xl can't recolor selected text, so blend
 -- the selection with the background to keep black text readable.
 style.selection = { common.color "rgba(48, 140, 198, 0.5)" }  -- Selection
+-- gray, to keep the window's left edge visible when the tree view is hidden
+style.gutter = { common.color "#ebebeb" }
 style.line_number = { common.color "#9f9d9a" }                -- LineNumber
 style.line_number2 = { common.color "#808080" }               -- CurrentLineNumber
 style.line_highlight = { common.color "#c1ddee" }             -- CurrentLine
