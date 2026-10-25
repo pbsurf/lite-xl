@@ -28,7 +28,7 @@
     },
     {
       "id": "debugger",
-      "description": "Debugger (lite-xl-ide 50c1b40) with a breakpoint column and glyph markers.",
+      "description": "Debugger (lite-xl-ide 50c1b40) with a breakpoint column and glyph markers; runs the build target's binary in its working directory and environment.",
       "version": "0.2",
       "mod_version": "3",
       "path": "addons/plugins/debugger",

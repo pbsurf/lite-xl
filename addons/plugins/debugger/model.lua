@@ -46,7 +46,8 @@ function model:remove_breakpoint(path, line)
 end
 
 
-function model:start(path, arguments, paused, exited, out)
+-- options: { cwd, env, commands (for the debugger, before starting) }
+function model:start(path, arguments, paused, exited, out, options)
   assert(path, "requires a path")
   if self.state ~= "inactive" then error("can only start from inactive state") end
   for k,v in pairs(self.backends) do if v.should_engage(path) then self.active = v break end end
@@ -55,7 +56,7 @@ function model:start(path, arguments, paused, exited, out)
   self.view_paused = paused
   self.view_exited = exited
   self.view_out = out
-  self.active:start(path, arguments or {}, function(...) self:started() end, function(...) self:stopped(...) end, function(...) self:completed(...) end, function(...) self:out(...) end)
+  self.active:start(path, arguments or {}, function(...) self:started() end, function(...) self:stopped(...) end, function(...) self:completed(...) end, function(...) self:out(...) end, options or {})
 end
 
 function model:attach(terminal, backend, paused, exited, out)

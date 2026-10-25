@@ -703,7 +703,11 @@ end, {
       else
         print(line)
       end
-    end)
+    end, {
+      -- from the build target (build plugin)
+      cwd = config.target_workdir, env = config.target_environment,
+      commands = config.target_debugger_commands,
+    })
   end
 })
 

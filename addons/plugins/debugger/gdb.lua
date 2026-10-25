@@ -267,7 +267,8 @@ function gdb:loop()
 end
 
 local build = require "plugins.build"
-local function start(gdb, program_or_terminal, arguments, started, stopped, completed, out)
+local function start(gdb, program_or_terminal, arguments, started, stopped, completed, out, options)
+  options = options or {}
   gdb.debugger_started = started
   gdb.debugger_stopped = stopped
   gdb.debugger_completed = completed
@@ -276,8 +277,9 @@ local function start(gdb, program_or_terminal, arguments, started, stopped, comp
     if type(program_or_terminal) == "string" then
       local args = { "gdb", "-q", "-nx", "--interpreter=mi3", "--args", core.root_project():absolute_path(program_or_terminal), table.unpack(arguments) }
       core.log_quiet("Running " .. table.concat(args, " "))
-      gdb.running_program = process.start(args, { cwd = core.root_project().path })
+      gdb.running_program = process.start(args, { cwd = options.cwd or core.root_project().path, env = options.env })
       gdb.waiting_on_result = function(type, category, attributes)
+        for _, command in ipairs(options.commands or {}) do gdb:cmd(command) end
         gdb:cmd("set filename-display absolute")
         gdb:cmd("start")
       end
@@ -297,8 +299,8 @@ local function start(gdb, program_or_terminal, arguments, started, stopped, comp
   end)
 end
 
-function gdb:start(program, arguments, started, stopped, completed, out)
-  return start(self, program, arguments, started, stopped, completed, out)
+function gdb:start(program, arguments, started, stopped, completed, out, options)
+  return start(self, program, arguments, started, stopped, completed, out, options)
 end
 
 
