@@ -505,8 +505,8 @@ function RootView:on_touch_moved(x, y, dx, dy, id)
   if t.lock_x then dy = 0 end
   local node = t.node
   if t.on_tabs then
-    node:scroll_tabs_freely(-dx / node.tab_width)
-    node.tab_shift = node.tab_scroll * node.tab_width   -- follow the finger, no animation
+    node:scroll_tabs_freely(-dx)
+    node.tab_shift = node.tab_scroll   -- follow the finger, no animation
   else
     local view = node.active_view
     view.scroll.to.x = view.scroll.to.x - dx
@@ -547,7 +547,9 @@ function RootView:on_mouse_wheel(dy, dx)
   local node = self.root_node:get_child_overlapping_point(x, y)
   -- over a tab bar: one notch scrolls one tab if its tabs scroll, else nothing
   if node:tab_bar_overlaps_point(x, y) then
-    if node:tabs_overflow() then node:scroll_tabs_freely(-(dy + (dx or 0))) end
+    if node:tabs_overflow() then
+      node:scroll_tabs_freely(-(dy + (dx or 0)) * node:target_tab_width())
+    end
     return true
   end
   return node.active_view:on_mouse_wheel(dy, dx)

@@ -275,3 +275,13 @@ function Node:draw_tab_title(view, font, is_active, is_hovered, x, y, w, h)
     Node_draw_tab_title(self, view, font, is_active, is_hovered, x, y, w, h)
   end
 end
+
+local Node_get_tab_title_width = Node.get_tab_title_width
+function Node:get_tab_title_width(view, font)
+  local w = Node_get_tab_title_width(self, view, font)
+  local icon, icon_font = view:get_icon()
+  if config.plugins.nerdicons.draw_tab_icons and icon then
+    w = w + icon_font:get_width(icon) + style.padding.x / 2
+  end
+  return w
+end

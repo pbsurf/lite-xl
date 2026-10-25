@@ -17,7 +17,7 @@ local Node = Object:extend()
 ---@field active? fun(node: core.node): boolean While false: dim, ignoring clicks
 ---@field width? fun(node: core.node): number Default: 3 icon widths. Called while
 ---working out how many tabs fit, so it can't depend on that (get_max_tabs,
----tabs_overflow, get_tab_area_width, target_tab_width, get_visible_tabs_number).
+---tabs_overflow, get_tab_area_width, target_tab_width, get_tab_target_widths).
 
 ---Tab bar buttons by name; config.tab_buttons chooses which show, in which order.
 ---@type table<string, core.node.tab_button>
@@ -37,11 +37,11 @@ function Node:new(type)
   self.hovered = {x = -1, y = -1 }
   self.hovered_close = 0
   self.hovered_tab_button = 0
-  -- tab_scroll: how far the tabs are scrolled, in tabs (fractional while scrolled
-  -- freely); tab_shift (pixels) and tab_width animate towards it and target_tab_width()
+  -- tab_scroll: how far the tabs are scrolled (pixels); tab_shift animates towards
+  -- it, and tab_widths (by view) towards get_tab_target_widths()
   self.tab_scroll = 0
   self.tab_shift = 0
-  self.tab_width = style.tab_width
+  self.tab_widths = setmetatable({}, { __mode = "k" })
   self.move_towards = View.move_towards
 end
 
@@ -125,12 +125,14 @@ function Node:remove_view(root, view)
   core.on_view_removed(self, view, self:get_view_idx(view))
   if #self.views > 1 then
     local idx = self:get_view_idx(view)
-    if idx <= self.tab_scroll then
+    local widths, lefts = self:get_tab_target_layout()
+    if lefts[idx] + widths[idx] <= self.tab_scroll + 0.5 then
       -- a tab left of the view: keep the same tabs in view
-      self.tab_scroll = math.max(0, self.tab_scroll - 1)
-      self.tab_shift = math.max(0, self.tab_shift - self.tab_width)
+      self.tab_scroll = math.max(0, self.tab_scroll - widths[idx])
+      self.tab_shift = math.max(0, self.tab_shift - self:get_tab_width(idx))
     end
     table.remove(self.views, idx)
+    self.tab_widths[view] = nil
     if self.active_view == view then
       self:set_active_view(self:get_most_recent_view()
         or self.views[idx] or self.views[#self.views])
@@ -329,36 +331,98 @@ function Node:get_tab_area_width()
 end
 
 
+---The width of every tab without config.fit_tab_width; with it, the widest a tab
+---gets while the tabs scroll.
 function Node:target_tab_width()
   local n = math.min(#self.views, self:get_max_tabs())
   return math.min(style.tab_width, self:get_tab_area_width() / n)
 end
 
 
----How many tabs fit in the tab area (can be fractional).
-function Node:get_tab_area_tabs()
-  return self:get_tab_area_width() / self:target_tab_width()
+---The width draw_tab_title needs to draw the view's title in full.
+function Node:get_tab_title_width(view, font)
+  return font:get_width(view:get_name() or "")
+end
+
+
+---The width a tab needs to show the view's title in full.
+function Node:get_tab_fit_width(view)
+  return self:get_tab_title_width(view, view:get_name_style(style.font))
+    + style.icon_font:get_width("C") + style.padding.x * 2 + style.divider_size * 2
+end
+
+
+-- The cap on the widths that makes them sum to at most total.
+local function fill_cap(widths, total)
+  local sorted = { table.unpack(widths) }
+  table.sort(sorted)
+  for i, w in ipairs(sorted) do
+    local left = #sorted - i + 1
+    if w * left > total then return total / left end
+    total = total - w
+  end
+  return math.huge
+end
+
+
+---Each tab's width, once it's done animating: target_tab_width(); or with
+---config.fit_tab_width, its fit width within config.min_tab_width and
+---config.max_tab_width, the widest shrunk as needed to fit the tab area, and none
+---wider than target_tab_width() while the tabs scroll.
+---@return number[]
+function Node:get_tab_target_widths()
+  local widths, w = {}, self:target_tab_width()
+  if not config.fit_tab_width then
+    for i = 1, #self.views do widths[i] = w end
+    return widths
+  end
+  local min_w, max_w = config.min_tab_width * SCALE, config.max_tab_width * SCALE
+  for i, view in ipairs(self.views) do
+    widths[i] = math.max(min_w, math.min(self:get_tab_fit_width(view), max_w))
+  end
+  local cap = self:tabs_overflow() and w or fill_cap(widths, self:get_tab_area_width())
+  for i = 1, #widths do widths[i] = math.min(widths[i], cap) end
+  return widths
+end
+
+
+---The tabs' target widths, their left edges in the scrolled tab strip, and its width.
+function Node:get_tab_target_layout()
+  local widths, lefts, x = self:get_tab_target_widths(), {}, 0
+  for i, w in ipairs(widths) do
+    lefts[i] = x
+    x = x + w
+  end
+  return widths, lefts, x
 end
 
 
 function Node:get_max_tab_scroll()
-  return math.max(0, #self.views - self:get_tab_area_tabs())
+  local _, _, total = self:get_tab_target_layout()
+  return math.max(0, total - self:get_tab_area_width())
 end
 
 
----How many tabs are fully in view, once the tabs have finished scrolling.
-function Node:get_visible_tabs_number()
-  local first = math.ceil(self.tab_scroll - 1e-6)
-  local after_last = math.floor(self.tab_scroll + self:get_tab_area_tabs() + 1e-6)
-  return math.max(0, math.min(#self.views, after_last) - first)
+---A tab's width where it's drawn now.
+function Node:get_tab_width(idx)
+  return self.tab_widths[self.views[idx]] or self:target_tab_width()
+end
+
+
+---The tab at x in the scrolled tab strip, where the tabs are drawn now.
+function Node:get_tab_index_at(x)
+  if x < 0 then return end
+  for i = 1, #self.views do
+    x = x - self:get_tab_width(i)
+    if x < 0 then return i end
+  end
 end
 
 
 ---The first and last tab at least partly in view, where the tabs are drawn now.
 function Node:get_drawn_tabs_range()
-  local first = math.floor(self.tab_shift / self.tab_width) + 1
-  local last = math.ceil((self.tab_shift + self:get_tab_area_width()) / self.tab_width)
-  return math.max(1, first), math.min(#self.views, last)
+  return self:get_tab_index_at(self.tab_shift) or 1,
+    self:get_tab_index_at(self.tab_shift + self:get_tab_area_width()) or #self.views
 end
 
 
@@ -369,8 +433,7 @@ function Node:get_tab_overlapping_point(px, py)
      or py < y0 or py >= y0 + self:get_tab_bar_height() then
     return nil
   end
-  local idx = math.floor((px - x0 + self.tab_shift) / self.tab_width) + 1
-  if idx >= 1 and idx <= #self.views then return idx end
+  return self:get_tab_index_at(px - x0 + self.tab_shift)
 end
 
 
@@ -470,8 +533,9 @@ end
 ---The tab's rect where it's drawn now; it can be partly or wholly outside the tab
 ---area (get_tab_area_width), which drawing clips to.
 function Node:get_tab_rect(idx)
-  local x = self.position.x + self.tab_width * (idx - 1) - self.tab_shift
-  return x, self.position.y, self.tab_width, self:get_tab_bar_height()
+  local x = self.position.x - self.tab_shift
+  for i = 1, idx - 1 do x = x + self:get_tab_width(i) end
+  return x, self.position.y, self:get_tab_width(idx), self:get_tab_bar_height()
 end
 
 
@@ -572,18 +636,20 @@ function Node:scroll_tabs_to_visible()
     self.free_scroll_view = nil
     local index = self:get_view_idx(self.active_view)
     if index then
-      self.tab_scroll = common.clamp(self.tab_scroll, index - self:get_tab_area_tabs(), index - 1)
+      local widths, lefts = self:get_tab_target_layout()
+      self.tab_scroll = common.clamp(self.tab_scroll,
+        lefts[index] + widths[index] - self:get_tab_area_width(), lefts[index])
     end
   end
   self.tab_scroll = common.clamp(self.tab_scroll, 0, self:get_max_tab_scroll())
 end
 
 
----Scrolls the tabs by n tabs (negative: towards the first; can be fractional)
----without changing the active tab, which can scroll out of view; they follow it
----again once it changes.
-function Node:scroll_tabs_freely(n)
-  self.tab_scroll = common.clamp(self.tab_scroll + n, 0, self:get_max_tab_scroll())
+---Scrolls the tabs by dx pixels (negative: towards the first) without changing
+---the active tab, which can scroll out of view; they follow it again once it
+---changes.
+function Node:scroll_tabs_freely(dx)
+  self.tab_scroll = common.clamp(self.tab_scroll + dx, 0, self:get_max_tab_scroll())
   self.free_scroll_view = self.active_view
 end
 
@@ -592,12 +658,31 @@ end
 ---first, 2: towards the last), making the nearest tab in view active if the
 ---active one would go out of view.
 function Node:scroll_tabs(dir)
-  local first = self.tab_scroll
-  first = dir == 1 and math.ceil(first - 1e-6) - 1 or math.floor(first + 1e-6) + 1
-  self.tab_scroll = common.clamp(first, 0, self:get_max_tab_scroll())
+  local widths, lefts, total = self:get_tab_target_layout()
+  local area = self:get_tab_area_width()
+  local scroll = self.tab_scroll
+  if dir == 1 then
+    scroll = 0
+    for i = #lefts, 1, -1 do
+      if lefts[i] < self.tab_scroll - 0.5 then scroll = lefts[i]; break end
+    end
+  else
+    scroll = total
+    for i = 1, #lefts do
+      if lefts[i] > self.tab_scroll + 0.5 then scroll = lefts[i]; break end
+    end
+  end
+  self.tab_scroll = common.clamp(scroll, 0, math.max(0, total - area))
+  -- the first and last tab fully in view
+  local first_index, last_index = #lefts, 1
+  for i = #lefts, 1, -1 do
+    if lefts[i] >= self.tab_scroll - 0.5 then first_index = i end
+  end
+  for i = 1, #lefts do
+    if lefts[i] + widths[i] <= self.tab_scroll + area + 0.5 then last_index = i end
+  end
+  last_index = math.max(first_index, last_index)
   local index = self:get_view_idx(self.active_view)
-  local first_index = math.ceil(self.tab_scroll - 1e-6) + 1
-  local last_index = first_index + self:get_visible_tabs_number() - 1
   if index < first_index then
     self:set_active_view(self.views[first_index])
   elseif index > last_index then
@@ -613,9 +698,15 @@ function Node:update()
       view:update()
     end
     self:tab_hovered_update(self.hovered.x, self.hovered.y)
-    local tab_width = self:target_tab_width()
-    self:move_towards("tab_shift", self.tab_scroll * tab_width, nil, "tabs")
-    self:move_towards("tab_width", tab_width, nil, "tabs")
+    for i, w in ipairs(self:get_tab_target_widths()) do
+      local view = self.views[i]
+      if self.tab_widths[view] then
+        self:move_towards(self.tab_widths, view, w, nil, "tabs")
+      else
+        self.tab_widths[view] = w
+      end
+    end
+    self:move_towards("tab_shift", self.tab_scroll, nil, "tabs")
   else
     self.a:update()
     self.b:update()
@@ -875,7 +966,7 @@ function Node:get_drag_overlay_tab_position(x, y, dragged_node, dragged_index)
     -- mouse after the last tab, or over the buttons: the last tab in view
     local x0 = self.position.x
     local area_x = math.min(x, x0 + self:get_tab_area_width() - 1)
-    tab_index = common.clamp(math.floor((area_x - x0 + self.tab_shift) / self.tab_width) + 1, 1, #self.views)
+    tab_index = self:get_tab_index_at(area_x - x0 + self.tab_shift) or #self.views
   end
   local tab_x, tab_y, tab_w, tab_h = self:get_tab_rect(tab_index)
   if x > tab_x + tab_w / 2 and tab_index <= #self.views then

@@ -31,7 +31,8 @@ Lite XL 2.1 (plugin API mod-version 3) with our changes on top, merged from
 upstream's `release/v2.1.x`. Additions to the editor:
 
 * **Tab overflow:** tabs scroll when they don't fit, with scroll buttons and a menu
-  of all tabs at the end of the tab bar.
+  of all tabs at the end of the tab bar. Optionally (`config.fit_tab_width`), each
+  tab is as wide as its name.
 * **Tab tooltips and menu:** hovering a tab shows the file's full path, size and
   age (and git state, with gitfiles); right clicking it offers close others / to
   the right / all and copy path.

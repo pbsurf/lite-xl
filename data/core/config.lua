@@ -31,6 +31,10 @@ config.max_undos = 10000
 -- min_tab_width (pixels at scale 1); 0 disables either limit
 config.max_tabs = 0
 config.min_tab_width = 120
+-- Tabs as wide as their names need, up to max_tab_width (pixels at scale 1),
+-- rather than all style.tab_width wide; they still shrink to fit, widest first
+config.fit_tab_width = false
+config.max_tab_width = 320
 -- Buttons at the right end of the tab bar while its tabs scroll, left to right;
 -- names nothing registered in Node.tab_buttons are skipped (the tab_overflow
 -- add-on registers "scroll_left", "scroll_right" and "menu")
