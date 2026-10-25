@@ -54,10 +54,14 @@ style.log = {}
 -- style.popup_background and style.popup_border (drawn style.divider_size
 -- wide). Without them, background3 and divider are used. style.popup_shadow,
 -- if set, is the color of their shadow at its darkest (common.draw_popup_box).
-local popup_fallbacks = { popup_background = "background3", popup_border = "divider" }
+-- style.gutter is the background of a document's gutter (line numbers), by
+-- default the text's.
+local fallbacks = {
+  popup_background = "background3", popup_border = "divider", gutter = "background"
+}
 setmetatable(style, {
   __index = function(t, k)
-    local fallback = popup_fallbacks[k]
+    local fallback = fallbacks[k]
     if fallback then return rawget(t, fallback) end
   end
 })

@@ -764,6 +764,11 @@ function DocView:draw()
 
   local x, y = self:get_line_screen_position(minline)
   local gw, gpad = self:get_gutter_width()
+  if style.gutter ~= style.background then
+    -- short of the text, which starts where the gutter ends
+    local fw = gw - math.floor(style.padding.x / 2)
+    renderer.draw_rect(self.position.x, self.position.y, fw, self.size.y, style.gutter)
+  end
   for i = minline, maxline do
     y = y + (self:draw_line_gutter(i, self.position.x, y, gpad and gw - gpad or gw) or lh)
   end
