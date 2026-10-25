@@ -28,6 +28,8 @@ local RootView = require "core.rootview"
 local TreeView = require "plugins.treeview"
 
 config.plugins.gitfiles = common.merge({
+  -- the git command: a name looked up in PATH, or a path
+  git = "git",
   -- seconds to wait after a change before asking git again, so that a burst
   -- of changes runs it once
   delay = 0.3,
@@ -55,7 +57,7 @@ local function shell_quote(s)
 end
 
 local function status_args(dir_name)
-  return { "git", "-C", dir_name, "--no-optional-locks", "status", "--porcelain",
+  return { config.plugins.gitfiles.git, "-C", dir_name, "--no-optional-locks", "status", "--porcelain",
            "-z", "--branch", "--ignored", "--", "." }
 end
 
@@ -155,7 +157,7 @@ end
 -- The directory's submodules (initialized ones, nested ones too) in it, as
 -- NUL-terminated pairs of path (relative to the directory) and git directory
 local function submodules_args(dir_name)
-  return { "git", "-C", dir_name, "submodule", "--quiet", "foreach", "--recursive",
+  return { config.plugins.gitfiles.git, "-C", dir_name, "submodule", "--quiet", "foreach", "--recursive",
            'printf "%s\\0%s\\0" "$displaypath" "$(git rev-parse --absolute-git-dir)"' }
 end
 
@@ -191,7 +193,7 @@ local function get_repo(dir_name)
   local repo = repos[dir_name]
   if repo ~= nil then return repo end
   repo = false
-  local out = read_command({ "git", "-C", dir_name, "rev-parse", "--show-prefix", "--absolute-git-dir" })
+  local out = read_command({ config.plugins.gitfiles.git, "-C", dir_name, "rev-parse", "--show-prefix", "--absolute-git-dir" })
   local prefix, git_dir = (out or ""):match("^([^\n]*)\n([^\n]+)\n")
   if git_dir then
     local r = { git_dir = git_dir, prefix = prefix }
