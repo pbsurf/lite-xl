@@ -59,6 +59,12 @@ config.plugins.nerdicons = common.merge({
 local icon_font = renderer.font.load(nerdfonts_symbols.path, 18.5 * SCALE)
 local map = nerdfonts_symbols.utf8
 local chevron_width = icon_font:get_width(map["oct-chevron_down"])
+
+-- Icons the Nerd Font lacks, in icons.ttf beside this file (see make_icons.py):
+-- name -> character
+local own_icons = { ["h-hexagon"] = "\u{e000}" }
+local own_font = renderer.font.load(
+  debug.getinfo(1, "S").source:match("^@(.*)[/\\]") .. PATHSEP .. "icons.ttf", 18.5 * SCALE)
 local previous_scale = SCALE
 
 
@@ -74,8 +80,8 @@ local extension_icons = {
   [".txt"]         = { "#ffffff", "fa-file_text"             },
   [".cpp"]         = { "#519aba", "custom-cpp"               },
   [".c"]           = { "#599eff", "custom-c"                 },
-  [".h"]           = { "#79029b", "fa-header"                },
-  [".hpp"]         = { "#79029b", "fa-header"                },
+  [".h"]           = { "#599eff", "h-hexagon"                },
+  [".hpp"]         = { "#519aba", "h-hexagon"                },
   [".py"]          = { "#3572A5", "md-language_python"       }, -- Python
   [".pyc"]         = { "#519aba", "md-language_python"       },
   [".pyd"]         = { "#519aba", "md-language_python"       },
@@ -192,6 +198,7 @@ function TreeView:get_item_icon(item, active, hovered)
     icon_font:set_size(
       icon_font:get_size() * (SCALE / previous_scale)
     )
+    own_font:set_size(own_font:get_size() * (SCALE / previous_scale))
     chevron_width = icon_font:get_width(map["oct-chevron_down"])
     previous_scale = SCALE
   end
@@ -210,8 +217,8 @@ function TreeView:get_item_icon(item, active, hovered)
     end
     if custom_icon ~= nil then
       color = readable(custom_icon[1])
-      icon = map[custom_icon[2]]
-      font = icon_font
+      icon = own_icons[custom_icon[2]] or map[custom_icon[2]]
+      font = own_icons[custom_icon[2]] and own_font or icon_font
     end
     if active or hovered then
       color = style.accent

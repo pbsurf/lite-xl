@@ -116,10 +116,10 @@
     },
     {
       "id": "nerdicons",
-      "description": "File icons for TreeView and tabs from Nerd Font symbols (lite-xl-plugins 6e4aa64); tab icons no longer cover truncated titles; icon colors adjusted for contrast; a terminal icon for terminal tabs; icon badges in tabs.",
+      "description": "File icons for TreeView and tabs from Nerd Font symbols (lite-xl-plugins 6e4aa64); tab icons no longer cover truncated titles; icon colors adjusted for contrast; a terminal icon for terminal tabs; icon badges in tabs; a hexagon H icon for headers, like the C icons (icons.ttf, made by make_icons.py).",
       "version": "1.2.4",
       "mod_version": "3",
-      "path": "addons/plugins/nerdicons.lua",
+      "path": "addons/plugins/nerdicons",
       "dependencies": { "font_symbols_nerdfont_mono_regular": {} }
     },
     {
