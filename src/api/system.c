@@ -312,7 +312,8 @@ top:
       ** several KEYDOWN events for the `tab` key; we flush all keydown
       ** events on focus so these are discarded */
       SDL_FlushEvent(SDL_EVENT_KEY_DOWN);
-      goto top;
+      lua_pushstring(L, "focusgained");
+      return 1;
 
 
     case SDL_EVENT_DROP_FILE:
