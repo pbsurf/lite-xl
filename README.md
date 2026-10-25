@@ -40,8 +40,8 @@ upstream's `release/v2.1.x`. Additions to the editor:
   (again for the one before), beside the tab that was next to it, at the cursor
   and scroll it had. Recent files (`core.recent_files`, kept between sessions)
   are ordered by when they were closed.
-* **Reloaded files:** a file reloaded from disk (autoreload) while you weren't
-  looking at it gets a dot on its tab's icon until you view it
+* **Reloaded files:** a file reloaded from disk (autoreload) gets a status bar
+  message and a dot on its tab's icon until the next input while it's active
   (`View:get_icon_badge`, drawn by icon plugins with `common.draw_icon_badge`).
 * **Tooltips** behave alike and as usual elsewhere (`core.tooltip`): shown after
   `config.tooltip_delay`, kept while the pointer stays on their target, and shown

@@ -54,14 +54,18 @@ local function update_time(doc)
   times[doc] = system.get_file_info(doc.filename).modified
 end
 
-local function reload_doc(doc)
+-- asked: reloaded on the user's answer, rather than automatically
+local function reload_doc(doc, asked)
   doc:reload()
   core.redraw = true
-  core.log_quiet("Auto-reloaded doc \"%s\"", doc.filename)
-  -- not seen reloaded: its tabs get a badge until it's looked at
-  if doc ~= core.active_view.doc or not system.window_has_focus() then
-    doc.reloaded_unseen = true
+  if asked then
+    core.log_quiet("Reloaded doc \"%s\"", doc.filename)
+    return
   end
+  core.log("Reloaded %s (changed on disk)", doc.filename)
+  -- even when shown, the new text may go unnoticed: its tabs get a badge until
+  -- the next input while it's the active doc
+  doc.reloaded_unseen = true
 end
 
 function DocView:get_icon_badge()
@@ -75,8 +79,7 @@ local function seen(doc)
   end
 end
 
--- The active doc reloaded while the window wasn't focused is seen at the first
--- input once it is
+-- A reloaded doc is seen at the first input while it's the active doc
 local on_event = core.on_event
 function core.on_event(type, ...)
   if type == "keypressed" or type == "mousepressed" or type == "mousewheel" then
@@ -93,7 +96,7 @@ local function check_prompt_reload(doc)
       { text = "Reload", default_yes = true },
       { text = "Keep Current", default_no = true }
     }, function(item)
-      if item.text == "Reload" then reload_doc(doc) end
+      if item.text == "Reload" then reload_doc(doc, true) end
       doc.deferred_reload = false
     end)
   end
@@ -180,7 +183,6 @@ local core_set_active_view = core.set_active_view
 function core.set_active_view(view)
   core_set_active_view(view)
   doc_changes_visiblity(view.doc, true)
-  seen(view.doc)
 end
 
 local node_set_active_view = Node.set_active_view
