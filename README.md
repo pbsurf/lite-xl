@@ -155,11 +155,16 @@ another repository's version, uninstalls removing dependents under `--assume-yes
   through the places the cursor jumped from (another file, or a move that took
   the view away from where it was, other than with the cursor keys),
   alt+shift+left / alt+shift+right within the current file only.
+* **build** (imported from lite-xl-ide, with our changes): in a project with VS
+  Code's `.vscode/tasks.json` and `launch.json`, a target per launch
+  configuration (building with its preLaunchTask, running or debugging its
+  program in its `cwd` with its `args` and environment) and per task; re-read
+  when saved, and the targets are found again on changing project.
 * **shapes:** antialiased shape helpers (squiggly underlines) for plugins.
 * **qtcreator:** a light color theme matching Qt Creator's.
 
 Also imported with changes: lsp and lintplus (squiggly diagnostics, diagnostics in
-hover popups), build and debugger (from lite-xl-ide), tab_switcher, tab_overflow,
+hover popups), debugger (from lite-xl-ide), tab_switcher, tab_overflow,
 minimap, nerdicons, language_yaml, the widget library, and repl (evaluates Lua in
 a running editor).
 

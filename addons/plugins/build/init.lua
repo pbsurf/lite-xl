@@ -7,6 +7,7 @@ local common = require "core.common"
 local style = require "core.style"
 local View = require "core.view"
 local DocView = require "core.docview"
+local Doc = require "core.doc"
 local StatusView = require "core.statusview"
 local TreeView = config.plugins.treeview ~= false and require "plugins.treeview"
 local ToolbarView = require "plugins.toolbarview"
@@ -27,7 +28,6 @@ else
   end
   if not core.root_project then
     local root_project = {
-      path = core.project_dir,
       absolute_path = function(self, path)
         return core.project_absolute_path(path)
       end,
@@ -39,6 +39,8 @@ else
       end
     }
     function core.root_project()
+      -- the project may have changed
+      root_project.path = core.project_dir
       return root_project
     end
   end
@@ -185,7 +187,8 @@ local function default_on_line(line)
   build.message_view:add_message(build.parse_compile_line(line))
 end
 
--- accept a table of commands. Run as many as we have threads.
+-- accept a table of commands. Run as many as we have threads. A command may
+-- have `cwd` (default: the project's directory) and `env` (variables added).
 function build.run_tasks(tasks, on_done, on_line)
   if #tasks == 0 then
     if on_done then on_done(0) end
@@ -262,7 +265,8 @@ function build.run_tasks(tasks, on_done, on_line)
                 if total_running >= build.threads then break end
                 if not task.done and not task.program then
                   build.message_view:add_message(table.concat(task.cmd, " "))
-                  task.program = process.start(task.cmd, { ["stderr"] = process.REDIRECT_STDOUT, env = (PLATFORM ~= "Windows" and { TERM = "ansi" } or {}), cwd = core.project_absolute_path(".") })
+                  local env = common.merge(PLATFORM ~= "Windows" and { TERM = "ansi" } or {}, task.cmd.env)
+                  task.program = process.start(task.cmd, { ["stderr"] = process.REDIRECT_STDOUT, env = env, cwd = task.cmd.cwd or core.project_absolute_path(".") })
                   total_running = total_running + 1
                 end
               end
@@ -292,8 +296,14 @@ function build.set_target(target)
   end
 
   target = common.clamp(target, 1, #build.targets)
-  config.target_binary = build.targets and build.targets[target] and build.targets[target].binary
-  local arguments = ""
+  local t = build.targets[target]
+  config.target_binary = t.binary
+  -- for the debugger: where and how to run the binary
+  config.target_workdir = t.wd
+  config.target_environment = t.env
+  config.target_debugger_commands = t.debugger_commands
+  -- the arguments last used with the target, else its own (binary_arguments)
+  local arguments
   for i = #build.state.previous_arguments, 1, -1 do
     local v = build.state.previous_arguments[i]
     if v[1] == target then
@@ -301,7 +311,7 @@ function build.set_target(target)
       break
     end
   end
-  config.target_binary_arguments = build.argument_string_to_table(arguments)
+  config.target_binary_arguments = arguments and build.argument_string_to_table(arguments) or t.binary_arguments
   build.state.target = target
   save_state()
 end
@@ -325,13 +335,13 @@ function build.build(callback)
   if build.is_running() or not build.can_build(target) then return false end
   build.message_view:clear_messages()
   build.message_view.visible = true
-  build.message_view:add_message("Building " .. (target.binary and common.basename(target.binary) or "target") .. "...")
+  build.message_view:add_message("Building " .. (target.binary and common.basename(target.binary) or target.name or "target") .. "...")
   build.message_view.minimized = false
   local status, err = pcall(function()
     if not target then error("Can't find target " .. target) end
     if not target.backend then error("Can't find target " .. target .. " backend.") end
     target.backend.build(target, function (status)
-      local line = "Completed building " .. (target.binary and common.basename(target.binary) or "target") .. ". " .. status .. " Errors/Warnings."
+      local line = "Completed building " .. (target.binary and common.basename(target.binary) or target.name or "target") .. ". " .. status .. " Errors/Warnings."
       build.message_view:add_message({ status == 0 and "good" or "error", line })
       build.message_view.visible = status ~= 0 or build.on_success ~= "close"
       build.output(line)
@@ -365,23 +375,46 @@ function build.escape_arguments(arguments)
   return arguments
 end
 
-function build.get_shell_command(target, command, arguments)
-  local target = build.state.target
+local function shell_quote(s)
+  if s:match("^[%w%-%._/=:,@+]+$") then return s end
+  return "'" .. s:gsub("'", "'\\''") .. "'"
+end
+
+---The command to run the current target's `command` (a function of the target
+---returning it, or a program run with `arguments`, default
+---config.target_binary_arguments) in a terminal (build.terminal), in the
+---target's `wd` with its `env`. With `raw`, `command` is a shell command line.
+function build.get_shell_command(target, command, arguments, raw)
+  target = build.targets[build.state.target]
   if type(command) == "function" then
-    command = command(build.targets[target])
+    command = command(target)
   elseif type(command) == "string" then
     local arguments = arguments or config.target_binary_arguments or {}
-    local argument_string = type(arguments) == "string" and arguments or ("'" .. table.concat(build.escape_arguments(arguments), "' '") .. "'")
     if PLATFORM == "Windows" then
       command = { build.shell, command, table.unpack(arguments) }
     else
-      if not common.is_absolute_path(command) then command = "./" .. command end
+      local script = { "cd", shell_quote(target.wd or core.root_project().path), "&&" }
+      for name, value in pairs(target.env or {}) do
+        table.insert(script, "export " .. shell_quote(name .. "=" .. value) .. " &&")
+      end
+      if raw then
+        table.insert(script, command)
+      else
+        if not common.is_absolute_path(command) then command = "./" .. command end
+        table.insert(script, shell_quote(command))
+        if type(arguments) == "string" then
+          table.insert(script, arguments)
+        else
+          for _, arg in ipairs(arguments) do table.insert(script, shell_quote(arg)) end
+        end
+      end
+      script = table.concat(script, " ") .. '; echo "\nProgram exited with error code $?.\n\nPress any key to exit..."; read'
       local cmd = {}
-      for i,v in ipairs(type(build.terminal) == 'table' and build.terminal or { build.terminal }) do table.insert(cmd, type(v) == 'function' and v(build.targets[target], command) or v) end
+      for i,v in ipairs(type(build.terminal) == 'table' and build.terminal or { build.terminal }) do table.insert(cmd, type(v) == 'function' and v(target, command) or v) end
       table.insert(cmd, "")
-      for i,v in ipairs(type(build.shell) == 'table' and build.shell or { build.shell }) do cmd[#cmd] = cmd[#cmd] .. (type(v) == 'function' and v(build.targets[target], command) or v) .. " " end
-      cmd[#cmd] = cmd[#cmd] .. "'cd " .. (build.targets[target].wd or core.root_project().path) .. " && " .. command .. " " .. argument_string .. "; echo \"\nProgram exited with error code $?.\n\nPress any key to exit...\"; read'"
-      print(table.concat(cmd, " "))
+      for i,v in ipairs(type(build.shell) == 'table' and build.shell or { build.shell }) do cmd[#cmd] = cmd[#cmd] .. (type(v) == 'function' and v(target, command) or v) .. " " end
+      cmd[#cmd] = cmd[#cmd] .. shell_quote(script)
+      core.log_quiet("Running %s", table.concat(cmd, " "))
       command = cmd
     end
   end
@@ -475,17 +508,24 @@ local function remember_arguments(text)
   save_state()
 end
 
+---The binary's path as shown: relative to the project if in it, else with ~.
+local function get_binary_text()
+  local path = core.root_project():absolute_path(config.target_binary)
+  local root = core.root_project().path
+  return common.path_belongs_to(path, root) and common.relative_path(root, path) or common.home_encode(path)
+end
+
 local function edit_binary()
   local arguments = get_arguments_text()
   core.command_view:enter("Set Target Binary", {
-    text = config.target_binary .. (arguments ~= "" and " " .. arguments or ""),
+    text = get_binary_text() .. (arguments ~= "" and " " .. arguments or ""),
     submit = function(text)
       local i = text:find(" ")
+      -- relative to the project, as shown
+      config.target_binary = core.root_project():absolute_path(common.home_expand(i and text:sub(1, i-1) or text))
       if i then
-        config.target_binary = text:sub(1, i-1)
         config.target_binary_arguments = build.argument_string_to_table(text:sub(i+1))
       else
-        config.target_binary = text
         config.target_binary_arguments = nil
       end
       remember_arguments(i and text:sub(i+1))
@@ -517,7 +557,7 @@ local function get_menu()
   for i, target in ipairs(build.targets) do
     table.insert(targets, {
       text = target.name or "default",
-      info = target.backend and target.backend.id or "",
+      info = target.info or target.backend and target.backend.id or "",
       active = i == build.state.target,
       command = function() build.set_target(i) end,
     })
@@ -527,7 +567,7 @@ local function get_menu()
   local binary = {}
   if config.target_binary then
     local arguments = get_arguments_text()
-    table.insert(binary, { text = "Binary: " .. config.target_binary, command = edit_binary })
+    table.insert(binary, { text = "Binary: " .. get_binary_text(), command = edit_binary })
     -- the arguments used recently with this target, newest first
     local seen = { [arguments] = true }
     local previous = build.state.previous_arguments
@@ -579,10 +619,10 @@ core.status_view:add_item({
   end,
   tooltip = function()
     local target = build.targets[build.state.target]
-    local text = string.format("Target: %s (%s)", target.name or "default", target.backend.id)
+    local text = string.format("Target: %s (%s)", target.name or "default", target.info or target.backend.id)
     if config.target_binary then
       local arguments = get_arguments_text()
-      text = text .. ", binary: " .. config.target_binary .. (arguments ~= "" and " " .. arguments or "")
+      text = text .. ", binary: " .. get_binary_text() .. (arguments ~= "" and " " .. arguments or "")
     end
     return text
   end,
@@ -894,7 +934,7 @@ end, {
   ["build:run-or-term-or-kill-with-arguments"] = function(arguments)
     local relevant_previous_arguments
     for i,v in ipairs(build.state.previous_arguments) do if v[1] == build.state.target then relevant_previous_arguments = v[2] break end end
-    core.command_view:enter(config.target_binary .. " ", {
+    core.command_view:enter(get_binary_text() .. " ", {
       submit = function(text)
         config.target_binary_arguments = build.argument_string_to_table(text)
         command.perform("build:run-or-term-or-kill", text)
@@ -988,32 +1028,62 @@ keymap.add {
   ["escape"]             = "build:contextual-close-drawer"
 }
 
-core.add_thread(function()
-  if config.plugins.build.targets then
-    build.set_targets(config.plugins.build.targets, config.plugins.build.type or "internal")
-  else
-    local backends = build.get_backends()
-    table.sort(backends, function(a,b) return (a.priority or 0) < (b.priority or 0) end)
-    local targets = {}
-    for _, backend in ipairs(backends) do
-      if backend.id ~= "internal" then
-        for _, target in ipairs(backend.infer and backend.infer() or {}) do
-          target.backend = backend
+---Sets the targets: config.plugins.build.targets, or those the backends infer
+---for the project. Keeps the current target if there's one of the same name.
+function build.infer_targets()
+  core.add_thread(function()
+    local current = build.targets and build.targets[build.state.target]
+    if config.plugins.build.targets then
+      build.set_targets(config.plugins.build.targets, config.plugins.build.type or "internal")
+    else
+      local backends = build.get_backends()
+      table.sort(backends, function(a,b) return (a.priority or 0) < (b.priority or 0) end)
+      local targets = {}
+      for _, backend in ipairs(backends) do
+        if backend.id ~= "internal" then
+          for _, target in ipairs(backend.infer and backend.infer() or {}) do
+            target.backend = backend
+            table.insert(targets, target)
+          end
+        end
+      end
+      if #targets == 0 then
+        local internal = build.get_backends("internal")
+        for _, target in ipairs(internal.infer() or {}) do
+          target.backend = internal
           table.insert(targets, target)
         end
       end
+      build.set_targets(targets)
     end
-    if #targets == 0 then
-      local internal = build.get_backends("internal")
-      for _, target in ipairs(internal.infer() or {}) do
-        target.backend = internal
-        table.insert(targets, target)
+    if current then
+      for i, target in ipairs(build.targets) do
+        if target.name == current.name then build.state.target = i break end
       end
     end
-    build.set_targets(targets)
+    build.set_target(build.state.target)
+  end)
+end
+
+build.infer_targets()
+
+-- a new project has its own targets
+local on_enter_project = core.on_enter_project
+function core.on_enter_project(...)
+  on_enter_project(...)
+  build.infer_targets()
+end
+
+-- VS Code's task and launch files define targets (vscode backend)
+local doc_save = Doc.save
+function Doc:save(...)
+  local res = doc_save(self, ...)
+  local vscode_dir = core.root_project().path .. PATHSEP .. ".vscode" .. PATHSEP
+  if self.abs_filename == vscode_dir .. "tasks.json" or self.abs_filename == vscode_dir .. "launch.json" then
+    build.infer_targets()
   end
-  build.set_target(build.state.target)
-end)
+  return res
+end
 
 return build
 

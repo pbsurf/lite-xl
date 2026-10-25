@@ -20,7 +20,7 @@
     },
     {
       "id": "build",
-      "description": "Build plugin (lite-xl-ide 50c1b40) with a task backend; toolbar font scales with SCALE.",
+      "description": "Build plugin (lite-xl-ide 50c1b40) with a task backend and targets from VS Code's tasks.json and launch.json; toolbar font scales with SCALE.",
       "version": "0.2",
       "mod_version": "3",
       "path": "addons/plugins/build",
