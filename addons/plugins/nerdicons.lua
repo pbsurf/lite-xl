@@ -229,9 +229,17 @@ function TreeView:draw_item_chevron(item, active, hovered, x, y, w, h)
       local chevron_color = hovered and style.accent or style.text
       common.draw_text(icon_font, chevron_color, map[chevron_icon], nil, x+8, y, 0, h) -- added 8 to x to draw the chevron closer to the icon
     end
-    return chevron_width + style.padding.x
+    return self:get_item_chevron_width(item)
   end
   return TreeView_draw_item_chevron(self, item, active, hovered, x, y, w, h)
+end
+
+local TreeView_get_item_chevron_width = TreeView.get_item_chevron_width
+function TreeView:get_item_chevron_width(item)
+  if not config.plugins.nerdicons.use_default_chevrons then
+    return chevron_width + style.padding.x
+  end
+  return TreeView_get_item_chevron_width(self, item)
 end
 
 -- Terminal views (terminal plugin, if loaded): a terminal icon

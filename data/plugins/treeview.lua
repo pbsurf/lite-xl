@@ -208,12 +208,12 @@ function TreeView:set_selection(selection, selection_y)
 end
 
 
+---Where an entry's name is drawn in its row (x, y, w, h), as draw_item lays it out.
 function TreeView:get_text_bounding_box(item, x, y, w, h)
-  local icon_width = style.icon_font:get_width("D")
-  local xoffset = item.depth * style.padding.x + style.padding.x + icon_width
-  x = x + xoffset
-  w = style.font:get_width(item.name) + 2 * style.padding.x
-  return x, y, w, h
+  x = x + self:get_item_indent(item) + self:get_item_chevron_width(item)
+    + self.item_icon_width + self.item_text_spacing
+  local text, font = self:get_item_text(item)
+  return x, y, font:get_width(text), h
 end
 
 
@@ -348,13 +348,25 @@ function TreeView:draw_item_body(item, active, hovered, x, y, w, h)
 end
 
 
+---Space before an entry's chevron column: its depth's indent, plus a margin.
+function TreeView:get_item_indent(item)
+  return item.depth * style.padding.x + style.padding.x / 2
+end
+
+
+---Width of the chevron column, which every entry has, chevron or not.
+function TreeView:get_item_chevron_width(item)
+  return style.padding.x
+end
+
+
 function TreeView:draw_item_chevron(item, active, hovered, x, y, w, h)
   if item.type == "dir" then
     local chevron_icon = item.expanded and "-" or "+"
     local chevron_color = hovered and style.accent or style.text
     common.draw_text(style.icon_font, chevron_color, chevron_icon, nil, x, y, 0, h)
   end
-  return style.padding.x
+  return self:get_item_chevron_width(item)
 end
 
 
@@ -372,7 +384,7 @@ end
 function TreeView:draw_item(item, active, hovered, x, y, w, h)
   self:draw_item_background(item, active, hovered, x, y, w, h)
 
-  x = x + item.depth * style.padding.x + style.padding.x
+  x = x + self:get_item_indent(item)
   x = x + self:draw_item_chevron(item, active, hovered, x, y, w, h)
 
   self:draw_item_body(item, active, hovered, x, y, w, h)
