@@ -14,7 +14,6 @@ local ToolbarView = require "plugins.toolbarview"
 local ContextMenu = require "core.contextmenu"
 local TerminalView = require("plugins.terminal").class
 local search = require "plugins.terminal.search"
-local PanelHeader = require "core.panelheader"
 local panel = require "core.panel"
 local ResultsList = require "core.resultslist"
 
@@ -64,10 +63,8 @@ local build = common.merge({
   error_color = style.error,
   warning_color = style.warn,
   good_color = style.good,
-  -- the height of the drawer with the build's terminal
-  drawer_size = 250 * SCALE,
   max_previous_arguments = 100,
-  -- after a successful build or clean: "keep" the drawer open, or "close" it
+  -- after a successful build or clean: "keep" the output's tab open, or "close" it
   on_success = "keep",
   -- show the build toolbar, under the file browser
   toolbar = true,
@@ -248,13 +245,13 @@ function build.is_running() return build.current ~= nil end
 function build.output(line) core.log_quiet(line) end
 
 ---Starts a build, clean or run (`kind`: "Build", "Clean", "Run") of a target:
----the drawer opens, and `start(finish)` is run in a thread; `finish(status)`
+---the output's tab shows, and `start(finish)` is run in a thread; `finish(status)`
 ---(or build.fail) ends it, writing a footer, then calls `callback(status)`.
 local function begin(kind, target, start, callback)
   local name = target.name or "target"
   local current = { kind = kind, target = target, started = system.get_time() }
   build.current = current
-  build.view.visible = true
+  panel.show(build.view, { focus = false })
   -- a run's output isn't the build's problems
   if kind ~= "Run" then
     build.view.problems = {}
@@ -288,9 +285,17 @@ local function begin(kind, target, start, callback)
     local summary = string.format("%s %s: %s%s, %.1f s", kind, name, result,
       #counts > 0 and ", " .. table.concat(counts, ", ") or "", time)
     build.view:write(sgr_color(status == 0 and style.dim or build.error_color) .. "── " .. summary .. "\x1b[0m\r\n")
-    build.view.summary = { text = summary, failed = status ~= 0 }
+    -- for the tab: the exit status and time go in its tooltip
+    local short = result:gsub(" with exit status %-?%d+$", "")
+    local info = { string.format("%.1f s", time) }
+    if short ~= result then table.insert(info, 1, "exit status " .. status) end
+    build.view.summary = {
+      text = string.format("%s %s: %s%s", kind, name, short, #counts > 0 and ", " .. table.concat(counts, ", ") or ""),
+      failed = status ~= 0,
+      info = info,
+    }
     build.output(summary)
-    if status == 0 and kind ~= "Run" and build.on_success == "close" then build.view.visible = false end
+    if status == 0 and kind ~= "Run" and build.on_success == "close" then panel.remove(build.view) end
     if callback then callback(status) end
   end
   core.add_thread(function()
@@ -506,8 +511,8 @@ build.menu_actions = {
   { text = "Show Problems", command = "build:show-problems" },
   { text = "Next Error", command = "build:next-error" },
   { text = "Previous Error", command = "build:previous-error" },
-  { text = "Show Build Output", command = "build:toggle-drawer", when = function() return not build.view.visible end },
-  { text = "Hide Build Output", command = "build:toggle-drawer", when = function() return build.view.visible end },
+  { text = "Show Build Output", command = "build:toggle-output", when = function() return not build.is_output_shown() end },
+  { text = "Hide Build Output", command = "build:toggle-output", when = function() return build.is_output_shown() end },
 }
 
 ---The target menu's rows: targets, binary and recent arguments, actions.
@@ -647,7 +652,9 @@ function DocView:draw_line_gutter(idx, x, y, width)
 end
 
 
----The build's terminal, in a drawer: each command of a build runs in it, on
+---The build's terminal, a tab in the bottom panel (core.panel), its title the
+---build's status (progress behind it, red when it failed), kept when the tab
+---is closed: each command of a build runs in it, on
 ---a pty of its own, after the output of those before. Compilers' messages in
 ---it are found as lines complete (build.parse_compile_line, or the backend's),
 ---and can be clicked to go to their file.
@@ -656,9 +663,6 @@ BuildView.close_on_exit = false
 
 function BuildView:new()
   BuildView.super.new(self, { shell = "DUMMY" })
-  self.size.y = 0
-  self.target_size = build.drawer_size
-  self.visible = false
   -- messages found, in order: { type, file (absolute), line, col, message,
   -- first, last }, first and last naming its rows as row + terminal:scrolled()
   self.messages = {}
@@ -666,31 +670,43 @@ function BuildView:new()
   self.problems = {}
   self.hovered_message = nil
   self.active_message = nil
-  -- how the last build, clean or run ended, for the header: { text, failed }
+  -- how the last build, clean or run ended, for the tab: { text, failed,
+  -- info (for its tooltip) }
   self.summary = nil
-  self.header = PanelHeader(self, {
-    { icon = "C", tooltip = "Close", action = function() build.set_drawer_visible(false) end },
-  })
   -- the command running: { cmd, cwd, dirs (make's directories), parsed (the
   -- first row not parsed yet, as an id), source (the pty's watch source) }
   self.job = nil
 end
 
-function BuildView:get_name() return "Build" end
-
-function BuildView:update()
-  -- no animation: a terminal resized a little at a time pushes its lines into
-  -- the scrollback (and hidden, at 0, it keeps its size)
-  self.size.y = self.visible and self.target_size or 0
-  BuildView.super.update(self)
-  if self.hovered_message and self.terminal and not self.terminal:mouse_tracking_mode() then self.cursor = "hand" end
+-- what's under way, else how the last one ended
+function BuildView:get_name()
+  local current = build.current
+  if current then
+    return ({ Build = "Building ", Clean = "Cleaning ", Run = "Running " })[current.kind]
+      .. (current.target.name or "target")
+  end
+  return self.summary and self.summary.text or "Build"
 end
 
-function BuildView:set_target_size(axis, value)
-  if axis == "y" then
-    self.target_size = value
-    return true
-  end
+function BuildView:get_name_color()
+  return not build.current and self.summary and self.summary.failed and build.error_color or nil
+end
+
+function BuildView:get_progress()
+  return build.current and (build.current.progress or true) or nil
+end
+
+function BuildView:get_tab_tooltip_info()
+  if build.current or not self.summary then return {} end
+  return self.summary.info
+end
+
+-- not restored with the workspace: its output isn't
+function BuildView:is_transient() return true end
+
+function BuildView:update()
+  BuildView.super.update(self)
+  if self.hovered_message and self.terminal and not self.terminal:mouse_tracking_mode() then self.cursor = "hand" end
 end
 
 function BuildView:accepts_input()
@@ -708,31 +724,17 @@ function BuildView:get_cursor()
   return x, y, self.job and mode or "hidden"
 end
 
--- what's under way, else how the last one ended
-function BuildView:update_header()
-  local current = build.current
-  if current then
-    self.header.text = ({ Build = "Building ", Clean = "Cleaning ", Run = "Running " })[current.kind]
-      .. (current.target.name or "target") .. "…"
-    self.header.color = nil
-    self.header.progress = current.progress
-  else
-    self.header.text = self.summary and self.summary.text or "No build yet"
-    self.header.color = self.summary and self.summary.failed and build.error_color or nil
-    self.header.progress = nil
-  end
-end
-
 function BuildView:clear()
   self.terminal:clear()
   self.messages, self.problems = {}, {}
   self.hovered_message, self.active_message = nil, nil
 end
 
----The terminal, made now if the drawer hasn't been shown yet.
+---The terminal, made now if the view hasn't been shown yet: sized as the
+---panel is likely to be, and resized when it shows.
 function BuildView:get_terminal()
   if not self.terminal then
-    self.size.y = self.target_size
+    if self.size.y <= 0 then self.size.y = panel.height or core.root_view.size.y / 3 end
     if self.size.x <= 0 then self.size.x = core.root_view.size.x end
     BuildView.super.update(self)
   end
@@ -1244,14 +1246,12 @@ function BuildBarView:new()
     {symbol = "#", command = "build:clean-and-build"},
     {symbol = "$", command = "build:terminate"},
     {symbol = "&", command = "build:next-target"},
-    {symbol = "%", command = "build:toggle-drawer"},
+    {symbol = "%", command = "build:toggle-output"},
   }
 end
 
 build.build_bar_view = BuildBarView()
 build.view = BuildView()
-local node = core.root_view:get_active_node()
-build.view_node = node:split("down", build.view, { y = true }, true)
 -- above the file browser's toolbar, if it has one (toolbarview isn't disabled)
 if TreeView and build.toolbar then
   build.build_bar_node = TreeView.node.b and TreeView.node.b:split("up", build.build_bar_view, {y = true})
@@ -1389,11 +1389,20 @@ end, {
   end
 })
 
----Shows or hides the drawer; hidden, it gives the keyboard back.
-function build.set_drawer_visible(visible)
-  build.view.visible = visible
-  if not visible and core.active_view == build.view and core.last_active_view then
-    core.set_active_view(core.last_active_view)
+---Whether the build's output is shown: its tab is in a node.
+function build.is_output_shown()
+  return core.root_view.root_node:get_node_for_view(build.view) ~= nil
+end
+
+---Shows the build's output and focuses it, or takes its tab out (it's kept),
+---giving the keyboard back to the editor.
+function build.set_output_shown(shown)
+  if shown then
+    panel.show(build.view)
+  else
+    local had_focus = core.active_view == build.view
+    panel.remove(build.view)
+    if had_focus then core.set_active_view(core.root_view:get_last_used_node().active_view) end
   end
 end
 
@@ -1420,8 +1429,10 @@ local function select_target_commandview(submit, target, condition)
 end
 
 command.add(nil, {
-  ["build:toggle-drawer"] = function()
-    build.set_drawer_visible(not build.view.visible)
+  -- shows the output, or hides it if it's the tab in front
+  ["build:toggle-output"] = function()
+    local node = core.root_view.root_node:get_node_for_view(build.view)
+    build.set_output_shown(not (node and node.active_view == build.view))
   end,
   ["build:select-target"] = function(target)
     select_target_commandview(function(target, idx)
@@ -1446,10 +1457,10 @@ command.add(nil, {
 
 -- escape in the build terminal goes to its program while one runs
 command.add(function()
-  return core.active_view == build.view and build.view.visible and not build.view:accepts_input()
+  return core.active_view == build.view and not build.view:accepts_input()
 end, {
-  ["build:contextual-close-drawer"] = function()
-    build.set_drawer_visible(false)
+  ["build:contextual-close"] = function()
+    build.set_output_shown(false)
   end
 })
 
@@ -1464,10 +1475,10 @@ keymap.add {
   ["ctrl+alt+e"]         = "build:select-target-and-run",
   ["ctrl+shift+alt+b"]   = "build:select-target-and-build",
   ["ctrl+shift+b"]       = "build:clean",
-  ["f6"]                 = "build:toggle-drawer",
+  ["f6"]                 = "build:toggle-output",
   ["f4"]                 = "build:next-error",
   ["shift+f4"]           = "build:previous-error",
-  ["escape"]             = "build:contextual-close-drawer"
+  ["escape"]             = "build:contextual-close"
 }
 
 ---Sets the targets: config.plugins.build.targets, or those the backends infer

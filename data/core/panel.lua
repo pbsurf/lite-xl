@@ -105,7 +105,9 @@ end
 ---in a node (the panel's or one it was dragged to); else added to the panel,
 ---which is made if needed, along with the views hide() took out.
 ---@param view core.view
-function panel.show(view)
+---@param opts? { focus?: boolean } focus: false leaves the focus where it is
+function panel.show(view, opts)
+  local active = core.active_view
   local node = core.root_view.root_node:get_node_for_view(view)
   if not node then
     node = panel.get_node()
@@ -117,6 +119,7 @@ function panel.show(view)
     if not node:get_view_idx(view) then node:add_view(view) end
   end
   node:set_active_view(view)
+  if opts and opts.focus == false and active then core.set_active_view(active) end
 end
 
 ---Takes a view out of its node without closing it (a build or shell keeps

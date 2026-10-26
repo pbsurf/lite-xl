@@ -124,7 +124,7 @@ config.plugins.menubar = common.merge({
       { command = "treeview:toggle-focus", text = "Focus File Browser" },
       { command = "toolbar:toggle", text = "Toolbar" },
       { command = "status-bar:toggle", text = "Status Bar" },
-      { command = "build:toggle-drawer", text = "Build Output" },
+      { command = "build:toggle-output", text = "Build Output" },
       { command = "debugger:toggle-drawer", text = "Debugger" },
       { command = "core:open-log", text = "Log" },
       "-",
@@ -249,9 +249,9 @@ config.plugins.menubar = common.merge({
       return tv and tv.toolbar and tv.toolbar.visible
     end,
     ["status-bar:toggle"] = function() return core.status_view.visible end,
-    ["build:toggle-drawer"] = function()
+    ["build:toggle-output"] = function()
       local build = package.loaded["plugins.build"]
-      return build and build.view.visible
+      return build and build.is_output_shown()
     end,
     ["debugger:toggle-drawer"] = function()
       local debugger = package.loaded["plugins.debugger"]

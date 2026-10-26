@@ -158,7 +158,7 @@ another repository's version, uninstalls removing dependents under `--assume-yes
   the view away from where it was, other than with the cursor keys),
   alt+shift+left / alt+shift+right within the current file only.
 * **build** (imported from lite-xl-ide, with our changes): builds and runs in a
-  terminal in the drawer (f6), so output has its colors and progress lines,
+  terminal in the bottom panel (f6), so output has its colors and progress lines,
   ctrl+c works, and a program run reads the keyboard; each build stays in the
   scrollback above the next, ending with a line saying how it went. Compilers'
   `file:line:col` messages are found in it: click one to open the file there,
