@@ -11,6 +11,8 @@ local Object = require "core.object"
 local ContextMenu = require "core.contextmenu"
 local RootView = require "core.rootview"
 local tooltip = require "core.tooltip"
+local keymap = require "core.keymap"
+local panel = require "core.panel"
 
 
 ---Text drawn with a vertical offset, in pixels (negative raises it): for a glyph
@@ -125,6 +127,9 @@ function StatusViewItem:__tostring() return "StatusViewItem" end
 ---The type of separator rendered to the right of the item if another item
 ---follows it.
 ---@field separator? core.statusview.item.separator
+---Stays at the end of its side of the bar: items added later at the default
+---position go before it.
+---@field last? boolean
 
 ---Flag to tell the item should me aligned on left side of status bar.
 ---@type integer
@@ -158,6 +163,7 @@ function StatusViewItem:new(options)
   self.w = 0
   self.separator = options.separator or StatusView.separator
   self.get_item = options.get_item
+  self.last = options.last
 end
 
 ---Called by the status bar each time that the item needs to be rendered,
@@ -215,6 +221,7 @@ function StatusView:new()
   self:register_log_item()
   self:register_docview_items()
   self:register_command_items()
+  self:register_panel_item()
 end
 
 
@@ -367,6 +374,48 @@ function StatusView:register_command_items()
 end
 
 
+---The bottom panel's toggle (core.panel, root:toggle-panel), last on the right:
+---a window with its bottom part filled while the panel is shown, an outline
+---while it's hidden; dim with nothing to show.
+function StatusView:register_panel_item()
+  local item = self:add_item({
+    name = "core:panel",
+    alignment = StatusView.Item.RIGHT,
+    last = true,
+    priority = 10,
+    command = "root:toggle-panel",
+    tooltip = function()
+      local key = keymap.get_binding("root:toggle-panel")
+      key = key and " (" .. key .. ")" or ""
+      if panel.is_shown() then return "Hide the bottom panel" .. key end
+      if panel.has_hidden() then return "Show the bottom panel" .. key end
+      return "The bottom panel is empty"
+    end,
+  })
+  item.on_draw = function(x, y, h, hovered, calc_only)
+    local ih = math.floor(style.font:get_height() * 0.7)
+    local iw = math.floor(ih * 1.3)
+    if calc_only then return iw end
+    local shown = panel.is_shown()
+    local color = (shown or panel.has_hidden()) and style.text or style.dim
+    local t = math.max(1, math.floor(SCALE))
+    local top = math.floor(y + (h - ih) / 2)
+    x = math.floor(x)
+    renderer.draw_rect(x, top, iw, t, color)
+    renderer.draw_rect(x, top + ih - t, iw, t, color)
+    renderer.draw_rect(x, top, t, ih, color)
+    renderer.draw_rect(x + iw - t, top, t, ih, color)
+    local bh = math.floor(ih * 0.4)
+    if shown then
+      renderer.draw_rect(x, top + ih - bh, iw, bh, color)
+    else
+      renderer.draw_rect(x, top + ih - bh, iw, t, color)
+    end
+    return iw
+  end
+end
+
+
 ---Set a position to the best match according to total available items.
 ---@param self core.statusview
 ---@param position integer
@@ -406,7 +455,13 @@ function StatusView:add_item(options)
   assert(self:get_item(options.name) == nil, "status item already exists: " .. options.name)
   ---@type core.statusview.item
   local item = StatusView.Item(options)
-  table.insert(self.items, normalize_position(self, options.position or -1, options.alignment), item)
+  local position = normalize_position(self, options.position or -1, options.alignment)
+  -- at the end by default: before an item that stays last
+  local before = self.items[position - 1]
+  if not options.position and before and before.last and before.alignment == item.alignment then
+    position = position - 1
+  end
+  table.insert(self.items, position, item)
   return item
 end
 
