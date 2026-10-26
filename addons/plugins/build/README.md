@@ -16,7 +16,7 @@ Targets are the basis of the build plugin. Different build systems can co-exist 
 
 Builds, cleans and runs happen in a terminal in a drawer under the editor (f6 shows or hides it). Each command a backend runs gets a pty of its own in it, after the output of the commands before, so colors, progress lines and ctrl+c work as in a shell, and a program run reads the keyboard. A dim line shows each command; a line at the end says how the build went.
 
-Lines in gcc's and clang's format, `file:line:column: type: message`, are found as they're written, with paths relative to the command's directory, or to the one make or ninja says it's entering. Clicking one opens its file there; f4 and shift+f4 go to the next and previous error or warning of the last build, and the status bar's build item shows how many there were (or that it failed).
+Lines in gcc's and clang's format, `file:line:column: type: message`, are found as they're written, with paths relative to the command's directory, or to the one make or ninja says it's entering. Clicking one opens its file there; f4 and shift+f4 go to the next and previous error or warning of the last build, and the status bar shows how many there were (or that it failed). Clicking that, or Show Problems in the build menu (`build:show-problems`), opens the Problems panel: the last build's errors, warnings and notes, filled in as it runs. Selecting one there (arrow keys, a click) shows its file and marks it in the terminal; Enter or a double click goes there, as in project search's results.
 
 ### Backends
 

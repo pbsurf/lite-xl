@@ -94,7 +94,9 @@ upstream's `release/v2.1.x`. Additions to the editor:
   multi-line status bar tooltips,
   `system.open_url` (opens a URL with the system's default handler), context
   menu items built when the menu opens (`ContextMenu:register` with a function), and
-  threads that wait for events rather than time (`core.wait_for`, `core.wake`,
+  results lists' keyboard stepping and peeking for any view (`core.resultslist`,
+  used by project search, lsp's Symbols Search and References, and build's
+  Problems), threads that wait for events rather than time (`core.wait_for`, `core.wake`,
   `core.watch_readable` with `process:watch_source`).
 
 ### Add-ons
@@ -160,8 +162,9 @@ another repository's version, uninstalls removing dependents under `--assume-yes
   ctrl+c works, and a program run reads the keyboard; each build stays in the
   scrollback above the next, ending with a line saying how it went. Compilers'
   `file:line:col` messages are found in it: click one to open the file there,
-  f4 / shift+f4 go to the next / previous error or warning, and the status bar's
-  build item counts them. The internal backend writes a makefile for make. In a
+  f4 / shift+f4 go to the next / previous error or warning, and the status bar
+  counts them; clicking the count opens Problems, a panel listing them, to step
+  through as project search's results. The internal backend writes a makefile for make. In a
   project with VS Code's `.vscode/tasks.json` and `launch.json`, a target per launch
   configuration (building with its preLaunchTask, running or debugging its
   program in its `cwd` with its `args` and environment) and per task; re-read

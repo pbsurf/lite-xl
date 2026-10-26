@@ -5,6 +5,7 @@ local keymap = require "core.keymap"
 local config = require "core.config"
 local common = require "core.common"
 local style = require "core.style"
+local View = require "core.view"
 local DocView = require "core.docview"
 local Doc = require "core.doc"
 local StatusView = require "core.statusview"
@@ -13,6 +14,8 @@ local ToolbarView = require "plugins.toolbarview"
 local ContextMenu = require "core.contextmenu"
 local TerminalView = require("plugins.terminal").class
 local search = require "plugins.terminal.search"
+local PanelHeader = require "core.panelheader"
+local ResultsList = require "core.resultslist"
 
 
 local storage 
@@ -171,6 +174,8 @@ function build.parse_compile_line(line)
   local kind, message = rest:match("^(%a[%a ]*):%s+(.*)")
   if kind == "error" or kind == "fatal error" then
     kind = "error"
+  elseif kind == "note" then
+    kind = "info"
   elseif kind ~= "warning" then
     kind, message = "info", rest
   end
@@ -245,19 +250,21 @@ function build.output(line) core.log_quiet(line) end
 ---(or build.fail) ends it, writing a footer, then calls `callback(status)`.
 local function begin(kind, target, start, callback)
   local name = target.name or "target"
-  local first_message = #build.view.messages + 1
   local current = { kind = kind, target = target, started = system.get_time() }
   build.current = current
   build.view.visible = true
-  build.view.first_message = first_message
+  -- a run's output isn't the build's problems
+  if kind ~= "Run" then
+    build.view.problems = {}
+    build.view.active_message = nil
+  end
   build.view:begin()
   function current.finish(status)
     if build.current ~= current then return end
     build.current = nil
     local errors, warnings = 0, 0
-    for i = first_message, #build.view.messages do
-      local type = build.view.messages[i].type
-      if type == "error" then errors = errors + 1 elseif type == "warning" then warnings = warnings + 1 end
+    for _, message in ipairs(kind ~= "Run" and build.view.problems or {}) do
+      if message.type == "error" then errors = errors + 1 elseif message.type == "warning" then warnings = warnings + 1 end
     end
     local time = system.get_time() - current.started
     if kind ~= "Run" then
@@ -493,6 +500,7 @@ build.menu_actions = {
   { text = "Clean", command = "build:clean" },
   { text = "Run", command = "build:run-or-term-or-kill", when = function() return not build.is_running() end },
   { text = "Stop", command = "build:terminate" },
+  { text = "Show Problems", command = "build:show-problems" },
   { text = "Next Error", command = "build:next-error" },
   { text = "Previous Error", command = "build:previous-error" },
   { text = "Show Build Output", command = "build:toggle-drawer", when = function() return not build.view.visible end },
@@ -567,22 +575,10 @@ core.status_view:add_item({
     if status_icon_font:get_size() ~= style.icon_font:get_size() then
       status_icon_font:set_size(style.icon_font:get_size())
     end
-    local item = {
+    return {
       style.text, status_icon_font, "&", style.font, " ",
       (target.name or "default") .. (get_arguments_text() ~= "" and "*" or "")
     }
-    -- what's under way, or how the last build ended: its counts, else its status
-    local function add(color, text) table.insert(item, color) table.insert(item, "  " .. text) end
-    local last = build.last
-    if build.current then
-      add(style.dim, ({ Build = "building…", Clean = "cleaning…", Run = "running…" })[build.current.kind])
-    elseif last and (last.errors > 0 or last.warnings > 0) then
-      if last.errors > 0 then add(build.error_color, last.errors .. (last.errors == 1 and " error" or " errors")) end
-      if last.warnings > 0 then add(build.warning_color, last.warnings .. (last.warnings == 1 and " warning" or " warnings")) end
-    elseif last and last.status ~= 0 then
-      add(build.error_color, last.kind:lower() .. " failed")
-    end
-    return item
   end,
   tooltip = function()
     local target = build.targets[build.state.target]
@@ -591,14 +587,44 @@ core.status_view:add_item({
       local arguments = get_arguments_text()
       text = text .. ", binary: " .. get_binary_text() .. (arguments ~= "" and " " .. arguments or "")
     end
-    local last = build.last
-    if last and not build.current then
-      text = text .. string.format("; last %s: %s", last.kind:lower(),
-        last.status == 0 and "done" or last.status == -1 and "failed" or "exit status " .. last.status)
-    end
     return text
   end,
   menu = get_menu,
+})
+
+-- what's under way, or how the last build ended: its counts, else that it
+-- failed; a click shows the Problems panel
+core.status_view:add_item({
+  predicate = function()
+    local last = build.last
+    return build.current or (last and (last.errors > 0 or last.warnings > 0 or last.status ~= 0))
+  end,
+  name = "build:status",
+  alignment = StatusView.Item.RIGHT,
+  get_item = function()
+    local item = {}
+    local function add(color, text)
+      table.insert(item, color)
+      table.insert(item, (#item > 1 and " " or "") .. text)
+    end
+    local last = build.last
+    if build.current then
+      add(style.dim, ({ Build = "building…", Clean = "cleaning…", Run = "running…" })[build.current.kind])
+    elseif last.errors > 0 or last.warnings > 0 then
+      if last.errors > 0 then add(build.error_color, last.errors .. (last.errors == 1 and " error" or " errors")) end
+      if last.warnings > 0 then add(build.warning_color, last.warnings .. (last.warnings == 1 and " warning" or " warnings")) end
+    else
+      add(build.error_color, last.kind:lower() .. " failed")
+    end
+    return item
+  end,
+  tooltip = function()
+    local last = build.last
+    if build.current or not last then return "Show Problems" end
+    return string.format("Last %s: %s. Show Problems", last.kind:lower(),
+      last.status == 0 and "done" or last.status == -1 and "failed" or "exit status " .. last.status)
+  end,
+  command = "build:show-problems",
 })
 
 local type_colors = {
@@ -633,8 +659,8 @@ function BuildView:new()
   -- messages found, in order: { type, file (absolute), line, col, message,
   -- first, last }, first and last naming its rows as row + terminal:scrolled()
   self.messages = {}
-  -- the first message of the last build
-  self.first_message = 1
+  -- the messages of the last build or clean (not of runs since)
+  self.problems = {}
   self.hovered_message = nil
   self.active_message = nil
   -- the command running: { cmd, cwd, dirs (make's directories), parsed (the
@@ -676,7 +702,7 @@ end
 
 function BuildView:clear()
   self.terminal:clear()
-  self.messages, self.first_message = {}, 1
+  self.messages, self.problems = {}, {}
   self.hovered_message, self.active_message = nil, nil
 end
 
@@ -814,6 +840,7 @@ function BuildView:parse_line(text, first, last)
   if not info or info.type ~= "file" then return end
   message.file, message.first, message.last = file, first, last
   table.insert(self.messages, message)
+  if build.current and build.current.kind ~= "Run" then table.insert(self.problems, message) end
 end
 
 ---The message on a row of the screen (0 is its top), if any.
@@ -891,10 +918,16 @@ end
 
 ---Opens a message's file at its line, marking it in the terminal and the gutter.
 function build.go_to_message(message)
+  build.mark_message(message)
+  jump_to_file(message.file, message.line, message.col)
+end
+
+---Makes a message the active one: marked in the terminal (scrolled to it),
+---in its file's gutter, and selected in the Problems panel.
+function build.mark_message(message)
   build.view.active_message = message
-  -- scrolled into view if it isn't
   local view = build.view
-  if view.terminal then
+  if view.terminal and view.size.y > 0 then
     local y, h = view:get_message_rect(message)
     if y < view.position.y or y + h > view.position.y + view.size.y then
       local scrollback, total = view.terminal:scrollback()
@@ -902,15 +935,15 @@ function build.go_to_message(message)
       view.terminal:scrollback(common.clamp(math.floor(view.lines / 3) - row, 0, total))
     end
   end
-  jump_to_file(message.file, message.line, message.col)
+  local panel = PanelHeader.get_panel(build.ProblemsView)
+  if panel then panel:sync_selection() end
   core.redraw = true
 end
 
 ---The last build's errors and warnings, in order.
 function build.get_errors()
   local errors = {}
-  for i = build.view.first_message, #build.view.messages do
-    local message = build.view.messages[i]
+  for _, message in ipairs(build.view.problems) do
     if message.type ~= "info" then table.insert(errors, message) end
   end
   return errors
@@ -945,6 +978,214 @@ function build.next_error(step)
 end
 
 
+---The last build's messages as a list (core.resultslist): errors, warnings and
+---notes in the order the build wrote them, coming in while it runs. Selecting
+---one shows its file there and marks it in the terminal, as f4 does.
+local ProblemsView = View:extend()
+build.ProblemsView = ProblemsView
+
+function ProblemsView:__tostring() return "ProblemsView" end
+
+function ProblemsView:new()
+  ProblemsView.super.new(self)
+  self.scrollable = true
+  self.header = PanelHeader(self)
+  -- the list shown: another is a new build's (see update)
+  self.problems = build.view.problems
+  self.selected_idx = nil
+  self.hovered_idx = nil
+  self.max_h_scroll = 0
+end
+
+function ProblemsView:get_name() return "Problems" end
+
+-- not restored with the workspace: the build's messages aren't
+function ProblemsView:is_transient() return true end
+
+function ProblemsView:set_target_size(axis, value)
+  if axis ~= "y" then return false end
+  self.size.y = value
+  return true
+end
+
+function ProblemsView:get_problems() return build.view.problems end
+
+function ProblemsView:update()
+  -- a new build's: nothing selected
+  if self.problems ~= build.view.problems then
+    self.problems = build.view.problems
+    self.selected_idx, self.hovered_idx = nil, nil
+    self.scroll.to.y = 0
+  end
+  ProblemsView.super.update(self)
+end
+
+-- for core.resultslist
+function ProblemsView:get_result_count() return #self:get_problems() end
+
+function ProblemsView:get_result_location(idx)
+  local message = self:get_problems()[idx]
+  return message.file, message.line, message.col
+end
+
+function ProblemsView:get_selected_index()
+  local problems = self:get_problems()
+  return self.selected_idx and problems[self.selected_idx] and self.selected_idx or nil
+end
+
+function ProblemsView:set_selected_index(idx)
+  self.selected_idx = idx
+  self:scroll_to_make_selected_visible()
+  build.mark_message(self:get_problems()[idx])
+end
+
+---Selects the active message (f4, a click in the terminal), if it's a problem.
+function ProblemsView:sync_selection()
+  for i, message in ipairs(self:get_problems()) do
+    if message == build.view.active_message then
+      self.selected_idx = i
+      self:scroll_to_make_selected_visible()
+      return
+    end
+  end
+end
+
+function ProblemsView:get_line_height()
+  return style.font:get_height() + style.padding.y
+end
+
+function ProblemsView:get_page_size()
+  return math.max(1, math.floor((self.size.y - self.header:get_height()) / self:get_line_height()) - 1)
+end
+
+function ProblemsView:get_scrollable_size()
+  return self.header:get_height() + self:get_result_count() * self:get_line_height()
+end
+
+function ProblemsView:get_h_scrollable_size()
+  return self.max_h_scroll
+end
+
+function ProblemsView:scroll_to_make_selected_visible()
+  local h = self:get_line_height()
+  local y = h * (self.selected_idx - 1)
+  self.scroll.to.y = math.min(self.scroll.to.y, y)
+  self.scroll.to.y = math.max(self.scroll.to.y, y + h - self.size.y + self.header:get_height())
+end
+
+---The visible rows: index, message, x, y, w, h.
+function ProblemsView:each_visible_row()
+  return coroutine.wrap(function()
+    local lh = self:get_line_height()
+    local x, y = self:get_content_offset()
+    local _, _, w = self:get_content_bounds()
+    y = y + self.header:get_height()
+    local first = math.max(1, math.floor((self.scroll.y) / lh))
+    local problems = self:get_problems()
+    for i = first, math.min(#problems, first + math.ceil(self.size.y / lh) + 1) do
+      coroutine.yield(i, problems[i], x, y + (i - 1) * lh, w, lh)
+    end
+  end)
+end
+
+function ProblemsView:get_status()
+  local errors, warnings = 0, 0
+  for _, message in ipairs(self:get_problems()) do
+    if message.type == "error" then errors = errors + 1 elseif message.type == "warning" then warnings = warnings + 1 end
+  end
+  local counts = {}
+  if errors > 0 then table.insert(counts, errors .. (errors == 1 and " error" or " errors")) end
+  if warnings > 0 then table.insert(counts, warnings .. (warnings == 1 and " warning" or " warnings")) end
+  local current = build.current and build.current.kind ~= "Run" and build.current
+  local last = build.last
+  local what = current or last
+  if not what then return "No build yet" end
+  local title = (current and (current.kind == "Build" and "Building " or "Cleaning ") or what.kind .. " ")
+    .. (what.target.name or "target") .. ": "
+  if #counts > 0 then return title .. table.concat(counts, ", ") end
+  if current then return title .. "no errors or warnings yet" end
+  if last.status ~= 0 then
+    return title .. "failed" .. (last.status ~= -1 and " with exit status " .. last.status or "")
+      .. ", no errors or warnings found"
+  end
+  return title .. "no errors or warnings"
+end
+
+function ProblemsView:on_mouse_moved(x, y, ...)
+  ProblemsView.super.on_mouse_moved(self, x, y, ...)
+  self.hovered_idx = nil
+  if self.header:on_mouse_moved(x, y) then return end
+  for i, _, rx, ry, rw, rh in self:each_visible_row() do
+    if x >= rx and y >= ry and x < rx + rw and y < ry + rh then
+      self.hovered_idx = i
+      break
+    end
+  end
+end
+
+function ProblemsView:on_mouse_pressed(button, x, y, clicks)
+  if self.header:on_mouse_pressed(button, x, y) then return true end
+  local caught = ProblemsView.super.on_mouse_pressed(self, button, x, y, clicks)
+  if not caught and button == "left" and self.hovered_idx then
+    self:click_result(self.hovered_idx, clicks)
+    return true
+  end
+end
+
+function ProblemsView:on_mouse_left()
+  ProblemsView.super.on_mouse_left(self)
+  self.hovered_idx = nil
+  self.header:on_mouse_left()
+end
+
+local type_labels = { error = "error", warning = "warning", info = "note" }
+
+function ProblemsView:draw()
+  self:draw_background(style.background)
+  local header_h = self.header:get_height()
+  if self.scroll.y ~= 0 then
+    renderer.draw_rect(self.position.x, self.position.y + header_h, self.size.x, style.divider_size, style.divider)
+  end
+  self.header.text = self:get_status()
+  self.header:draw(self.position.x, self.position.y, self.size.x)
+
+  local root = core.root_project().path
+  local label_w = style.font:get_width("warning") + style.padding.x
+  core.push_clip_rect(self.position.x, self.position.y + header_h + style.divider_size, self.size.x, self.size.y - header_h)
+  for i, message, x, y, w, h in self:each_visible_row() do
+    local selected = i == self.selected_idx
+    if selected then
+      renderer.draw_rect(x, y, w, h, style.selection)
+    elseif i == self.hovered_idx then
+      renderer.draw_rect(x, y, w, h, style.line_highlight)
+    end
+    x = x + style.padding.x
+    local note = message.type == "info"
+    common.draw_text(style.font, note and style.dim or type_colors[message.type](), type_labels[message.type], "left", x, y, 0, h)
+    x = x + label_w
+    local file = common.path_belongs_to(message.file, root) and common.relative_path(root, message.file) or common.home_encode(message.file)
+    -- dim is hard to read on the selection's color
+    local dim = selected and style.text or style.dim
+    x = common.draw_text(style.font, dim, string.format("%s:%d:%d", file, message.line, message.col), "left", x, y, 0, h)
+    x = common.draw_text(style.font, note and dim or style.text, "  " .. (message.message or ""), "left", x, y, 0, h)
+    self.max_h_scroll = math.max(self.max_h_scroll, x - self.position.x + self.scroll.x)
+  end
+  core.pop_clip_rect()
+  self:draw_scrollbar()
+end
+
+ResultsList.add_to(ProblemsView, "build-problems")
+
+---Shows the Problems panel and focuses it.
+function build.show_problems()
+  local panel = PanelHeader.get_panel(ProblemsView) or ProblemsView()
+  panel.header:show_panel()
+  panel:sync_selection()
+  core.set_active_view(panel)
+  return panel
+end
+
+
 local BuildBarView = ToolbarView:extend()
 
 function BuildBarView:new()
@@ -970,6 +1211,10 @@ if TreeView and build.toolbar then
     or TreeView.node:split("down", build.build_bar_view, {y = true})
 end
 
+
+command.add(nil, {
+  ["build:show-problems"] = function() build.show_problems() end,
+})
 
 command.add(function()
   return #build.get_errors() > 0
