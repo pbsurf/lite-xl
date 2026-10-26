@@ -5,43 +5,55 @@ local keymap = require "core.keymap"
 local command = require "core.command"
 local style = require "core.style"
 local View = require "core.view"
-local PanelHeader = require "core.panelheader"
+local panel = require "core.panel"
 local ResultsList = require "core.resultslist"
 
 ---@class plugins.projectsearch.resultsview : core.view
 local ResultsView = View:extend()
 
--- The results are a panel below the pane used last, reused by each search, to
--- step through with the keyboard (core.resultslist), the match selected in
--- the file shown. Its header's button moves it into a tab, keeping the
--- results; the next search opens a new panel. In a tab, the button moves it
--- back, replacing the panel.
+-- The results are a tab in the bottom panel (core.panel), reused by the next
+-- search unless kept, to step through with the keyboard (core.resultslist),
+-- the match selected in the file shown. The tab's title is the search's status,
+-- its progress drawn behind it; its tooltip has the search's details.
 function ResultsView:__tostring() return "ResultsView" end
 
 ResultsView.context = "session"
 
-function ResultsView:new(path, text, fn)
+---@param info? plugins.projectsearch.info
+function ResultsView:new(path, text, fn, info)
   ResultsView.super.new(self)
   self.scrollable = true
-  self.brightness = 0
   self.max_h_scroll = 0
   self.hovered_idx = 0
   self.generation = 0
-  self.header = PanelHeader(self)
-  self:begin_search(path, text, fn)
+  self:begin_search(path, text, fn, info)
 end
 
 
 function ResultsView:get_name()
-  return "Search: " .. self.query
+  return string.format("Search \"%s\": %d", self.query, #self.results)
 end
 
 
--- As a panel, resized by the user (a locked node, resizable)
-function ResultsView:set_target_size(axis, value)
-  if axis ~= "y" then return false end
-  self.size.y = value
-  return true
+function ResultsView:get_progress()
+  if not self.searching then return nil end
+  local files_number = core.project_files_number()
+  return files_number and self.last_file_idx / files_number or true
+end
+
+
+function ResultsView:get_tab_tooltip_info()
+  local t = {}
+  local info = self.search_args[4]
+  if info then
+    table.insert(t, info.mode .. (info.insensitive and ", ignoring case" or ""))
+  end
+  if self.search_args[1] then table.insert(t, "in " .. common.home_encode(self.search_args[1])) end
+  table.insert(t, common.format_count(self.last_file_idx)
+    .. (self.last_file_idx == 1 and " file" or " files"))
+  local time = (self.finished or system.get_time()) - self.started
+  table.insert(t, string.format("%.1f s", time))
+  return t
 end
 
 
@@ -69,8 +81,18 @@ local function find_all_matches_in_file(t, filename, fn)
 end
 
 
-function ResultsView:begin_search(path, text, fn)
-  self.search_args = { path, text, fn }
+---What a search is, for its tooltip.
+---@class plugins.projectsearch.info
+---@field mode string "literal", "regex", "fuzzy"
+---@field insensitive? boolean
+
+---@param path? string Searches files under it only
+---@param text string
+---@param fn fun(line: string): integer?, integer? A match's start and end
+---@param info? plugins.projectsearch.info
+function ResultsView:begin_search(path, text, fn, info)
+  self.search_args = { path, text, fn, info }
+  self.started, self.finished = system.get_time(), nil
   self.results = {}
   self.last_file_idx = 1
   self.query = text
@@ -94,7 +116,7 @@ function ResultsView:begin_search(path, text, fn)
     end
     if self.generation ~= generation then return end
     self.searching = false
-    self.brightness = 100
+    self.finished = system.get_time()
     core.redraw = true
   end, results)
 
@@ -110,7 +132,6 @@ end
 function ResultsView:on_mouse_moved(mx, my, ...)
   ResultsView.super.on_mouse_moved(self, mx, my, ...)
   self.hovered_idx = 0
-  if self.header:on_mouse_moved(mx, my) then return end
   for i, item, x,y,w,h in self:each_visible_result() do
     if mx >= x and my >= y and mx < x + w and my < y + h then
       self.hovered_idx = i
@@ -121,7 +142,6 @@ end
 
 
 function ResultsView:on_mouse_pressed(button, x, y, clicks)
-  if self.header:on_mouse_pressed(button, x, y) then return true end
   local caught = ResultsView.super.on_mouse_pressed(self, button, x, y, clicks)
   if not caught and button == "left" and self.hovered_idx > 0 then
     self:click_result(self.hovered_idx, clicks)
@@ -133,7 +153,6 @@ end
 function ResultsView:on_mouse_left()
   ResultsView.super.on_mouse_left(self)
   self.hovered_idx = 0
-  self.header:on_mouse_left()
 end
 
 
@@ -155,18 +174,7 @@ function ResultsView:set_selected_index(idx)
 end
 
 function ResultsView:get_page_size()
-  return math.max(1, math.floor((self.size.y - self:get_results_yoffset()) / self:get_line_height()) - 1)
-end
-
-
-function ResultsView:update()
-  self:move_towards("brightness", 0, 0.1)
-  ResultsView.super.update(self)
-end
-
-
-function ResultsView:get_results_yoffset()
-  return self.header:get_height()
+  return math.max(1, math.floor(self.size.y / self:get_line_height()) - 1)
 end
 
 
@@ -176,7 +184,7 @@ end
 
 
 function ResultsView:get_scrollable_size()
-  return self:get_results_yoffset() + #self.results * self:get_line_height()
+  return #self.results * self:get_line_height()
 end
 
 
@@ -187,8 +195,7 @@ end
 
 function ResultsView:get_visible_results_range()
   local lh = self:get_line_height()
-  local oy = self:get_results_yoffset()
-  local min = self.scroll.y+oy-style.font:get_height()
+  local min = self.scroll.y-style.font:get_height()
   min = math.max(1, math.floor(min / lh))
   return min, min + math.floor(self.size.y / lh) + 1
 end
@@ -199,7 +206,7 @@ function ResultsView:each_visible_result()
     local lh = self:get_line_height()
     local x, y = self:get_content_offset()
     local min, max = self:get_visible_results_range()
-    y = y + self:get_results_yoffset() + lh * (min - 1)
+    y = y + lh * (min - 1)
     for i = min, max do
       local item = self.results[i]
       if not item then break end
@@ -215,47 +222,18 @@ function ResultsView:scroll_to_make_selected_visible()
   local h = self:get_line_height()
   local y = h * (self.selected_idx - 1)
   self.scroll.to.y = math.min(self.scroll.to.y, y)
-  self.scroll.to.y = math.max(self.scroll.to.y, y + h - self.size.y + self:get_results_yoffset())
+  self.scroll.to.y = math.max(self.scroll.to.y, y + h - self.size.y)
 end
 
 
 function ResultsView:draw()
   self:draw_background(style.background)
 
-  -- status
   local ox, oy = self.position.x, self.position.y
-  local yoffset = self:get_results_yoffset()
-  renderer.draw_rect(self.position.x, self.position.y, self.size.x, yoffset, style.background)
-  if self.scroll.y ~= 0 then
-    renderer.draw_rect(self.position.x, self.position.y+yoffset, self.size.x, style.divider_size, style.divider)
-  end
-
-  local files_number = core.project_files_number()
-  local per = common.clamp(files_number and self.last_file_idx / files_number or 1, 0, 1)
-  local text
-  if self.searching then
-    if files_number then
-      text = string.format("Searching %.f%% (%d of %d files, %d matches) for %q...",
-        per * 100, self.last_file_idx, files_number,
-        #self.results, self.query)
-    else
-      text = string.format("Searching (%d files, %d matches) for %q...",
-        self.last_file_idx, #self.results, self.query)
-    end
-  else
-    text = string.format("Found %d matches for %q",
-      #self.results, self.query)
-  end
-  local header = self.header
-  header.text = text
-  header.color = common.lerp(style.text, style.accent, self.brightness / 100)
-  header.divider_color = common.lerp(style.dim, style.text, self.brightness / 100)
-  header.progress = self.searching and per or nil
-  header:draw(ox, oy, self.size.x)
 
   -- results
   local _, _, bw = self:get_content_bounds()
-  core.push_clip_rect(ox, oy+yoffset + style.divider_size, bw, self.size.y-yoffset)
+  core.push_clip_rect(ox, oy, bw, self.size.y)
   local y1, y2 = self.position.y, self.position.y + self.size.y
   for i, item, x,y,w,h in self:each_visible_result() do
     local color = style.text
@@ -282,20 +260,21 @@ end
 ---@param text string
 ---@param fn fun(line_text:string):...
 ---@return plugins.projectsearch.resultsview?
-local function begin_search(path, text, fn)
+---@param info plugins.projectsearch.info
+local function begin_search(path, text, fn, info)
   if text == "" then
     core.error("Expected non-empty string")
     return
   end
-  local panel = PanelHeader.get_panel(ResultsView)
-  if panel then
-    panel:begin_search(path, text, fn)
+  local view = panel.current(ResultsView)
+  if view then
+    view:begin_search(path, text, fn, info)
   else
-    panel = ResultsView(path, text, fn)
+    view = ResultsView(path, text, fn, info)
+    panel.set_current(view)
   end
-  panel.header:show_panel()
-  core.set_active_view(panel)
-  return panel
+  panel.show(view)
+  return view
 end
 
 
@@ -340,7 +319,7 @@ function projectsearch.search_plain(text, path, insensitive)
     end
     -- the column after the match, as regex.cmatch gives
     return s, e and e + 1
-  end)
+  end, { mode = "literal", insensitive = insensitive })
 end
 
 ---@param text string
@@ -357,7 +336,7 @@ function projectsearch.search_regex(text, path, insensitive)
   if not re then core.log("%s", errmsg) return end
   return begin_search(path, text, function(line_text)
     return regex.cmatch(re, line_text)
-  end)
+  end, { mode = "regex", insensitive = insensitive })
 end
 
 ---@param text string
@@ -372,7 +351,7 @@ function projectsearch.search_fuzzy(text, path, insensitive)
     else
       return common.fuzzy_match(line_text, text) and 1
     end
-  end)
+  end, { mode = "fuzzy", insensitive = insensitive })
 end
 
 

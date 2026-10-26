@@ -15,6 +15,7 @@ local ContextMenu = require "core.contextmenu"
 local TerminalView = require("plugins.terminal").class
 local search = require "plugins.terminal.search"
 local PanelHeader = require "core.panelheader"
+local panel = require "core.panel"
 local ResultsList = require "core.resultslist"
 
 
@@ -976,8 +977,7 @@ function build.mark_message(message)
       view.terminal:scrollback(common.clamp(math.floor(view.lines / 3) - row, 0, total))
     end
   end
-  local panel = PanelHeader.get_panel(build.ProblemsView)
-  if panel then panel:sync_selection() end
+  if build.problems_view then build.problems_view:sync_selection() end
   core.redraw = true
 end
 
@@ -1030,7 +1030,6 @@ function ProblemsView:__tostring() return "ProblemsView" end
 function ProblemsView:new()
   ProblemsView.super.new(self)
   self.scrollable = true
-  self.header = PanelHeader(self)
   -- the list shown: another is a new build's (see update)
   self.problems = build.view.problems
   self.selected_idx = nil
@@ -1038,16 +1037,53 @@ function ProblemsView:new()
   self.max_h_scroll = 0
 end
 
-function ProblemsView:get_name() return "Problems" end
+-- The build or clean under way, not a run (whose output isn't problems)
+local function current_build()
+  return build.current and build.current.kind ~= "Run" and build.current or nil
+end
+
+-- The counts of errors and warnings: "3 errors, 1 warning", nil if none
+local function problem_counts(problems)
+  local errors, warnings = 0, 0
+  for _, message in ipairs(problems) do
+    if message.type == "error" then errors = errors + 1 elseif message.type == "warning" then warnings = warnings + 1 end
+  end
+  local counts = {}
+  if errors > 0 then table.insert(counts, errors .. (errors == 1 and " error" or " errors")) end
+  if warnings > 0 then table.insert(counts, warnings .. (warnings == 1 and " warning" or " warnings")) end
+  return #counts > 0 and table.concat(counts, ", ") or nil
+end
+
+-- the counts, so far while a build is under way
+function ProblemsView:get_name()
+  local current = current_build()
+  if not current and not build.last then return "Problems" end
+  local counts = problem_counts(self:get_problems())
+  if current then return counts and "Problems: " .. counts or "Problems" end
+  return "Problems: " .. (counts or "none")
+end
+
+function ProblemsView:get_progress()
+  local current = current_build()
+  return current and (current.progress or true) or nil
+end
+
+-- what the problems are from, and how it ended
+function ProblemsView:get_tab_tooltip_info()
+  local current = current_build()
+  if current then
+    return { (current.kind == "Build" and "Building " or "Cleaning ") .. (current.target.name or "target") }
+  end
+  local last = build.last
+  if not last then return { "No build yet" } end
+  local result = last.status == 0 and "done" or last.status == -1 and "failed"
+    or "failed with exit status " .. last.status
+  return { last.kind .. " " .. (last.target.name or "target") .. ": " .. result,
+    string.format("%.1f s", last.time) }
+end
 
 -- not restored with the workspace: the build's messages aren't
 function ProblemsView:is_transient() return true end
-
-function ProblemsView:set_target_size(axis, value)
-  if axis ~= "y" then return false end
-  self.size.y = value
-  return true
-end
 
 function ProblemsView:get_problems() return build.view.problems end
 
@@ -1096,11 +1132,11 @@ function ProblemsView:get_line_height()
 end
 
 function ProblemsView:get_page_size()
-  return math.max(1, math.floor((self.size.y - self.header:get_height()) / self:get_line_height()) - 1)
+  return math.max(1, math.floor(self.size.y / self:get_line_height()) - 1)
 end
 
 function ProblemsView:get_scrollable_size()
-  return self.header:get_height() + self:get_result_count() * self:get_line_height()
+  return self:get_result_count() * self:get_line_height()
 end
 
 function ProblemsView:get_h_scrollable_size()
@@ -1111,7 +1147,7 @@ function ProblemsView:scroll_to_make_selected_visible()
   local h = self:get_line_height()
   local y = h * (self.selected_idx - 1)
   self.scroll.to.y = math.min(self.scroll.to.y, y)
-  self.scroll.to.y = math.max(self.scroll.to.y, y + h - self.size.y + self.header:get_height())
+  self.scroll.to.y = math.max(self.scroll.to.y, y + h - self.size.y)
 end
 
 ---The visible rows: index, message, x, y, w, h.
@@ -1120,7 +1156,6 @@ function ProblemsView:each_visible_row()
     local lh = self:get_line_height()
     local x, y = self:get_content_offset()
     local _, _, w = self:get_content_bounds()
-    y = y + self.header:get_height()
     local first = math.max(1, math.floor((self.scroll.y) / lh))
     local problems = self:get_problems()
     for i = first, math.min(#problems, first + math.ceil(self.size.y / lh) + 1) do
@@ -1129,33 +1164,9 @@ function ProblemsView:each_visible_row()
   end)
 end
 
-function ProblemsView:get_status()
-  local errors, warnings = 0, 0
-  for _, message in ipairs(self:get_problems()) do
-    if message.type == "error" then errors = errors + 1 elseif message.type == "warning" then warnings = warnings + 1 end
-  end
-  local counts = {}
-  if errors > 0 then table.insert(counts, errors .. (errors == 1 and " error" or " errors")) end
-  if warnings > 0 then table.insert(counts, warnings .. (warnings == 1 and " warning" or " warnings")) end
-  local current = build.current and build.current.kind ~= "Run" and build.current
-  local last = build.last
-  local what = current or last
-  if not what then return "No build yet" end
-  local title = (current and (current.kind == "Build" and "Building " or "Cleaning ") or what.kind .. " ")
-    .. (what.target.name or "target") .. ": "
-  if #counts > 0 then return title .. table.concat(counts, ", ") end
-  if current then return title .. "no errors or warnings yet" end
-  if last.status ~= 0 then
-    return title .. "failed" .. (last.status ~= -1 and " with exit status " .. last.status or "")
-      .. ", no errors or warnings found"
-  end
-  return title .. "no errors or warnings"
-end
-
 function ProblemsView:on_mouse_moved(x, y, ...)
   ProblemsView.super.on_mouse_moved(self, x, y, ...)
   self.hovered_idx = nil
-  if self.header:on_mouse_moved(x, y) then return end
   for i, _, rx, ry, rw, rh in self:each_visible_row() do
     if x >= rx and y >= ry and x < rx + rw and y < ry + rh then
       self.hovered_idx = i
@@ -1165,7 +1176,6 @@ function ProblemsView:on_mouse_moved(x, y, ...)
 end
 
 function ProblemsView:on_mouse_pressed(button, x, y, clicks)
-  if self.header:on_mouse_pressed(button, x, y) then return true end
   local caught = ProblemsView.super.on_mouse_pressed(self, button, x, y, clicks)
   if not caught and button == "left" and self.hovered_idx then
     self:click_result(self.hovered_idx, clicks)
@@ -1176,23 +1186,16 @@ end
 function ProblemsView:on_mouse_left()
   ProblemsView.super.on_mouse_left(self)
   self.hovered_idx = nil
-  self.header:on_mouse_left()
 end
 
 local type_labels = { error = "error", warning = "warning", info = "note" }
 
 function ProblemsView:draw()
   self:draw_background(style.background)
-  local header_h = self.header:get_height()
-  if self.scroll.y ~= 0 then
-    renderer.draw_rect(self.position.x, self.position.y + header_h, self.size.x, style.divider_size, style.divider)
-  end
-  self.header.text = self:get_status()
-  self.header:draw(self.position.x, self.position.y, self.size.x)
 
   local root = core.root_project().path
   local label_w = style.font:get_width("warning") + style.padding.x
-  core.push_clip_rect(self.position.x, self.position.y + header_h + style.divider_size, self.size.x, self.size.y - header_h)
+  core.push_clip_rect(self.position.x, self.position.y, self.size.x, self.size.y)
   for i, message, x, y, w, h in self:each_visible_row() do
     local selected = i == self.selected_idx
     if selected then
@@ -1217,13 +1220,16 @@ end
 
 ResultsList.add_to(ProblemsView, "build-problems")
 
----Shows the Problems panel and focuses it.
+---The Problems view, once shown: one, kept when its tab is closed
+build.problems_view = nil
+
+---Shows the Problems view in the bottom panel (or where it was dragged) and
+---focuses it.
 function build.show_problems()
-  local panel = PanelHeader.get_panel(ProblemsView) or ProblemsView()
-  panel.header:show_panel()
-  panel:sync_selection()
-  core.set_active_view(panel)
-  return panel
+  build.problems_view = build.problems_view or ProblemsView()
+  panel.show(build.problems_view)
+  build.problems_view:sync_selection()
+  return build.problems_view
 end
 
 

@@ -1749,7 +1749,7 @@ function lsp.request_references(doc, line, col)
     if server.capabilities.hoverProvider then
       local l1, c1 = translate.start_of_word(doc, line, col)
       local l2, c2 = translate.end_of_word(doc, line, col)
-      local rr = ReferenceResults:open(doc:get_text(l1, c1, l2, c2))
+      local rr = ReferenceResults:open(doc:get_text(l1, c1, l2, c2), name)
       -- a later search reuses the panel: this one's results are dropped then
       local generation = rr.generation
       local request_params = get_buffer_position_params(doc, line, col)
@@ -1856,7 +1856,7 @@ function lsp.request_workspace_symbol(doc, symbol)
   for _, name in pairs(lsp.get_active_servers(doc.filename, true)) do
     local server = lsp.servers_running[name]
     if server.capabilities.workspaceSymbolProvider then
-      local rs = SymbolResults:open(symbol)
+      local rs = SymbolResults:open(symbol, name)
       -- a later search reuses the panel: this one's results are dropped then
       local generation = rs.generation
       server:push_request('workspace/symbol', {

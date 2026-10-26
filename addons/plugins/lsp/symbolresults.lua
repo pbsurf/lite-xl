@@ -3,10 +3,9 @@
 -- @copyright Jefferson Gonzalez
 -- @license MIT
 --
--- A panel below the pane used last, to step through with the keyboard
--- (core.resultslist), the symbol's name selected in the file shown. Its
--- header's button moves it into a tab, keeping the results; the next search
--- opens a new panel. In a tab, the button moves it back, replacing the panel.
+-- A tab in the bottom panel (core.panel), reused by the next search unless
+-- kept, to step through with the keyboard (core.resultslist), the symbol's
+-- name selected in the file shown. The tab's title is the search's status.
 --
 -- ReferenceResults, the same for the references to a symbol, is a subclass.
 --
@@ -14,7 +13,7 @@
 local core = require "core"
 local common = require "core.common"
 local style = require "core.style"
-local PanelHeader = require "core.panelheader"
+local panel = require "core.panel"
 local ResultsList = require "core.resultslist"
 local Widget = require "libraries.widget"
 local ListBox = require "libraries.widget.listbox"
@@ -25,18 +24,19 @@ local util = require "plugins.lsp.util"
 ---@field public searching boolean
 ---@field public symbol string
 ---@field public generation integer Incremented by each search shown
----@field private header core.panelheader
+---@field public server? string The name of the server searching
 ---@field private list_container widget
 ---@field private list widget.listbox
 local SymbolResults = Widget:extend()
+
+---What the tab's title calls the results
+SymbolResults.results_label = "Symbols"
 
 function SymbolResults:new()
   SymbolResults.super.new(self)
 
   self.name = "Symbols Search"
   self.defer_draw = false
-
-  self.header = PanelHeader(self)
 
   self.list_container = Widget(self)
   self.list_container.border.width = 0
@@ -69,21 +69,29 @@ function SymbolResults:add_columns()
   self.list:add_column("Location")
 end
 
----Shows the class's panel (a subclass has its own), cleared for a new search,
----and focuses it. Called on the class: `SymbolResults:open(symbol)`.
+---Shows the class's current view in the bottom panel (a subclass has its own),
+---or a new one, cleared for a new search, and focuses it. Called on the class:
+---`SymbolResults:open(symbol, server)`.
 ---@param symbol string
+---@param server string The name of the server searching
 ---@return lsp.symbolresults
-function SymbolResults:open(symbol)
-  local panel = PanelHeader.get_panel(self) or self()
-  panel.header:show_panel()
-  panel:reset(symbol)
-  core.set_active_view(panel)
-  return panel
+function SymbolResults:open(symbol, server)
+  local view = panel.current(self)
+  if not view then
+    view = self()
+    panel.set_current(view)
+  end
+  view:reset(symbol, server)
+  panel.show(view)
+  return view
 end
 
 ---@param symbol string
-function SymbolResults:reset(symbol)
+---@param server? string
+function SymbolResults:reset(symbol, server)
   self.symbol = symbol
+  self.server = server
+  self.started, self.finished = system.get_time(), nil
   self.searching = true
   self.num = 1
   self.generation = self.generation + 1
@@ -93,7 +101,24 @@ function SymbolResults:reset(symbol)
 end
 
 function SymbolResults:get_name()
-  return "Symbols: " .. self.symbol
+  if self.searching and #self.list.rows == 0 then
+    return string.format("%s \"%s\"", self.results_label, self.symbol)
+  end
+  return string.format("%s \"%s\": %d", self.results_label, self.symbol, #self.list.rows)
+end
+
+-- under way by an unknown amount: servers don't report progress
+function SymbolResults:get_progress()
+  return self.searching or nil
+end
+
+function SymbolResults:get_tab_tooltip_info()
+  local t = {}
+  if self.server then table.insert(t, self.server) end
+  if self.started then
+    table.insert(t, string.format("%.1f s", (self.finished or system.get_time()) - self.started))
+  end
+  return t
 end
 
 -- Not restored with the workspace: it would come back without its results
@@ -124,18 +149,10 @@ function SymbolResults:add_result(result)
   self.list:add_row(row, result)
 end
 
----The header's text.
----@return string
-function SymbolResults:get_status()
-  if self.searching and #self.list.rows == 0 then
-    return string.format("Searching symbols for %q...", self.symbol)
-  end
-  return string.format("%s %d results found for %q",
-    self.searching and "Searching:" or "Finished:", #self.list.rows, self.symbol)
-end
-
 function SymbolResults:stop_searching()
   self.searching = false
+  self.finished = system.get_time()
+  core.redraw = true
 end
 
 -- for core.resultslist: a result's range is the symbol's name (the start of a
@@ -170,36 +187,11 @@ function SymbolResults:update()
   if not SymbolResults.super.update(self) then return end
   -- update the positions and sizes
   self.background_color = style.background
-  self.header.text = self:get_status()
-  local top = self.header:get_height()
-  self.list_container:set_position(style.padding.x, top)
+  self.list_container:set_position(style.padding.x, 0)
   self.list_container:set_size(
     self.size.x - (style.padding.x * 2),
-    self.size.y - top
+    self.size.y
   )
-end
-
-function SymbolResults:draw()
-  if not SymbolResults.super.draw(self) then return false end
-  self.header:draw(self.position.x, self.position.y, self.size.x)
-  return true
-end
-
-function SymbolResults:on_mouse_moved(x, y, ...)
-  -- the widgets too, also when it's over the header: the list then learns the
-  -- mouse left it
-  local over_header = self.header:on_mouse_moved(x, y)
-  return SymbolResults.super.on_mouse_moved(self, x, y, ...) or over_header
-end
-
-function SymbolResults:on_mouse_pressed(button, x, y, ...)
-  if self.header:on_mouse_pressed(button, x, y) then return true end
-  return SymbolResults.super.on_mouse_pressed(self, button, x, y, ...)
-end
-
-function SymbolResults:on_mouse_left()
-  SymbolResults.super.on_mouse_left(self)
-  self.header:on_mouse_left()
 end
 
 -- also for ReferenceResults, which extends it
@@ -209,6 +201,7 @@ ResultsList.add_to(SymbolResults, "symbol-results")
 ---The references to a symbol: a row for each, its location and line of code.
 ---@class lsp.referenceresults : lsp.symbolresults
 local ReferenceResults = SymbolResults:extend()
+ReferenceResults.results_label = "References"
 
 function ReferenceResults:new()
   ReferenceResults.super.new(self)
@@ -220,9 +213,6 @@ function ReferenceResults:add_columns()
   self.list:add_column("Code")
 end
 
-function ReferenceResults:get_name()
-  return "References: " .. self.symbol
-end
 
 ---@param location table An LSP Location
 function ReferenceResults:add_result(location)
@@ -232,14 +222,6 @@ function ReferenceResults:add_result(location)
     ListBox.COLEND,
     { container = style, name = "code_font" }, style.accent, preview
   }, { location = location })
-end
-
-function ReferenceResults:get_status()
-  if self.searching and #self.list.rows == 0 then
-    return string.format("Finding references to %q...", self.symbol)
-  end
-  return string.format("%s %d references to %q",
-    self.searching and "Searching:" or "Finished:", #self.list.rows, self.symbol)
 end
 
 SymbolResults.ReferenceResults = ReferenceResults

@@ -9,7 +9,7 @@ local keymap = require "core.keymap"
 ---last (RootView:peek_file), while the focus stays in the list; Enter or a
 ---double click moves the focus there. Where showing it would hide the list (a
 ---tab in that pane), a click or Enter opens it. Escape closes the view if it's
----a panel (it has a PanelHeader, `header`).
+---in the bottom panel (core.panel), the focus going back to the editor.
 ---
 ---A view class gets it with ResultsList.add_to(class, prefix), which adds the
 ---methods below (but not over the class's own) and the commands, named
@@ -86,12 +86,16 @@ function ResultsList.add_to(cls, prefix)
     [prefix .. ":select-last"] = function(view) view:select(view:get_result_count()) end,
     [prefix .. ":open-selected"] = function(view) view:open_selected() end,
   })
-  -- Escape closes a panel; a tab is closed as any other
+  -- Escape closes it in the panel; a tab elsewhere is closed as any other
   command.add(function()
     local view = core.active_view
-    return view:extends(cls) and view.header and view.header:is_panel(), view
+    local node = core.root_view.root_node:get_node_for_view(view)
+    return view:extends(cls) and node and node.is_panel, view, node
   end, {
-    [prefix .. ":close"] = function(view) view.header:close() end,
+    [prefix .. ":close"] = function(view, node)
+      node:close_view(core.root_view.root_node, view)
+      core.set_active_view(core.root_view:get_last_used_node().active_view)
+    end,
   })
 
   keymap.add {
