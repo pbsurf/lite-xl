@@ -429,8 +429,12 @@ function build.execute_command(command)
   end
 end
 
+---Whether the target can run: its `run`, its backend's, or else the binary.
 function build.can_run(target)
-  return target ~= nil and target.run ~= false and (target.run or (target.backend.run and (not target.backend.can_run or target.backend.can_run(target))))
+  if target == nil or target.run == false then return false end
+  if target.run then return true end
+  if target.backend.run then return not target.backend.can_run or target.backend.can_run(target) end
+  return config.target_binary ~= nil
 end
 
 function build.run(arguments)
