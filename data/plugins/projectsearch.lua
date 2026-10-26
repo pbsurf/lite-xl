@@ -6,18 +6,16 @@ local command = require "core.command"
 local style = require "core.style"
 local View = require "core.view"
 local PanelHeader = require "core.panelheader"
+local ResultsList = require "core.resultslist"
 
 ---@class plugins.projectsearch.resultsview : core.view
 local ResultsView = View:extend()
 
--- The results are a panel below the pane used last, reused by each search.
--- Selecting a result (arrow keys, a click) shows it in that pane, with the
--- match selected, while the focus stays here; Enter or a double click moves the
--- focus there, Escape closes the panel. Its header's button moves it into a
--- tab, keeping the results; the next search opens a new panel. In a tab, the
--- button moves it back, replacing the panel. In a tab sharing
--- a pane with the docs, showing a result would hide the list, so there a click,
--- double click or Enter opens it.
+-- The results are a panel below the pane used last, reused by each search, to
+-- step through with the keyboard (core.resultslist), the match selected in
+-- the file shown. Its header's button moves it into a tab, keeping the
+-- results; the next search opens a new panel. In a tab, the button moves it
+-- back, replacing the panel.
 function ResultsView:__tostring() return "ResultsView" end
 
 ResultsView.context = "session"
@@ -126,10 +124,7 @@ function ResultsView:on_mouse_pressed(button, x, y, clicks)
   if self.header:on_mouse_pressed(button, x, y) then return true end
   local caught = ResultsView.super.on_mouse_pressed(self, button, x, y, clicks)
   if not caught and button == "left" and self.hovered_idx > 0 then
-    self:select(self.hovered_idx)
-    if clicks > 1 or not core.root_view:can_peek(self) then
-      self:open_selected_result()
-    end
+    self:click_result(self.hovered_idx, clicks)
     return true
   end
 end
@@ -142,36 +137,25 @@ function ResultsView:on_mouse_left()
 end
 
 
----Shows a result in the pane used last, with the match selected (the line,
----for a fuzzy match), leaving the focus here.
----@return core.docview?
-local function show_result(res)
-  return core.root_view:peek_file(res.file, res.line, res.col, res.line, res.col2 or math.huge)
+-- for core.resultslist: a result's range is the match (the line, for a fuzzy one)
+function ResultsView:get_result_count() return #self.results end
+
+function ResultsView:get_result_location(idx)
+  local res = self.results[idx]
+  return res.file, res.line, res.col, res.line, res.col2 or math.huge
 end
 
+function ResultsView:get_selected_index()
+  return self.selected_idx > 0 and self.selected_idx or nil
+end
 
----Selects a result (clamped to the list) and shows it, if that can be done
----without hiding the list.
----@param idx integer
-function ResultsView:select(idx)
-  if #self.results == 0 then return end
-  self.selected_idx = common.clamp(idx, 1, #self.results)
+function ResultsView:set_selected_index(idx)
+  self.selected_idx = idx
   self:scroll_to_make_selected_visible()
-  self.shown = nil
-  if core.root_view:can_peek(self) then
-    self.shown = show_result(self.results[self.selected_idx])
-  end
 end
 
-
----Shows the selected result, or the first, and focuses it.
-function ResultsView:open_selected_result()
-  if self.selected_idx == 0 then self:select(1) end
-  local res = self.results[self.selected_idx]
-  if not res then return end
-  local dv = self.shown or show_result(res)
-  if dv then core.set_active_view(dv) end
-  return true
+function ResultsView:get_page_size()
+  return math.max(1, math.floor((self.size.y - self:get_results_yoffset()) / self:get_line_height()) - 1)
 end
 
 
@@ -423,67 +407,17 @@ command.add(nil, {
 })
 
 
+ResultsList.add_to(ResultsView, "project-search")
+
 command.add(ResultsView, {
-  ["project-search:select-previous"] = function()
-    local view = core.active_view
-    view:select(view.selected_idx - 1)
-  end,
-
-  ["project-search:select-next"] = function()
-    local view = core.active_view
-    view:select(view.selected_idx + 1)
-  end,
-
-  ["project-search:open-selected"] = function()
-    core.active_view:open_selected_result()
-  end,
-
   ["project-search:refresh"] = function()
     core.active_view:refresh()
   end,
-
-  ["project-search:move-to-previous-page"] = function()
-    local view = core.active_view
-    view.scroll.to.y = view.scroll.to.y - view.size.y
-  end,
-
-  ["project-search:move-to-next-page"] = function()
-    local view = core.active_view
-    view.scroll.to.y = view.scroll.to.y + view.size.y
-  end,
-
-  ["project-search:move-to-start-of-doc"] = function()
-    local view = core.active_view
-    view.scroll.to.y = 0
-  end,
-
-  ["project-search:move-to-end-of-doc"] = function()
-    local view = core.active_view
-    view.scroll.to.y = view:get_scrollable_size()
-  end
-})
-
--- Escape closes the panel; a tab is closed as any other
-command.add(function()
-  return core.active_view:is(ResultsView) and core.active_view.header:is_panel(),
-    core.active_view
-end, {
-  ["project-search:close"] = function(view) view.header:close() end,
 })
 
 keymap.add {
-  ["escape"]             = "project-search:close",
   ["f5"]                 = "project-search:refresh",
   ["ctrl+shift+f"]       = "project-search:find",
-  ["up"]                 = "project-search:select-previous",
-  ["down"]               = "project-search:select-next",
-  ["return"]             = "project-search:open-selected",
-  ["pageup"]             = "project-search:move-to-previous-page",
-  ["pagedown"]           = "project-search:move-to-next-page",
-  ["ctrl+home"]          = "project-search:move-to-start-of-doc",
-  ["ctrl+end"]           = "project-search:move-to-end-of-doc",
-  ["home"]               = "project-search:move-to-start-of-doc",
-  ["end"]                = "project-search:move-to-end-of-doc"
 }
 
 
