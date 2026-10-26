@@ -237,7 +237,8 @@ function build.fail(err)
 end
 
 ---The build, clean or run under way, from its start until its last command
----exits: { kind, target, started, finish(status) }.
+---exits: { kind, target, started, finish(status), progress (0 to 1, if the
+---build tool shows it) }.
 build.current = nil
 ---The last build or clean that ended: { kind, target, status, errors, warnings, time }.
 build.last = nil
@@ -286,6 +287,7 @@ local function begin(kind, target, start, callback)
     local summary = string.format("%s %s: %s%s, %.1f s", kind, name, result,
       #counts > 0 and ", " .. table.concat(counts, ", ") or "", time)
     build.view:write(sgr_color(status == 0 and style.dim or build.error_color) .. "── " .. summary .. "\x1b[0m\r\n")
+    build.view.summary = { text = summary, failed = status ~= 0 }
     build.output(summary)
     if status == 0 and kind ~= "Run" and build.on_success == "close" then build.view.visible = false end
     if callback then callback(status) end
@@ -663,6 +665,11 @@ function BuildView:new()
   self.problems = {}
   self.hovered_message = nil
   self.active_message = nil
+  -- how the last build, clean or run ended, for the header: { text, failed }
+  self.summary = nil
+  self.header = PanelHeader(self, {
+    { icon = "C", tooltip = "Close", action = function() build.set_drawer_visible(false) end },
+  })
   -- the command running: { cmd, cwd, dirs (make's directories), parsed (the
   -- first row not parsed yet, as an id), source (the pty's watch source) }
   self.job = nil
@@ -698,6 +705,21 @@ end
 function BuildView:get_cursor()
   local x, y, mode = self.terminal:cursor()
   return x, y, self.job and mode or "hidden"
+end
+
+-- what's under way, else how the last one ended
+function BuildView:update_header()
+  local current = build.current
+  if current then
+    self.header.text = ({ Build = "Building ", Clean = "Cleaning ", Run = "Running " })[current.kind]
+      .. (current.target.name or "target") .. "…"
+    self.header.color = nil
+    self.header.progress = current.progress
+  else
+    self.header.text = self.summary and self.summary.text or "No build yet"
+    self.header.color = self.summary and self.summary.failed and build.error_color or nil
+    self.header.progress = nil
+  end
 end
 
 function BuildView:clear()
@@ -809,15 +831,34 @@ function BuildView:parse_output(final)
   local doc = search.snapshot(self, first, cursor_y)
   for i, text in ipairs(doc.lines) do
     local segments = doc.segments[i]
-    if i == #doc.lines and not final then break end
+    if i == #doc.lines and not final then
+      -- a status line that's rewritten in place (ninja's)
+      self:parse_progress(text)
+      break
+    end
     -- without the newline, and the blank cells at the end
     self:parse_line(text:gsub("%s+$", ""), segments[1].row + scrolled, segments[#segments].row + scrolled)
     job.parsed = segments[#segments].row + scrolled + 1
   end
 end
 
+---Notes the build's progress from build tools' status lines: ninja's
+---"[3/120] ..." and CMake's makefiles' "[ 45%] ...".
+function BuildView:parse_progress(text)
+  local current = build.current
+  if not current or current.kind == "Run" then return end
+  local done, total = text:match("^%[(%d+)/(%d+)%]")
+  local percent = text:match("^%[%s*(%d+)%%%]")
+  if done then
+    current.progress = tonumber(done) / math.max(tonumber(total), 1)
+  elseif percent then
+    current.progress = tonumber(percent) / 100
+  end
+end
+
 function BuildView:parse_line(text, first, last)
   local job = self.job
+  self:parse_progress(text)
   -- make's and ninja's directories, which the paths after are relative to
   local dir = text:match("Entering directory [`'\"](.*)['\"]%s*$")
   if dir then
@@ -862,7 +903,7 @@ function BuildView:get_message_rect(message)
   local _, padding_y = self:get_padding()
   local lh = self:get_line_height()
   local row = message.first - self.terminal:scrolled() + self.terminal:scrollback()
-  return self.position.y + padding_y + row * lh, (message.last - message.first + 1) * lh
+  return self.position.y + self:get_header_height() + padding_y + row * lh, (message.last - message.first + 1) * lh
 end
 
 function BuildView:draw_background(color)
@@ -870,7 +911,7 @@ function BuildView:draw_background(color)
   if not self.terminal then return end
   for _, message in pairs({ hovered = self.hovered_message, active = self.active_message }) do
     local y, h = self:get_message_rect(message)
-    if y + h > self.position.y and y < self.position.y + self.size.y then
+    if y + h > self.position.y + self:get_header_height() and y < self.position.y + self.size.y then
       renderer.draw_rect(self.position.x, y, self.size.x, h, style.line_highlight)
       if message == self.active_message then
         renderer.draw_rect(self.position.x, y, math.ceil(2 * SCALE), h, type_colors[message.type]())
@@ -883,7 +924,7 @@ function BuildView:on_mouse_moved(x, y, ...)
   local result = BuildView.super.on_mouse_moved(self, x, y, ...)
   local hovered = nil
   if not self.v_scrollbar.dragging and x >= self.position.x and x < self.position.x + self.size.x
-    and y >= self.position.y and y < self.position.y + self.size.y then
+    and y >= self.position.y + self:get_header_height() and y < self.position.y + self.size.y then
     local _, row = self:convert_coordinates(x, y)
     hovered = self:get_message_at(row)
   end
@@ -929,7 +970,7 @@ function build.mark_message(message)
   local view = build.view
   if view.terminal and view.size.y > 0 then
     local y, h = view:get_message_rect(message)
-    if y < view.position.y or y + h > view.position.y + view.size.y then
+    if y < view.position.y + view:get_header_height() or y + h > view.position.y + view.size.y then
       local scrollback, total = view.terminal:scrollback()
       local row = message.first - view.terminal:scrolled()
       view.terminal:scrollback(common.clamp(math.floor(view.lines / 3) - row, 0, total))
