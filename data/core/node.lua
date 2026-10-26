@@ -911,12 +911,18 @@ end
 
 -- Returns true for nodes that accept either "proportional" resizes (based on the
 -- node.divider) or "locked" resizable nodes (along the resize axis).
+-- A split along the axis is resizable when either side is (that side takes the
+-- change: an editor above a fixed-height pane, as search_ui's); across it, when
+-- both are.
 function Node:is_resizable(axis)
   if self.type == 'leaf' then
     return not self.locked or not self.locked[axis] or self.resizable
   else
     local a_resizable = self.a:is_resizable(axis)
     local b_resizable = self.b:is_resizable(axis)
+    if self.type == (axis == "x" and "hsplit" or "vsplit") then
+      return a_resizable or b_resizable
+    end
     return a_resizable and b_resizable
   end
 end
