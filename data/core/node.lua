@@ -154,11 +154,17 @@ function Node:remove_view(root, view)
     else
       locked_size = locked_size_y
     end
+    -- next to a fixed-size pane (a drawer, maybe hidden) the node stays, empty,
+    -- to take the space; unless the parent's neighbour along the same axis can
+    -- (the pane then goes next to it)
+    local grandparent = locked_size and parent:get_parent_node(root)
+    local taken_up = grandparent and grandparent.type == parent.type
+      and grandparent[grandparent.a == parent and "b" or "a"]:is_resizable(parent.type == "hsplit" and "x" or "y")
     local next_primary
     if self.is_primary_node then
       next_primary = core.root_view:select_next_primary_node()
     end
-    if locked_size or (self.is_primary_node and not next_primary) then
+    if (locked_size and not taken_up) or (self.is_primary_node and not next_primary) then
       self.views = {}
       self:add_view(EmptyView())
     else
@@ -167,7 +173,9 @@ function Node:remove_view(root, view)
         next_primary = parent
       end
       parent:consume(other)
-      local p = parent
+      -- the focus goes to the sibling that takes the space; past a fixed pane,
+      -- to the unlocked node used last
+      local p = taken_up and core.root_view:get_last_used_node() or parent
       while p.type ~= "leaf" do
         p = p[is_a and "a" or "b"]
       end
