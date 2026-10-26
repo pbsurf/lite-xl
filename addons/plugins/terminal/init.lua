@@ -1207,7 +1207,6 @@ local keys = {
   ["ctrl+g"] = "terminal:bell",
   ["ctrl+h"] = "terminal:backspace",
   ["ctrl+i"] = "terminal:tab",
-  ["ctrl+j"] = "terminal:return",
   ["ctrl+k"] = "terminal:vertical-tab",
   ["ctrl+l"] = "terminal:redraw",
   ["ctrl+m"] = "terminal:carriage-feed",

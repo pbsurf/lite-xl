@@ -4,6 +4,7 @@ local DocView = require "core.docview"
 local command = require "core.command"
 local common = require "core.common"
 local config = require "core.config"
+local panel = require "core.panel"
 
 
 local t = {
@@ -114,6 +115,12 @@ command.add(function()
   local sx, sy = node:get_locked_size()
   return not sx and not sy, node
 end, t)
+
+-- the bottom panel: hidden with all its tabs (their programs running on), or
+-- shown again as it was
+command.add(function() return panel.is_shown() or panel.has_hidden() end, {
+  ["root:toggle-panel"] = function() panel.toggle() end,
+})
 
 command.add(nil, {
   ["root:scroll"] = function(delta)

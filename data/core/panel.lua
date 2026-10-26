@@ -159,6 +159,12 @@ function panel.hide()
   end
 end
 
+---Whether hide() took views out that the next show() brings back.
+---@return boolean
+function panel.has_hidden()
+  return #hidden > 0
+end
+
 ---Hides the panel, or shows it again as hide() left it.
 function panel.toggle()
   if panel.is_shown() then

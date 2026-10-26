@@ -42,7 +42,9 @@ upstream's `release/v2.1.x`. Additions to the editor:
   (`Search "foo": 42`, `Build lite-xl: failed, 3 errors` in red), with progress
   drawn behind it and details in its tooltip. A new search reuses its kind's
   italic tab; double-clicking that tab keeps it. Files never open there, and its
-  tabs can be dragged or moved (tab menu) to the editor and back.
+  tabs can be dragged or moved (tab menu) to the editor and back. ctrl+j
+  (`root:toggle-panel`; join lines moves to ctrl+shift+j) hides it with all its
+  tabs, their programs running on, and shows it again.
 * **Reopen closed tab:** ctrl+shift+t reopens the file whose tab was closed last
   (again for the one before), beside the tab that was next to it, at the cursor
   and scroll it had. Recent files (`core.recent_files`, kept between sessions)
