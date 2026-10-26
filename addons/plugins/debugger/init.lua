@@ -626,8 +626,12 @@ function core.set_active_view(view)
   end
 end
 
-core.add_thread(function()
-  local node = core.root_view:get_active_node()
+---Makes the drawer, below the editor used last, if it isn't made yet: when
+---it's first needed (a debug session, debugger:toggle-drawer), so an unused
+---debugger leaves the layout alone.
+function debugger.ensure_drawer()
+  if debugger.stack_view_node then return end
+  local node = core.root_view:get_last_used_node()
   debugger.stack_view_node = node:split("down", debugger.stack_view, { y = true }, true)
   if debugger.terminal_view then
     debugger.terminal_view_node = debugger.stack_view_node:split("right", debugger.terminal_view, { y = false }, true)
@@ -637,7 +641,7 @@ core.add_thread(function()
     debugger.watch_variable_view_node = debugger.stack_view_node:split("right", debugger.watch_variable_view, { y = true }, true)
     debugger.watch_result_view_node = debugger.watch_variable_view_node:split("right", debugger.watch_result_view, { y = true }, true)
   end
-end)
+end
 
 core.add_thread(function() 
   local item = core.status_view:add_item({
@@ -691,8 +695,10 @@ command.add(function()
   return config.target_binary and system.get_file_info(core.root_project():absolute_path(config.target_binary)) and model.state == "inactive"
 end, {
   ["debugger:start"] = function()
+    debugger.ensure_drawer()
     debugger.last_start_time = system.get_time()
-    if debugger.terminal_view then debugger.terminal_view.terminal:clear() end
+    -- no terminal yet before the drawer has first shown: its output waits
+    if debugger.terminal_view and debugger.terminal_view.terminal then debugger.terminal_view.terminal:clear() end
     model:start(config.target_binary, config.target_binary_arguments, function()
       debugger:paused()
     end, function()
@@ -765,7 +771,10 @@ end, {
 })
 
 command.add(nil, {
-  ["debugger:toggle-drawer"] = function() debugger.drawer_visible = not debugger.drawer_visible end
+  ["debugger:toggle-drawer"] = function()
+    debugger.ensure_drawer()
+    debugger.drawer_visible = not debugger.drawer_visible
+  end
 })
 
 command.add(function()
