@@ -121,7 +121,7 @@ another repository's version, uninstalls removing dependents under `--assume-yes
   match in `style.search_match`; the replace row shows only when wanted (ctrl+r,
   or the chevron left of the search box).
 * **terminal** (imported from lite-xl-terminal, with our changes): an integrated
-  terminal, as a drawer (shift+alt+t) or a tab (ctrl+shift+\`). ctrl+f
+  terminal, in the bottom panel (shift+alt+t, alt+t) or a tab (ctrl+shift+\`). ctrl+f
   searches it in search_ui's pane, newest output first (`search_backward`). Its C
   module is built by our meson build and linked into the user dir by `scripts/run.sh`.
 * **spellcheck:** spell checking with hunspell (`/usr/share/hunspell/en_US` by

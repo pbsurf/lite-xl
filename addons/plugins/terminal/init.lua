@@ -7,7 +7,7 @@ local common = require "core.common"
 local View = require "core.view"
 local keymap = require "core.keymap"
 local StatusView = require "core.statusview"
-local PanelHeader = require "core.panelheader"
+local panel = require "core.panel"
 
 local terminal_native = require "plugins.terminal.libterminal"
 local search = require "plugins.terminal.search"
@@ -54,8 +54,6 @@ local default_config = {
   -- searching (the search_ui plugin) goes up from the bottom of what's shown:
   -- newest output first; shift+enter/shift+f3 then go down
   search_backward = true,
-  -- the default height of the console drawer
-  drawer_height = 300,
   -- the default console font. non-monsospace is unsupported
   font = style.code_font,
   -- extra space after each character, as a fraction of the font size; negative is
@@ -156,11 +154,6 @@ default_config.config_spec = set_config_default_values {
     label = "Minimum Contrast Ratio",
     description = "Minimum contrast between the text and background color (set to 0 to disable auto color adjustment).",
     path = "minimum_contrast_ratio", type = "NUMBER"
-  },
-  {
-    label = "Terminal Drawer Height",
-    description = "Height of the terminal drawer (in pixels).",
-    path = "drawer_height", type = "NUMBER"
   },
   {
     label = "Inversion Key",
@@ -297,7 +290,6 @@ function TerminalView:supports_text_input() return true end
 function TerminalView:new(options)
   TerminalView.super.new(self)
   options = common.merge(common.merge({}, config.plugins.terminal), options)
-  self.size.y = options.drawer_height
   self.options = options
   -- with letter spacing, draw with a copy of the font, kept at its size in update
   self.base_font = self.options.font
@@ -378,21 +370,6 @@ function TerminalView:get_padding()
 end
 
 
----The height of the header above the rows: the view's `header` (a
----core.panelheader: the drawers' status line), if it has one. It's in the
----terminal's colors, as a results panel's header is in its.
-function TerminalView:get_header_height()
-  return self.header and self.header:get_height() or 0
-end
-
-
----Sets the header's text (and color, progress) before it's drawn: the
----terminal's title.
-function TerminalView:update_header()
-  self.header.text = self.terminal and self.terminal:name() or "Terminal"
-end
-
-
 -- row height: the font's, plus line_spacing rounded to whole pixels
 function TerminalView:get_line_height()
   local font = self.options.font
@@ -408,12 +385,12 @@ function TerminalView:update()
   if self.options.bold_font:get_size() ~= self.options.font:get_size() then
     self.options.bold_font:set_size(self.options.font:get_size())
   end
-  -- not while hidden (a closed drawer): shrunk to a line, a terminal would push
+  -- not while hidden (the debugger's closed drawer): shrunk to a line, a terminal would push
   -- what's on screen to the scrollback, and it doesn't come back
   if self.size.x > 0 and self.size.y > 0 and ((self.last_font_size and self.last_font_size ~= self.options.font:get_size()) or not self.terminal or self.last_size.x ~= self.size.x or self.last_size.y ~= self.size.y) then
     local padding_x, padding_y = self:get_padding()
     self.columns = math.max(math.floor((self.size.x - padding_x*2) / self.options.font:get_width("W")), 1)
-    self.lines = math.max(math.floor((self.size.y - self:get_header_height() - padding_y*2) / self:get_line_height()), 1)
+    self.lines = math.max(math.floor((self.size.y - padding_y*2) / self:get_line_height()), 1)
     if self.lines > 0 and self.columns > 0 then
       if not self.terminal then
         self:spawn()
@@ -432,7 +409,7 @@ function TerminalView:update()
       self.cursor = "ibeam"
       if self.terminal:mouse_tracking_mode()
          or self.v_scrollbar.hovering.track
-         or self.header_hovered then
+         or self.v_scrollbar.hovering.track then
         self.cursor = "arrow"
       end
       if (core.active_view == self and not self.focused) or (core.active_view ~= self and self.focused) then
@@ -459,8 +436,7 @@ function TerminalView:update()
       -- the scrollbar's percent is the scroll offset from the top over the scrollable
       -- size (as View sets it), so at 0 scrollback it's (size - visible) / size
       local scrollable = self:get_scrollable_size()
-      local header_h = self:get_header_height()
-      self.v_scrollbar:set_size(self.position.x, self.position.y + header_h, self.size.x, self.size.y - header_h, scrollable)
+      self.v_scrollbar:set_size(self.position.x, self.position.y, self.size.x, self.size.y, scrollable)
       self.v_scrollbar:set_percent((total_scrollback - scrollback) * lh / scrollable)
       self.v_scrollbar:update()
     else
@@ -516,7 +492,7 @@ function TerminalView:draw()
     local space_width = self.options.font:get_width(" ")
     local padding_x, padding_y = self:get_padding()
 
-    local y = self.position.y + self:get_header_height() + padding_y
+    local y = self.position.y + padding_y
     local lh = self:get_line_height()
     local text_y = math.floor((lh - self.options.font:get_height()) / 2)
     core.redraw = self:shift_selection_update() or core.redraw
@@ -621,16 +597,6 @@ function TerminalView:draw()
     end
   end
   TerminalView.super.draw_scrollbar(self)
-  if self.header then
-    local options = self.options
-    if self.header.foreground ~= options.text then
-      self.header.foreground = options.text
-      self.header.dim = common.lerp(options.background, options.text, 0.5)
-    end
-    self:update_header()
-    renderer.draw_rect(self.position.x, self.position.y, self.size.x, self:get_header_height(), options.background)
-    self.header:draw(self.position.x, self.position.y, self.size.x)
-  end
 end
 
 -- the search_ui plugin's Highlight All: the matches on screen, as lists of
@@ -673,7 +639,7 @@ function TerminalView:convert_coordinates(x, y)
   local padding_x, padding_y = self:get_padding()
   local col_exact = math.floor((x - self.position.x - padding_x) / w)
   local col_approx = common.round((x - self.position.x - padding_x) / w)
-  local row = math.floor((y - self.position.y - self:get_header_height() - padding_y) / self:get_line_height())
+  local row = math.floor((y - self.position.y - padding_y) / self:get_line_height())
   return math.max(0, col_exact), math.max(0, row), math.max(0, col_approx)
 end
 
@@ -701,10 +667,6 @@ function TerminalView:get_word_boundaries(col, row)
 end
 
 function TerminalView:on_mouse_pressed(button, x, y, clicks)
-  if self.header_hovered then
-    self.header:on_mouse_pressed(button, x, y)
-    return true
-  end
   local result = self.v_scrollbar:on_mouse_pressed(button, x, y, clicks)
   if result then
     if type(result) == "string" then
@@ -742,18 +704,6 @@ function TerminalView:on_mouse_pressed(button, x, y, clicks)
 end
 
 function TerminalView:on_mouse_moved(x, y, dx, dy)
-  -- the header's, unless dragging (a selection, the scrollbar)
-  local in_header = self.header and not (self.pressing or self.word_selecting or self.row_selecting or self.v_scrollbar.dragging)
-    and y >= self.position.y and y < self.position.y + self:get_header_height()
-  if in_header then
-    self.mouse_x, self.mouse_y = x, y
-    self.header_hovered = true
-    self.header:on_mouse_moved(x, y)
-    return true
-  elseif self.header_hovered then
-    self.header_hovered = false
-    self.header:on_mouse_left()
-  end
   local result = self.v_scrollbar:on_mouse_moved(x, y, dx, dy)
   if result then
     if result ~= true then
@@ -764,7 +714,7 @@ function TerminalView:on_mouse_moved(x, y, dx, dy)
   self.mouse_x = x
   self.mouse_y = y
   if self.pressing or self.word_selecting or self.row_selecting then
-    if y < self.position.y + self:get_header_height() then
+    if y < self.position.y then
       self.scrolling_offscreen = 1
     elseif y > self.position.y + self.size.y then
       self.scrolling_offscreen = -1
@@ -822,15 +772,6 @@ function TerminalView:on_mouse_released(button, x, y)
 end
 
 
-function TerminalView:on_mouse_left()
-  TerminalView.super.on_mouse_left(self)
-  if self.header_hovered then
-    self.header_hovered = false
-    self.header:on_mouse_left()
-  end
-end
-
-
 -- inverse of the percent set in update: a scrollbar result to scrollback lines
 function TerminalView:scroll_to_percent(percent)
   local _, total_scrollback = self.terminal:scrollback()
@@ -842,7 +783,7 @@ function TerminalView:get_scrollable_size()
   if not self.terminal then return self.size.y end
   local lh = self:get_line_height()
   local _, total_scrollback = self.terminal:scrollback()
-  return total_scrollback * lh + self.size.y - self:get_header_height()
+  return total_scrollback * lh + self.size.y
 end
 
 
@@ -887,12 +828,10 @@ function TerminalView:close()
     if source then core.unwatch_readable(source) end
     self.terminal:close()
   end
+  -- not in a node while the panel's terminal is hidden
   local node = core.root_view.root_node:get_node_for_view(self)
-  node:close_view(core.root_view.root_node, self)
-  if core.terminal_view == self then 
-    core.terminal_view = nil 
-    core.terminal_view_node = nil
-  end
+  if node then node:close_view(core.root_view.root_node, self) end
+  if core.terminal_view == self then core.terminal_view = nil end
   self.terminal = nil
   self.routine = nil
 end
@@ -1103,59 +1042,59 @@ end, {
   end
 })
 
-local toggle_drawer
-
--- the drawer's header closes it, as terminal:toggle-drawer does
-local drawer_buttons = {
-  { icon = "C", tooltip = "Close", action = function()
-    toggle_drawer(false)
-    if core.active_view == core.terminal_view and core.last_active_view then
-      core.set_active_view(core.last_active_view)
-    end
-  end },
-}
-
-function toggle_drawer(open)
-  if not core.terminal_view  then
-    core.terminal_view = TerminalView(config.plugins.terminal)
-    core.terminal_view.header = PanelHeader(core.terminal_view, drawer_buttons)
-  end
-  if not core.terminal_view_node then
-    core.terminal_view_node = core.root_view:get_active_node_default():split("down", core.terminal_view, { y = true }, true)
-  end
-  if open then
-    core.terminal_view_node:resize("y", core.terminal_view_closed or core.terminal_view.size.y)
-    core.terminal_view_closed = nil
-  else
-    core.terminal_view_closed = core.terminal_view.size.y
-    core.terminal_view_node:resize("y", 0)
-  end
+-- The panel's terminal (core.terminal_view): a tab in the bottom panel
+-- (core.panel), shown and hidden by alt+t and shift+alt+t, its shell running on
+-- while it's hidden; made when first shown.
+local function show_panel_terminal()
+  core.terminal_view = core.terminal_view or TerminalView(config.plugins.terminal)
+  panel.show(core.terminal_view)
 end
 
 command.add(nil, {
-  ["terminal:toggle-drawer"] = function()
-    toggle_drawer(not core.terminal_view or core.terminal_view_closed ~= nil)
-    if not core.terminal_view_closed then core.set_active_view(core.terminal_view) end
+  -- shows the panel's terminal and focuses it; hides it if it's the tab in front
+  ["terminal:toggle"] = function()
+    local tv = core.terminal_view
+    local node = tv and core.root_view.root_node:get_node_for_view(tv)
+    if node and node.active_view == tv then
+      local had_focus = core.active_view == tv
+      panel.remove(tv)
+      if had_focus then core.set_active_view(core.root_view:get_last_used_node().active_view) end
+    else
+      show_panel_terminal()
+    end
   end,
-  ["terminal:swap-drawer"] = function()
-    toggle_drawer(true)
-    core.set_active_view(core.active_view == core.terminal_view and core.last_active_view or core.terminal_view)
+  -- focuses the panel's terminal, showing it; from it, goes back
+  ["terminal:swap-focus"] = function()
+    if core.active_view == core.terminal_view and core.last_active_view then
+      core.set_active_view(core.last_active_view)
+    else
+      show_panel_terminal()
+    end
   end,
   ["terminal:execute"] = function(text)
-    local open_drawer = function(text)
-      if not core.terminal_view then command.perform("terminal:toggle-drawer") end
-      local target_view = core.active_view:is(TerminalView) and core.active_view or core.terminal_view
-      target_view:input(text .. target_view.options.newline) 
+    local execute = function(text)
+      local target_view = core.active_view:is(TerminalView) and core.active_view
+      if not target_view then
+        show_panel_terminal()
+        target_view = core.terminal_view
+      end
+      target_view:input(text .. target_view.options.newline)
     end
     if not text then
-      core.command_view:enter("Execute Command", { submit = open_drawer })
+      core.command_view:enter("Execute Command", { submit = execute })
     else
-      open_drawer(text)
+      execute(text)
     end
   end,
+  -- a new terminal tab: in the panel while it has the focus, else the editor's
   ["terminal:open-tab"] = function()
     local tv = TerminalView(config.plugins.terminal)
-    core.root_view:get_active_node_default():add_view(tv)
+    local node = core.root_view.root_node:get_node_for_view(core.active_view)
+    if node and node.is_panel then
+      panel.show(tv)
+    else
+      core.root_view:get_active_node_default():add_view(tv)
+    end
   end
 })
 
@@ -1182,7 +1121,7 @@ end
 
 command.add(function() return core.terminal_view and core.active_view ~= core.terminal_view end, {
   ["terminal:focus"] = function()
-    core.set_active_view(core.terminal_view)
+    show_panel_terminal()
   end
 })
 
@@ -1206,8 +1145,8 @@ core.status_view:add_item({
 -- add in the terminal metacommands not related to actually sending things to the temrinal first
 keymap.add({
   ["ctrl+shift+`"] = "terminal:open-tab",
-  ["alt+t"]  = "terminal:swap-drawer",
-  ["shift+alt+t"]  = "terminal:toggle-drawer"
+  ["alt+t"]  = "terminal:swap-focus",
+  ["shift+alt+t"]  = "terminal:toggle"
 })
 local keys = {
   ["return"] = "terminal:return",
@@ -1317,7 +1256,7 @@ end
 -- ctrl+shift+<key> (terminal:doc:save, ...). Hide all but these from Do Command and
 -- menus.
 local listed = {
-  "toggle-drawer", "swap-drawer", "open-tab", "focus", "execute", "close-tab",
+  "toggle", "swap-focus", "open-tab", "focus", "execute", "close-tab",
   "copy", "paste", "clear", "scroll-up", "scroll-down", "scroll-to-top", "scroll-to-end",
 }
 for i, name in ipairs(listed) do listed["terminal:" .. name] = true end

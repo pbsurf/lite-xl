@@ -906,7 +906,7 @@ function BuildView:get_message_rect(message)
   local _, padding_y = self:get_padding()
   local lh = self:get_line_height()
   local row = message.first - self.terminal:scrolled() + self.terminal:scrollback()
-  return self.position.y + self:get_header_height() + padding_y + row * lh, (message.last - message.first + 1) * lh
+  return self.position.y + padding_y + row * lh, (message.last - message.first + 1) * lh
 end
 
 function BuildView:draw_background(color)
@@ -914,7 +914,7 @@ function BuildView:draw_background(color)
   if not self.terminal then return end
   for _, message in pairs({ hovered = self.hovered_message, active = self.active_message }) do
     local y, h = self:get_message_rect(message)
-    if y + h > self.position.y + self:get_header_height() and y < self.position.y + self.size.y then
+    if y + h > self.position.y and y < self.position.y + self.size.y then
       renderer.draw_rect(self.position.x, y, self.size.x, h, style.line_highlight)
       if message == self.active_message then
         renderer.draw_rect(self.position.x, y, math.ceil(2 * SCALE), h, type_colors[message.type]())
@@ -927,7 +927,7 @@ function BuildView:on_mouse_moved(x, y, ...)
   local result = BuildView.super.on_mouse_moved(self, x, y, ...)
   local hovered = nil
   if not self.v_scrollbar.dragging and x >= self.position.x and x < self.position.x + self.size.x
-    and y >= self.position.y + self:get_header_height() and y < self.position.y + self.size.y then
+    and y >= self.position.y and y < self.position.y + self.size.y then
     local _, row = self:convert_coordinates(x, y)
     hovered = self:get_message_at(row)
   end
@@ -973,7 +973,7 @@ function build.mark_message(message)
   local view = build.view
   if view.terminal and view.size.y > 0 then
     local y, h = view:get_message_rect(message)
-    if y < view.position.y + view:get_header_height() or y + h > view.position.y + view.size.y then
+    if y < view.position.y or y + h > view.position.y + view.size.y then
       local scrollback, total = view.terminal:scrollback()
       local row = message.first - view.terminal:scrolled()
       view.terminal:scrollback(common.clamp(math.floor(view.lines / 3) - row, 0, total))
