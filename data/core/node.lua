@@ -730,6 +730,10 @@ function Node:draw_tab_title(view, font, is_active, is_hovered, x, y, w, h)
   local color = style.dim
   if is_active then color = style.text end
   if is_hovered then color = style.text end
+  -- a tab with work under way stands out, and its progress fill is no dimmer
+  -- than style.dim in some color schemes
+  if view and view:get_progress() then color = style.text end
+  color = view and view:get_name_color() or color
   common.draw_text(font, color, text, align, x, y, w, h)
 end
 
@@ -754,6 +758,20 @@ end
 
 function Node:draw_tab(view, is_active, is_hovered, is_close_hovered, x, y, w, h, standalone)
   x, y, w, h = self:draw_tab_borders(view, is_active, is_hovered, x, y, w, h, standalone)
+  -- Progress: a fill from the left (style.tab_progress, else a faint accent),
+  -- above the tab bar's bottom divider; work by an unknown amount, fainter
+  -- across the tab
+  local progress = view:get_progress()
+  if progress then
+    local color = style.tab_progress or { style.accent[1], style.accent[2], style.accent[3], 64 }
+    local fw = w
+    if progress == true then
+      color = { color[1], color[2], color[3], (color[4] or 255) / 2 }
+    else
+      fw = w * common.clamp(progress, 0, 1)
+    end
+    renderer.draw_rect(x, y, fw, h - (is_active and 0 or style.divider_size), color)
+  end
   -- Close button
   local cx, cw, cpad = close_button_location(x, w)
   local show_close_button = ((is_active or is_hovered) and not standalone and config.tab_close_button)

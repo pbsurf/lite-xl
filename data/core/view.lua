@@ -106,6 +106,21 @@ function View:get_name_style(font)
   return font
 end
 
+---How far along the view's work is, 0 to 1, drawn as a fill behind its tab's
+---title; true while it's under way by an unknown amount (a fainter fill across
+---the tab), nil while there's none.
+---@return number|boolean?
+function View:get_progress()
+  return nil
+end
+
+---The color of this view's tab title, or nil for the usual one: e.g. a status
+---that's an error.
+---@return renderer.color?
+function View:get_name_color()
+  return nil
+end
+
 ---The icon drawn with this view's name in tab lists (and in tabs by an icon
 ---plugin such as nerdicons), or nil for none.
 ---@param hovered? boolean
