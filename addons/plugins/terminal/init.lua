@@ -286,6 +286,10 @@ end
 
 local TerminalView = View:extend()
 
+-- whether the view closes when its program exits (false: it stays, showing
+-- what the program wrote, as the build plugin's terminal does)
+TerminalView.close_on_exit = true
+
 function TerminalView:get_name() return (self.modified_since_last_focus and "* " or "") .. (self.terminal and self.terminal:name() or "Terminal") end
 function TerminalView:supports_text_input() return true end
 
@@ -324,17 +328,23 @@ end
 
 function TerminalView:shift_selection_update()
   local shifts = self.terminal:update()
-  if shifts and not self.focused then self.modified_since_last_focus = true end
+  if shifts then self:on_output(shifts) end
+  return shifts
+end
+
+---Called after output is read (or written with terminal:output), which
+---scrolled `shifts` lines.
+function TerminalView:on_output(shifts)
+  if not self.focused then self.modified_since_last_focus = true end
   -- counts output read, so a cached search doc knows it's out of date
-  if shifts then self.output_count = (self.output_count or 0) + 1 end
-  if self.selection and shifts then
+  self.output_count = (self.output_count or 0) + 1
+  if self.selection then
     self.selection[2] = self.selection[2] - shifts
     self.selection[4] = self.selection[4] - shifts
     if math.abs(math.min(self.selection[2], self.selection[4])) > self.options.scrollback_limit then
       self.selection = nil
     end
   end
-  return shifts
 end
 
 
@@ -382,7 +392,9 @@ function TerminalView:update()
   if self.options.bold_font:get_size() ~= self.options.font:get_size() then
     self.options.bold_font:set_size(self.options.font:get_size())
   end
-  if (self.last_font_size and self.last_font_size ~= self.options.font:get_size()) or self.size.x > 0 and self.size.y > 0 and not self.terminal or self.last_size.x ~= self.size.x or self.last_size.y ~= self.size.y then
+  -- not while hidden (a closed drawer): shrunk to a line, a terminal would push
+  -- what's on screen to the scrollback, and it doesn't come back
+  if self.size.x > 0 and self.size.y > 0 and ((self.last_font_size and self.last_font_size ~= self.options.font:get_size()) or not self.terminal or self.last_size.x ~= self.size.x or self.last_size.y ~= self.size.y) then
     local padding_x, padding_y = self:get_padding()
     self.columns = math.max(math.floor((self.size.x - padding_x*2) / self.options.font:get_width("W")), 1)
     self.lines = math.max(math.floor((self.size.y - padding_y*2) / self:get_line_height()), 1)
@@ -400,8 +412,7 @@ function TerminalView:update()
       self:input(self.deferred_input)
       self.deferred_input = nil
     end
-    local exited = self.terminal:exited()
-    if exited == false then
+    if not self.close_on_exit or self.terminal:exited() == false then
       self.cursor = "ibeam"
       if self.terminal:mouse_tracking_mode()
          or self.v_scrollbar.hovering.track
@@ -413,7 +424,7 @@ function TerminalView:update()
         self.modified_since_last_focus = false
         self.terminal:focused(self.focused)
       end
-      local x, y, mode = self.terminal:cursor()
+      local x, y, mode = self:get_cursor()
       if mode == "blinking" then
         local T, t0 = config.blink_period, core.blink_start
         local ta, tb = core.blink_timer, system.get_time()
@@ -483,7 +494,7 @@ end
 
 local contrast_foreground = {}
 function TerminalView:draw()
-  TerminalView.super.draw_background(self, self.options.background)
+  self:draw_background(self.options.background)
   if self.terminal then
     local space_width = self.options.font:get_width(" ")
     local padding_x, padding_y = self:get_padding()
@@ -492,7 +503,7 @@ function TerminalView:draw()
     local lh = self:get_line_height()
     local text_y = math.floor((lh - self.options.font:get_height()) / 2)
     core.redraw = self:shift_selection_update() or core.redraw
-    local cursor_x, cursor_y, mode = self.terminal:cursor()
+    local cursor_x, cursor_y, mode = self:get_cursor()
 
 
     local selection = self:sorted_selection()
@@ -796,6 +807,22 @@ function TerminalView:input(text)
   return false
 end
 
+---The cursor's column and row on the screen, and its mode ("hidden", ...).
+function TerminalView:get_cursor()
+  return self.terminal:cursor()
+end
+
+---Whether keys and text go to the program (else to the editor's commands).
+function TerminalView:accepts_input()
+  return self.terminal ~= nil
+end
+
+---Clears the screen and the scrollback.
+function TerminalView:clear()
+  self.terminal:clear()
+  self:input(self.options.newline)
+end
+
 function TerminalView:on_text_input(text)
   return self:input(text)
 end
@@ -893,7 +920,7 @@ command.add(function(amount)
   local view = core.root_view.overlapping_view
                 or (core.root_view.overlapping_node and core.root_view.overlapping_node.active_view)
                 or core.active_view
-  return (view and view:is(TerminalView)), view, amount
+  return (view and view:extends(TerminalView)), view, amount
 end, {
   ["terminal:scroll"] = function(view, amount)
     if view.terminal:mouse_tracking_mode() then
@@ -916,9 +943,27 @@ end, {
 
 
 local active_terminal_predicate = function(...)
-  return (core.active_view:is(TerminalView) and core.active_view.terminal), core.active_view, ...
+  return (core.active_view:extends(TerminalView) and core.active_view.terminal), core.active_view, ...
 end
 command.add(active_terminal_predicate, {
+  ["terminal:scroll-up"] = function(view) view.terminal:scrollback(view.terminal:scrollback() + view.lines) end,
+  ["terminal:scroll-down"] = function(view) view.terminal:scrollback(view.terminal:scrollback() - view.lines) end,
+  ["terminal:scroll-to-end"] = function(view) view.terminal:scrollback(0) end,
+  ["terminal:scroll-to-top"] = function(view) view.terminal:scrollback(view.options.scrollback_limit) end,
+  ["terminal:clear"] = function(view) view:clear() end,
+  ["terminal:close-tab"] = function(view) view:close() end,
+  -- the search_ui plugin's pane, searching this terminal
+  ["terminal:find"] = function(view)
+    if command.map["search-replace:file-search"] then
+      command.perform("search-replace:file-search")
+    end
+  end
+})
+-- keys sent to the program
+local input_predicate = function(...)
+  return (core.active_view:extends(TerminalView) and core.active_view:accepts_input()), core.active_view, ...
+end
+command.add(input_predicate, {
   ["terminal:backspace"] = function(view) view:input(view.options.backspace) end,
   ["terminal:ctrl-backspace"] = function(view) view:input(view.options.backspace == "\b" and "\x7F" or "\b") end,
   ["terminal:alt-backspace"] = function(view) view:input("\x1B" .. view.options.backspace) end,
@@ -939,10 +984,6 @@ command.add(active_terminal_predicate, {
   end,
   ["terminal:page-up"] = function(view) view:input("\x1B[5~") end,
   ["terminal:page-down"] = function(view) view:input("\x1B[6~") end,
-  ["terminal:scroll-up"] = function(view) view.terminal:scrollback(view.terminal:scrollback() + view.lines) end,
-  ["terminal:scroll-down"] = function(view) view.terminal:scrollback(view.terminal:scrollback() - view.lines) end,
-  ["terminal:scroll-to-end"] = function(view) view.terminal:scrollback(0) end,
-  ["terminal:scroll-to-top"] = function(view) view.terminal:scrollback(view.options.scrollback_limit) end,
   ["terminal:up"] = function(view) view:input(view.terminal:cursor_keys_mode() == "application" and "\x1BOA" or "\x1B[A") end,
   ["terminal:down"] = function(view) view:input(view.terminal:cursor_keys_mode() == "application" and "\x1BOB" or "\x1B[B") end,
   ["terminal:left"] = function(view) view:input(view.terminal:cursor_keys_mode() == "application" and "\x1BOD" or "\x1B[D") end,
@@ -988,17 +1029,9 @@ command.add(active_terminal_predicate, {
   ["terminal:end-of-medium"] = function(view) view:input("\x19") end,
   ["terminal:file-separator"] = function(view) view:input("\x1C") end,
   ["terminal:group-separator"] = function(view) view:input("\x1D") end,
-  ["terminal:clear"] = function(view) view.terminal:clear() view:input(view.options.newline) end,
-  ["terminal:close-tab"] = function(view) view:close() end,
-  -- the search_ui plugin's pane, searching this terminal
-  ["terminal:find"] = function(view)
-    if command.map["search-replace:file-search"] then
-      command.perform("search-replace:file-search")
-    end
-  end
 });
 if system.get_primary_selection then -- check for master vs. 2.1.7
-  command.add(active_terminal_predicate, {
+  command.add(input_predicate, {
     ["terminal:primary-paste"] = function(view)
       if view.terminal:paste_mode() == "bracketed" then
         view:input("\x1B[200~" .. system.get_primary_selection() .. "\x1B[201~")
@@ -1010,7 +1043,7 @@ if system.get_primary_selection then -- check for master vs. 2.1.7
 end
 
 command.add(function()
-  return core.active_view and core.active_view:is(TerminalView) and core.active_view.selection and #core.active_view.selection == 4
+  return core.active_view and core.active_view:extends(TerminalView) and core.active_view.selection and #core.active_view.selection == 4
 end, {
   ["terminal:copy"] = function()
     local selection = core.active_view:sorted_selection()
