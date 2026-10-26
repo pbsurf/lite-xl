@@ -20,9 +20,6 @@ local build = require "plugins.build"
 if not config.plugins.build.internal then config.plugins.build.internal = {} end
 local internal = common.merge({
   threads = build.threads,
-  running_programs = nil,
-  remaining_programs = {},
-  interval = 0.1,
   priority = 10
 }, config.plugins.build.internal)
 
@@ -93,93 +90,94 @@ function internal.infer()
   end
 end
 
+-- a path as a makefile's target or prerequisite
+local function make_path(path)
+  return (path:gsub("%$", "$$"):gsub("([ #])", "\\%1"))
+end
+
+-- a command as a makefile's recipe line
+local function make_recipe(cmd)
+  return "\t" .. build.command_line(cmd):gsub("%$", "$$")
+end
+
+-- the obj directory, a source's object in it, and the makefile; relative to the
+-- project if in it, as make runs in its directory
+local function get_paths(target)
+  local root = core.root_project().path
+  local obj = core.root_project():absolute_path(target.obj or "obj")
+  if common.path_belongs_to(obj, root) then obj = common.relative_path(root, obj) end
+  local function object(file) return obj .. PATHSEP .. (target.name .. file):gsub("[/\\]+", "_") .. ".o" end
+  return obj, object, obj .. PATHSEP .. target.name:gsub("[/\\]+", "_") .. ".mk"
+end
+
+-- Writes a makefile for the target, under its obj directory, and runs make
+-- with it, which compiles in parallel what's out of date (with the headers
+-- each source includes, from the compiler's -MMD) and links. Objects depend
+-- on the makefile too, so changing flags rebuilds them.
 function internal.build(target, callback)
-  local commands = {}
   local files = get_source_files(target)
   if #files == 0 then error("can't find source files for project") end
   local has_cpp = false
-  for i, v in ipairs(files) do if v:find(".cpp$") or v:find("*.cc") then has_cpp = true end end
-  -- pick targets for dependency generation
-  local dependencies = {}
-  local objects = {}
-  local stats = {}
-  local max_ostat = nil
-  common.mkdirp(core.root_project():absolute_path(target.obj or "obj"))
-  for i, v in ipairs(files) do
-    local handle = (target.name .. v):gsub("[/\\]+", "_")
-    dependencies[i] = (target.obj or core.root_project():absolute_path("obj")) .. PATHSEP .. handle .. ".d"
-    objects[i] = (target.obj or core.root_project():absolute_path("obj")) .. PATHSEP .. handle .. ".o"
-    stats[i] = system.get_file_info(v)
-  end
-  local dependency_jobs = {}
-  for i, d in ipairs(dependencies) do
-    local d_stat = system.get_file_info(d)
-    if not d_stat or d_stat.modified < stats[i].modified then
-      table.insert(dependency_jobs, table_concat(get_compiler(target, files[i]), { "-MM", core.root_project():normalize_path(files[i]), "-MF", core.root_project():normalize_path(d), table.unpack(get_compile_flags(target, files[i])) }))
-    end
-  end
+  for i, v in ipairs(files) do if v:find("%.cpp$") or v:find("%.cc$") then has_cpp = true end end
+  local obj, get_object, makefile = get_paths(target)
+  local function absolute(path) return core.root_project():absolute_path(path) end
+  common.mkdirp(absolute(obj))
+  local binary = get_binary(target)
+  local binary_folder = common.dirname(binary)
+  if binary_folder then common.mkdirp(absolute(binary_folder)) end
 
-  build.run_tasks(dependency_jobs, function(status)
-    if status ~= 0 then if callback then callback(status) end return end
-    local compile_jobs = {}
-    for i, d in ipairs(dependencies) do
-      local o_stat = system.get_file_info(objects[i])
-      if o_stat and (not max_ostat or o_stat.modified > max_ostat) then max_ostat = o_stat.modified end
-      local compile = not o_stat or o_stat.modified < stats[i].modified
-      if not compile then
-        for j, h in ipairs(split(io.open(d, "rb"):read("*all"):gsub("^[^:]+:%s*", ""), "[%s\\]+")) do
-          if h then
-            local h_stat = system.get_file_info(h)
-            if h_stat and o_stat.modified < h_stat.modified then
-              compile = true
-              break
-            end
-          end
-        end
-      end
-      if compile then
-        table.insert(compile_jobs, table_concat(get_compiler(target, core.root_project():normalize_path(files[i])), { "-fdiagnostics-color=always", "-c", core.root_project():normalize_path(files[i]), "-o", core.root_project():normalize_path(objects[i]), table.unpack(get_compile_flags(target, files[i])) }))
-      end
-    end
-    build.run_tasks(compile_jobs, function(status)
-      if status ~= 0 then if callback then callback(status) end return end
-      local link_job = {}
-      local type = get_type(target)
-      local linker = get_linker(target) or (has_cpp and split(get_field(target, nil, "cxx"), "%s+") or split(get_field(target, nil, "cc"), "%s+"))
-      local binary = get_binary(target)
-      local binary_stat = system.get_file_info(binary)
-      if not binary_stat or #compile_jobs > 0 or (max_ostat and binary_stat.modified < max_ostat) then
-        local binary_folder = common.dirname(binary)
-        if binary_folder then common.mkdirp(binary_folder) end
-        if not type or type == "executable" then
-          link_job = table_concat(linker, { "-o", binary })
-        elseif type == "static" then
-          link_job = { get_archiver(target), "-r", "-s", binary }
-        elseif type == "shared" then
-          link_job = table_concat(linker, { "-shared", "-o", binary })
-        end
-        for i, object in ipairs(objects) do table.insert(link_job, object) end
-        for i, ldflag in ipairs(get_ldflags(target) or {}) do table.insert(link_job, ldflag) end
-        build.run_tasks({ link_job }, callback)
-      else
-        if callback then callback(0) end
-      end
-    end)
-  end)
+  local objects, rules = {}, {}
+  for i, file in ipairs(files) do
+    local source = core.root_project():normalize_path(file)
+    objects[i] = get_object(file)
+    table.insert(rules, make_path(objects[i]) .. ": " .. make_path(source) .. " " .. make_path(makefile))
+    table.insert(rules, make_recipe(table_concat(get_compiler(target, file), { "-fdiagnostics-color=always", "-MMD", "-MP", "-c", source, "-o", objects[i], table.unpack(get_compile_flags(target, file)) })))
+    table.insert(rules, "-include " .. make_path(objects[i]:gsub("%.o$", ".d")))
+  end
+  local type = get_type(target)
+  local linker = get_linker(target) or (has_cpp and split(get_field(target, nil, "cxx"), "%s+") or split(get_field(target, nil, "cc"), "%s+"))
+  local link_job
+  if type == "static" then
+    link_job = { get_archiver(target), "-r", "-s", binary, table.unpack(objects) }
+  else
+    link_job = table_concat(linker, type == "shared" and { "-shared", "-o", binary } or { "-o", binary })
+    for _, object in ipairs(objects) do table.insert(link_job, object) end
+    for _, ldflag in ipairs(get_ldflags(target) or {}) do table.insert(link_job, ldflag) end
+  end
+  local prerequisites = {}
+  for _, object in ipairs(objects) do table.insert(prerequisites, make_path(object)) end
+  local text = table.concat({
+    "# made by the build plugin's internal backend for target " .. target.name,
+    make_path(binary) .. ": " .. table.concat(prerequisites, " ") .. " " .. make_path(makefile),
+    make_recipe(link_job),
+    table.concat(rules, "\n"),
+    ""
+  }, "\n")
+
+  -- written only if it changed, as objects depend on it
+  local f = io.open(absolute(makefile), "rb")
+  local old = f and f:read("*a")
+  if f then f:close() end
+  if old ~= text then
+    f = assert(io.open(absolute(makefile), "wb"))
+    f:write(text)
+    f:close()
+  end
+  build.run_command({ "make", "-f", makefile, "-j", tostring(build.threads) }, callback)
 end
 
 
 function internal.clean(target, callback)
-  local files = get_source_files(target)
-  for i, v in ipairs(files) do
-    local handle = (target.name .. v):gsub("[/\\]+", "_")
-    local dependency = (target.obj or "obj") .. PATHSEP .. handle .. ".d"
-    local object = (target.obj or "obj") .. PATHSEP .. handle .. ".o"
-    if system.get_file_info(dependency) then os.remove(dependency) end
-    if system.get_file_info(object) then os.remove(object) end
+  local _, get_object, makefile = get_paths(target)
+  local function absolute(path) return core.root_project():absolute_path(path) end
+  for i, v in ipairs(get_source_files(target)) do
+    local object = absolute(get_object(v))
+    os.remove((object:gsub("%.o$", ".d")))
+    os.remove(object)
   end
-  if system.get_file_info(get_binary(target)) then os.remove(get_binary(target)) end
-  if callback then callback() end
+  os.remove(absolute(makefile))
+  os.remove(absolute(get_binary(target)))
+  if callback then callback(0) end
 end
 
 

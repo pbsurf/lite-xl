@@ -8,9 +8,9 @@
 -- or options.shell) and process/cppbuild (run directly), with options.cwd and
 -- options.env (over tasks.json's top-level options), dependsOn (run in
 -- sequence); launch configurations' program, args, cwd, environment (or env)
--- and setupCommands, or a command (node-terminal), run in a terminal. Errors
--- are found by build's gcc-style parser (as "$gcc"), with paths relative to
--- the task's cwd. Variables: ${workspaceFolder}, ${workspaceFolderBasename},
+-- and setupCommands, or a command (node-terminal), run in the build terminal.
+-- Errors are found by build's gcc-style parser (as "$gcc"), with paths
+-- relative to the task's cwd. Variables: ${workspaceFolder}, ${workspaceFolderBasename},
 -- ${file}, ${relativeFile}, ${fileBasename}, ${fileBasenameNoExtension},
 -- ${fileDirname}, ${fileExtname}, ${lineNumber}, ${selectedText}, ${cwd},
 -- ${userHome}, ${pathSeparator}, ${env:NAME}.
@@ -173,7 +173,7 @@ local function load_tasks(root)
   return list, doc.options or {}
 end
 
----The command to run a task, with `cwd` and `env` fields for build.run_tasks.
+---The command to run a task, with `cwd` and `env` fields for build.run_command.
 local function task_command(task, defaults)
   local options = common.merge(defaults, task.options)
   options.env = common.merge(defaults.env, task.options and task.options.env)
@@ -282,25 +282,9 @@ function vscode.build(target, callback)
   for _, task in ipairs(sequence) do table.insert(commands, task_command(task, defaults)) end
   local i = 0
   local function next_task(status)
-    if status ~= 0 or i == #commands then
-      local errors = 0
-      for _, v in ipairs(build.message_view.messages) do
-        if type(v) == "table" and v[1] == "error" then errors = errors + 1 end
-      end
-      if callback then callback(status == 0 and errors or math.max(errors, 1)) end
-      return
-    end
+    if status ~= 0 or i == #commands then return callback(status) end
     i = i + 1
-    local cwd = commands[i].cwd
-    build.run_tasks({ commands[i] }, next_task, function(line)
-      local message = build.parse_compile_line(line)
-      -- a path relative to the task's directory: relative to the project's if in it
-      if type(message) == "table" and not common.is_absolute_path(message[2]) then
-        local file = common.normalize_path(cwd .. PATHSEP .. message[2])
-        message[2] = common.path_belongs_to(file, root) and common.relative_path(root, file) or file
-      end
-      build.message_view:add_message(message)
-    end)
+    build.run_command(commands[i], next_task)
   end
   next_task(0)
 end
@@ -308,12 +292,11 @@ end
 
 function vscode.can_run(target) return target.binary ~= nil or target.command ~= nil end
 
-function vscode.run(target)
+function vscode.run(target, arguments)
   if target.command then
-    build.execute_command(build.get_shell_command(target, target.command, nil, true))
-  else
-    build.execute_command(build.get_shell_command(target, config.target_binary or target.binary))
+    return build.get_run_command(target, target.command, nil, true)
   end
+  return build.get_run_command(target, config.target_binary or target.binary, arguments)
 end
 
 

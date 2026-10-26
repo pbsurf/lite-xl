@@ -251,7 +251,7 @@ config.plugins.menubar = common.merge({
     ["status-bar:toggle"] = function() return core.status_view.visible end,
     ["build:toggle-drawer"] = function()
       local build = package.loaded["plugins.build"]
-      return build and build.message_view.visible
+      return build and build.view.visible
     end,
     ["debugger:toggle-drawer"] = function()
       local debugger = package.loaded["plugins.debugger"]

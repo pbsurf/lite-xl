@@ -31,16 +31,12 @@ function shell.infer()
 end
 
 function shell.build(target, callback)
-  build.run_tasks({ { get_runner_name(target), get_script_name(target), get_args_build(target) } }, function(status)
-    if callback then callback(status) end
-  end, function(line)
-    build.message_view:add_message(build.parse_compile_line(line))
-  end)
+  build.run_command({ get_runner_name(target), get_script_name(target), get_args_build(target) }, callback)
 end
 
 
 function shell.clean(target, callback)
-  build.run_tasks({ { get_runner_name(target), get_script_name(target), get_args_clean(target) } }, callback)
+  build.run_command({ get_runner_name(target), get_script_name(target), get_args_clean(target) }, callback)
 end
 
 

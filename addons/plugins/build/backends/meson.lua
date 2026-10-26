@@ -4,13 +4,9 @@ local build = require "plugins.build"
 local config = require "core.config"
 local json = require "libraries.json"
 
-local meson = {
-  -- ninja executes from inside a build folder, so all file references begin with `..`, and should be removed to reference the file.
-  error_pattern = "^%s*%.%./([^:]+):(%d+):(%d*):? %[?(%w*)%]?:? (.+)",
-  file_pattern = "^%s*%.%./([^:]+):(%d+):(%d*):? (.+)",
-}
-
-local function grep(t, cond) local nt = {} for i,v in ipairs(t) do if cond(v, i) then table.insert(nt, v) end end return nt end
+-- ninja's messages have paths relative to the build directory, which build
+-- finds from its "Entering directory"
+local meson = {}
 
 local function get_build_directory(target)
   return target.build_directory or core.root_project().path .. PATHSEP .. (target.build_directory or ("build-" .. target.name:lower():gsub("%W+", "-"):gsub("%-+", "-"):gsub("^%-", ""):gsub("%-$", "")))
@@ -23,16 +19,8 @@ function meson.infer()
   }
 end
 
-function meson.parse_compile_line(line)
-  local _, _, file, line_number, column, type, message = line:find(meson.error_pattern)
-  if file and (type == "warning" or type == "error") then
-    return { type, file, line_number, column, message }
-  end
-  local _, _, file, line_number, column, message = line:find(meson.file_pattern)
-  return file and { "info", file, line_number, (column or 1), message } or line
-end
-
-local function run_command(args)
+-- a command's output, read to the end
+local function read_command(args)
   local proc = process.start(args)
   local accumulator = ""
   while true do
@@ -48,20 +36,10 @@ end
 
 function meson.build(target, callback)
   local bd = get_build_directory(target)
-  local tasks = { }
 
-  local ninja_build = function()
-    build.run_tasks({ { "ninja", "-C", bd } }, function(status)
-      local filtered_messages = grep(build.message_view.messages, function(v) return type(v) == 'table' and v[1] == "error" end)
-      if callback then callback(status == 0 and #filtered_messages or 1) end
-    end, function(line)
-      build.message_view:add_message(meson.parse_compile_line(line))
-    end)
-  end
-
+  -- the executable built by default is the target's binary
   local check_executables = function()
-    local info = json.decode(run_command({ "meson", "introspect", bd, "-a" }))
-    -- find an executable that is built by default
+    local info = json.decode(read_command({ "meson", "introspect", bd, "-a" }))
     for i,v in ipairs(info.targets) do
       if v.build_by_default and v.type == "executable" and v.filename then
         target.binary = v.filename[1]
@@ -72,22 +50,16 @@ function meson.build(target, callback)
     target.checked = true
   end
 
-  if not system.get_file_info(bd) then
-    build.run_tasks({ { "meson", "setup", bd, "--buildtype", target.buildtype or "debug" } }, function(status)
-      core.add_thread(function()
-        check_executables()
-        ninja_build()
-      end)
-    end)
+  local ninja_build = function(status)
+    if status ~= 0 then return callback(status) end
+    if not target.checked then check_executables() end
+    build.run_command({ "ninja", "-C", bd }, callback)
+  end
+
+  if not system.get_file_info(bd .. PATHSEP .. "build.ninja") then
+    build.run_command({ "meson", "setup", bd, "--buildtype", target.buildtype or "debug" }, ninja_build)
   else
-    if not target.checked then
-      core.add_thread(function()
-        check_executables()
-        ninja_build()
-      end)
-    else
-      ninja_build()
-    end
+    ninja_build(0)
   end
 end
 

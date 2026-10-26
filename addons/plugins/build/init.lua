@@ -5,13 +5,14 @@ local keymap = require "core.keymap"
 local config = require "core.config"
 local common = require "core.common"
 local style = require "core.style"
-local View = require "core.view"
 local DocView = require "core.docview"
 local Doc = require "core.doc"
 local StatusView = require "core.statusview"
 local TreeView = config.plugins.treeview ~= false and require "plugins.treeview"
 local ToolbarView = require "plugins.toolbarview"
 local ContextMenu = require "core.contextmenu"
+local TerminalView = require("plugins.terminal").class
+local search = require "plugins.terminal.search"
 
 
 local storage 
@@ -48,9 +49,6 @@ end
 
 local build = common.merge({
   targets = { },
-  thread = nil,
-  interval = 0.01,
-  running_bundles = {},
   -- Config variables
   threads = 8,
   cc = os.getenv("CC") or "gcc",
@@ -59,23 +57,17 @@ local build = common.merge({
   cflags = os.getenv("CFLAGS") or {},
   cxxflags = os.getenv("CXXFLAGS") or {},
   ldflags = os.getenv("LDFLAGS") or {},
-  error_pattern = "^%s*([^:]+):(%d+):(%d*):? %[?(%w*)%]?:? (.+)",
-  file_pattern = "^%s*([^:]+):(%d+):(%d*):? (.+)",
   error_color = style.error,
   warning_color = style.warn,
   good_color = style.good,
-  drawer_size = 100,
+  -- the height of the drawer with the build's terminal
+  drawer_size = 250 * SCALE,
   max_previous_arguments = 100,
-  on_success = "minimize",
+  -- after a successful build or clean: "keep" the drawer open, or "close" it
+  on_success = "keep",
   -- show the build toolbar, under the file browser
   toolbar = true,
-  terminal = (PLATFORM == "Windows" and { os.getenv("COMSPEC") } or { "xterm", "-T", function(target) return target.name end, "-e" }),
-  shell = (PLATFORM == "Windows" and "START /B" or { "bash", "-c" })
 }, config.plugins.build)
-
-
-if not style.build then style.build = {} end
-style.build.font = style.code_font:copy(style.code_font:get_height()*0.7)
 
 function build.argument_string_to_table(str)
   if not str then return nil end
@@ -155,135 +147,147 @@ local function save_state()
 end
 
 
+---Opens a file at a line (and column), as a preview.
 local function jump_to_file(file, line, col)
-  if not core.active_view or not core.active_view.doc or core.active_view.doc.abs_filename ~= file then
-    -- Check to see if the file is in the project. If it is, open it, and go to the line.
-    for i = 1, #core.projects do
-      if file and common.path_belongs_to(file, core.projects[i].path) then
-        local view = core.root_view:open_doc(core.open_doc(file), { preview = true })
-        if line then
-          view:scroll_to_line(math.max(1, line - 20), true)
-          view:set_selection(line, col or 1, line, col or 1)
-        end
-        break
-      end
-    end
+  local view = core.root_view:open_doc(core.open_doc(file), { preview = true })
+  if line then
+    view.doc:set_selection(line, col or 1)
+    view:scroll_to_line(line, true, true)
   end
+  return view
 end
 
 
+---A compiler's message in a line of output, in gcc's and clang's format:
+---`file:line:[column:] [type:] message`; nil if it isn't one. The type is
+---"error" (a fatal error too), "warning" or "info" (a note, or a location with
+---no type, as in "In file included from"). The file isn't checked here.
+---@param line string
+---@return { type: string, file: string, line: integer, col: integer, message: string }?
 function build.parse_compile_line(line)
-  local stripped_line = line:gsub("\x1B%[%d+;?%d+m",""):gsub("\x1B%[[Km]", "")
-  local _, _, file, line_number, column, type, message = stripped_line:find(build.error_pattern)
-  if file and (type == "warning" or type == "error") then
-    return { type, file, line_number, column, message }
+  local text = line:gsub("^In file included from ", "")
+  local file, line_number, column, rest = text:match("^%s*([^:%s][^:]*):(%d+):(%d*):? ?(.*)")
+  if not file then return nil end
+  local kind, message = rest:match("^(%a[%a ]*):%s+(.*)")
+  if kind == "error" or kind == "fatal error" then
+    kind = "error"
+  elseif kind ~= "warning" then
+    kind, message = "info", rest
   end
-  local _, _, file, line_number, column, message = line:find(build.file_pattern)
-  return file and { "info", core.root_project():normalize_path(file), line_number, (column or 1), message } or line
+  return {
+    type = kind, file = file, line = tonumber(line_number),
+    col = tonumber(column) or 1, message = message
+  }
 end
 
 
-local function default_on_line(line)
-  build.message_view:add_message(build.parse_compile_line(line))
+local function shell_quote(s)
+  if s:match("^[%w%-%._/=:,@+]+$") then return s end
+  return "'" .. s:gsub("'", "'\\''") .. "'"
 end
 
--- accept a table of commands. Run as many as we have threads. A command may
--- have `cwd` (default: the project's directory) and `env` (variables added).
-function build.run_tasks(tasks, on_done, on_line)
-  if #tasks == 0 then
-    if on_done then on_done(0) end
-    return
-  end
-  local bundle = { tasks = {}, on_done = on_done, on_line = (on_line or default_on_line)  }
-  for i, task in ipairs(tasks) do
-    table.insert(bundle.tasks, { cmd = task, program = nil, done = false })
-  end
-  table.insert(build.running_bundles, bundle)
-
-  if build.thread and core.threads[build.thread] and coroutine.status(core.threads[build.thread].cr) == "dead" then build.thread = nil end
-  if not build.thread then
-    build.thread = core.add_thread(function()
-      local function handle_output(bundle, output)
-        if output ~= nil then
-          local offset = 1
-          while offset < #output do
-            local newline = output:find("\n", offset) or #output
-            if bundle.on_line then
-              bundle.on_line(output:sub(offset, newline-1))
-            end
-            offset = newline + 1
-          end
-        end
-      end
-
-      while #build.running_bundles > 0 do
-        local total_running = 0
-        local yield_time = build.interval
-        local status, err = pcall(function()
-          for i, bundle in ipairs(build.running_bundles) do
-            local has_unfinished, bundle_finished
-            for _, task in ipairs(bundle.tasks) do
-              if not task.done then
-                has_unfinished = true
-                if task.program then
-                  while true do
-                    local output = task.program:read_stdout()
-                    handle_output(bundle, output)
-                    if not output or output == "" then break end
-                  end
-                  if task.program:running() then
-                    total_running = total_running + 1
-                  else
-                    task.done = true
-                    local status = task.program:returncode()
-                    if status ~= 0 then
-                      for _, killing_task in ipairs(bundle.tasks) do
-                        if killing_task.program then
-                          killing_task.program:terminate()
-                          total_running = total_running - 1
-                         end
-                      end
-                      bundle_finished = status
-                      break
-                    end
-                  end
-                end
-              end
-            end
-            if not has_unfinished and bundle_finished == nil then bundle_finished = 0 end
-            if bundle_finished ~= nil then
-              -- removed first, so on_done sees it finished and can start the next step
-              table.remove(build.running_bundles, i)
-              if bundle.on_done then bundle.on_done(bundle_finished) end
-              yield_time = 0
-              break
-            end
-          end
-          for i, bundle in ipairs(build.running_bundles) do
-            if total_running < build.threads then
-              for i,task in ipairs(bundle.tasks) do
-                if total_running >= build.threads then break end
-                if not task.done and not task.program then
-                  build.message_view:add_message(table.concat(task.cmd, " "))
-                  local env = common.merge(PLATFORM ~= "Windows" and { TERM = "ansi" } or {}, task.cmd.env)
-                  task.program = process.start(task.cmd, { ["stderr"] = process.REDIRECT_STDOUT, env = env, cwd = task.cmd.cwd or core.project_absolute_path(".") })
-                  total_running = total_running + 1
-                end
-              end
-              if total_running >= build.threads then break end
-            end
-          end
-        end)
-        if not status then build.message_view:add_message({ "error", err }) end
-        coroutine.yield(yield_time)
-      end
-      build.thread = nil
-    end, "build-thread")
-  end
+---A command as it would be typed in a shell.
+function build.command_line(cmd)
+  local words = {}
+  for _, arg in ipairs(cmd) do table.insert(words, shell_quote(tostring(arg))) end
+  return table.concat(words, " ")
 end
 
-function build.is_running() return #build.running_bundles > 0 end
+
+---A color as the escape sequence that sets it as the text's (24-bit).
+local function sgr_color(color)
+  return string.format("\x1b[38;2;%d;%d;%dm", color[1], color[2], color[3])
+end
+
+
+---Runs a command in the build terminal (build.view): a list, the program then
+---its arguments, with optional `cwd` (default: the project's directory) and
+---`env` (variables added). Calls `on_done` with its exit status (128 + the
+---signal if one killed it, -1 if it couldn't start), from a thread. One at a
+---time: a backend chains its commands from `on_done`.
+---@param cmd table
+---@param on_done? fun(status: integer)
+function build.run_command(cmd, on_done)
+  -- not after the build was terminated (its backend may be busy until then)
+  if not build.current then error("the build has ended", 0) end
+  build.view:run(cmd, function(status)
+    -- terminated: the build ends with this command
+    if build.current and build.current.cancelled then
+      build.current.finish(status)
+    elseif on_done then
+      local ok, err = pcall(on_done, status)
+      if not ok then build.fail(err) end
+    end
+  end)
+end
+
+---Ends the build (or clean or run) under way with an error: in red in the
+---terminal, then its footer.
+function build.fail(err)
+  core.log_quiet("build: %s", err)
+  if build.view.terminal then
+    build.view:write(sgr_color(build.error_color) .. tostring(err):gsub("\n", "\r\n") .. "\x1b[0m\r\n")
+  end
+  if build.current then build.current.finish(-1) end
+end
+
+---The build, clean or run under way, from its start until its last command
+---exits: { kind, target, started, finish(status) }.
+build.current = nil
+---The last build or clean that ended: { kind, target, status, errors, warnings, time }.
+build.last = nil
+
+function build.is_running() return build.current ~= nil end
 function build.output(line) core.log_quiet(line) end
+
+---Starts a build, clean or run (`kind`: "Build", "Clean", "Run") of a target:
+---the drawer opens, and `start(finish)` is run in a thread; `finish(status)`
+---(or build.fail) ends it, writing a footer, then calls `callback(status)`.
+local function begin(kind, target, start, callback)
+  local name = target.name or "target"
+  local first_message = #build.view.messages + 1
+  local current = { kind = kind, target = target, started = system.get_time() }
+  build.current = current
+  build.view.visible = true
+  build.view.first_message = first_message
+  build.view:begin()
+  function current.finish(status)
+    if build.current ~= current then return end
+    build.current = nil
+    local errors, warnings = 0, 0
+    for i = first_message, #build.view.messages do
+      local type = build.view.messages[i].type
+      if type == "error" then errors = errors + 1 elseif type == "warning" then warnings = warnings + 1 end
+    end
+    local time = system.get_time() - current.started
+    if kind ~= "Run" then
+      build.last = { kind = kind, target = target, status = status, errors = errors, warnings = warnings, time = time }
+    end
+    local counts = {}
+    if errors > 0 then table.insert(counts, errors .. (errors == 1 and " error" or " errors")) end
+    if warnings > 0 then table.insert(counts, warnings .. (warnings == 1 and " warning" or " warnings")) end
+    local result
+    if current.cancelled then
+      result = "terminated"
+    elseif kind == "Run" then
+      result = "exited with " .. status
+    elseif status == 0 then
+      result = "done"
+    else
+      result = status == -1 and "failed" or "failed with exit status " .. status
+    end
+    local summary = string.format("%s %s: %s%s, %.1f s", kind, name, result,
+      #counts > 0 and ", " .. table.concat(counts, ", ") or "", time)
+    build.view:write(sgr_color(status == 0 and style.dim or build.error_color) .. "── " .. summary .. "\x1b[0m\r\n")
+    build.output(summary)
+    if status == 0 and kind ~= "Run" and build.on_success == "close" then build.view.visible = false end
+    if callback then callback(status) end
+  end
+  core.add_thread(function()
+    local ok, err = pcall(start, current.finish)
+    if not ok then build.fail(err) end
+  end)
+end
 
 function build.set_target(target)
   if not build.targets or #build.targets == 0 then
@@ -333,38 +337,20 @@ end
 function build.build(callback)
   local target = build.targets[build.state.target]
   if build.is_running() or not build.can_build(target) then return false end
-  build.message_view:clear_messages()
-  build.message_view.visible = true
-  build.message_view:add_message("Building " .. (target.binary and common.basename(target.binary) or target.name or "target") .. "...")
-  build.message_view.minimized = false
-  local status, err = pcall(function()
-    if not target then error("Can't find target " .. target) end
-    if not target.backend then error("Can't find target " .. target .. " backend.") end
-    target.backend.build(target, function (status)
-      local line = "Completed building " .. (target.binary and common.basename(target.binary) or target.name or "target") .. ". " .. status .. " Errors/Warnings."
-      build.message_view:add_message({ status == 0 and "good" or "error", line })
-      build.message_view.visible = status ~= 0 or build.on_success ~= "close"
-      build.output(line)
-      build.message_view.scroll.to.y = 0
-      if status == 0 and build.on_success == "minimize" then build.message_view.minimized = true end
-      if callback then callback(status) end
-    end)
-  end)
-  if not status then
-    build.message_view:add_message({ "error", err }) 
-    if callback then callback(-1, err) end
-  end
+  begin("Build", target, function(finish)
+    target.backend.build(target, finish)
+  end, callback)
 end
 
 function build.escape_arguments(arguments)
   if type(arguments) == "table" then
     local new_arguments = {}
     for i,arg in ipairs(arguments) do
-      if not arg:find("[ \"']") then 
+      if not arg:find("[ \"']") then
         table.insert(new_arguments, arg)
-      elseif not arg:find("[']") then 
+      elseif not arg:find("[']") then
         table.insert(new_arguments, "'" .. arg .. "'")
-      elseif not arg:find("[\"]") then 
+      elseif not arg:find("[\"]") then
         table.insert(new_arguments, "\"" .. arg .. "\"")
       else
         table.insert(new_arguments, "'" .. arg:gsub("'", "'\"'\"'"):gsub("\\", "\\\\") .. "'")
@@ -375,58 +361,27 @@ function build.escape_arguments(arguments)
   return arguments
 end
 
-local function shell_quote(s)
-  if s:match("^[%w%-%._/=:,@+]+$") then return s end
-  return "'" .. s:gsub("'", "'\\''") .. "'"
-end
-
----The command to run the current target's `command` (a function of the target
----returning it, or a program run with `arguments`, default
----config.target_binary_arguments) in a terminal (build.terminal), in the
----target's `wd` with its `env`. With `raw`, `command` is a shell command line.
-function build.get_shell_command(target, command, arguments, raw)
-  target = build.targets[build.state.target]
-  if type(command) == "function" then
-    command = command(target)
-  elseif type(command) == "string" then
-    local arguments = arguments or config.target_binary_arguments or {}
-    if PLATFORM == "Windows" then
-      command = { build.shell, command, table.unpack(arguments) }
+---The command to run a program for the current target, in its `wd` with
+---its `env`: `program` (relative to the project) with `arguments` (default
+---config.target_binary_arguments; a string is a shell's command line). With
+---`shell_line`, `program` is a command line for the shell instead.
+function build.get_run_command(target, program, arguments, shell_line)
+  target = target or build.targets[build.state.target]
+  local cmd
+  if shell_line then
+    cmd = { os.getenv("SHELL") or "sh", "-c", program }
+  else
+    program = core.root_project():absolute_path(program)
+    arguments = arguments or config.target_binary_arguments or {}
+    if type(arguments) == "string" then
+      cmd = { os.getenv("SHELL") or "sh", "-c", shell_quote(program) .. " " .. arguments }
     else
-      local script = { "cd", shell_quote(target.wd or core.root_project().path), "&&" }
-      for name, value in pairs(target.env or {}) do
-        table.insert(script, "export " .. shell_quote(name .. "=" .. value) .. " &&")
-      end
-      if raw then
-        table.insert(script, command)
-      else
-        if not common.is_absolute_path(command) then command = "./" .. command end
-        table.insert(script, shell_quote(command))
-        if type(arguments) == "string" then
-          table.insert(script, arguments)
-        else
-          for _, arg in ipairs(arguments) do table.insert(script, shell_quote(arg)) end
-        end
-      end
-      script = table.concat(script, " ") .. '; echo "\nProgram exited with error code $?.\n\nPress any key to exit..."; read'
-      local cmd = {}
-      for i,v in ipairs(type(build.terminal) == 'table' and build.terminal or { build.terminal }) do table.insert(cmd, type(v) == 'function' and v(target, command) or v) end
-      table.insert(cmd, "")
-      for i,v in ipairs(type(build.shell) == 'table' and build.shell or { build.shell }) do cmd[#cmd] = cmd[#cmd] .. (type(v) == 'function' and v(target, command) or v) .. " " end
-      cmd[#cmd] = cmd[#cmd] .. shell_quote(script)
-      core.log_quiet("Running %s", table.concat(cmd, " "))
-      command = cmd
+      cmd = { program, table.unpack(arguments) }
     end
   end
-  return command
-end
-
-function build.execute_command(command)
-  if PLATFORM == "Windows" then
-    os.execute(table.concat(command, " "))
-  else
-    build.run_tasks({ command })
-  end
+  cmd.cwd = target.wd and core.root_project():absolute_path(target.wd)
+  cmd.env = target.env
+  return cmd
 end
 
 ---Whether the target can run: its `run`, its backend's, or else the binary.
@@ -437,15 +392,24 @@ function build.can_run(target)
   return config.target_binary ~= nil
 end
 
+---Runs the target's program in the build terminal, which takes the keyboard.
+---A backend's `run(target, arguments)` returns the command, else it's the
+---target's `run` (a function returning it, or a program), or its binary.
 function build.run(arguments)
   local target = build.targets[build.state.target]
   if build.is_running() or not build.can_run(target) then return false end
-  build.message_view:clear_messages()
-  if target.backend.run then
-    target.backend.run(target)
-  else
-    build.execute_command(build.get_shell_command(target, target.run or config.target_binary, arguments))
-  end
+  begin("Run", target, function(finish)
+    local cmd
+    if target.backend.run then
+      cmd = target.backend.run(target, arguments)
+    elseif type(target.run) == "function" then
+      cmd = target.run(target, arguments)
+    else
+      cmd = build.get_run_command(target, target.run or config.target_binary, arguments)
+    end
+    core.set_active_view(build.view)
+    build.run_command(cmd, finish)
+  end)
 end
 
 function build.can_clean(target)
@@ -455,42 +419,27 @@ end
 function build.clean(callback)
   local target = build.targets[build.state.target]
   if build.is_running() or not build.can_clean(target) then return false end
-  build.message_view:clear_messages()
-  build.message_view.visible = true
-  build.message_view.minimized = false
-  build.message_view:add_message("Started clean " .. (target.binary or "target") .. ".")
-  target.backend.clean(target, function(...)
-    build.message_view:add_message({ "good", "Completed cleaning " .. (target.binary or "target") .. "." })
-    if build.on_success == "minimize" then build.message_view.minimized = true end
-    if callback then callback(...) end
-  end)
+  begin("Clean", target, function(finish)
+    target.backend.clean(target, function(status) finish(status or 0) end)
+  end, callback)
 end
 
-function build.terminate(callback)
+---Stops the build, clean or run under way: its command gets SIGTERM (or
+---`signal`), and no other is started; it ends when the command exits.
+function build.terminate(callback, signal)
   if not build.is_running() then return false end
-  for i, bundle in ipairs(build.running_bundles) do
-    for j, task in ipairs(bundle.tasks) do
-      if task.program and not task.done then
-        task.program:terminate()
-        task.done = true
-      end
-    end
-    if bundle.on_done then bundle.on_done(1) end
+  if build.view.job then
+    build.current.cancelled = true
+    build.view:kill(signal)
+  else
+    build.fail("Terminated.")
   end
-  build.running_bundles = {}
-  build.message_view:add_message({ "warning", "Terminated running build." })
   if callback then callback() end
 end
 
+---As build.terminate, with SIGKILL.
 function build.kill(callback)
-  if not build.is_running() then return false end
-  for i, bundle in ipairs(build.running_bundles) do
-    for j, task in ipairs(bundle.tasks) do
-      if task.program then task.program:kill() end
-    end
-  end
-  build.message_view:add_message({ "error", "Killed running build." })
-  if callback then callback() end
+  return build.terminate(callback, 9)
 end
 
 
@@ -544,8 +493,10 @@ build.menu_actions = {
   { text = "Clean", command = "build:clean" },
   { text = "Run", command = "build:run-or-term-or-kill", when = function() return not build.is_running() end },
   { text = "Stop", command = "build:terminate" },
-  { text = "Show Build Output", command = "build:toggle-drawer", when = function() return not build.message_view.visible end },
-  { text = "Hide Build Output", command = "build:toggle-drawer", when = function() return build.message_view.visible end },
+  { text = "Next Error", command = "build:next-error" },
+  { text = "Previous Error", command = "build:previous-error" },
+  { text = "Show Build Output", command = "build:toggle-drawer", when = function() return not build.view.visible end },
+  { text = "Hide Build Output", command = "build:toggle-drawer", when = function() return build.view.visible end },
 }
 
 ---The target menu's rows: targets, binary and recent arguments, actions.
@@ -616,10 +567,22 @@ core.status_view:add_item({
     if status_icon_font:get_size() ~= style.icon_font:get_size() then
       status_icon_font:set_size(style.icon_font:get_size())
     end
-    return {
+    local item = {
       style.text, status_icon_font, "&", style.font, " ",
       (target.name or "default") .. (get_arguments_text() ~= "" and "*" or "")
     }
+    -- what's under way, or how the last build ended: its counts, else its status
+    local function add(color, text) table.insert(item, color) table.insert(item, "  " .. text) end
+    local last = build.last
+    if build.current then
+      add(style.dim, ({ Build = "building…", Clean = "cleaning…", Run = "running…" })[build.current.kind])
+    elseif last and (last.errors > 0 or last.warnings > 0) then
+      if last.errors > 0 then add(build.error_color, last.errors .. (last.errors == 1 and " error" or " errors")) end
+      if last.warnings > 0 then add(build.warning_color, last.warnings .. (last.warnings == 1 and " warning" or " warnings")) end
+    elseif last and last.status ~= 0 then
+      add(build.error_color, last.kind:lower() .. " failed")
+    end
+    return item
   end,
   tooltip = function()
     local target = build.targets[build.state.target]
@@ -628,169 +591,358 @@ core.status_view:add_item({
       local arguments = get_arguments_text()
       text = text .. ", binary: " .. get_binary_text() .. (arguments ~= "" and " " .. arguments or "")
     end
+    local last = build.last
+    if last and not build.current then
+      text = text .. string.format("; last %s: %s", last.kind:lower(),
+        last.status == 0 and "done" or last.status == -1 and "failed" or "exit status " .. last.status)
+    end
     return text
   end,
   menu = get_menu,
 })
 
+local type_colors = {
+  error = function() return build.error_color end,
+  warning = function() return build.warning_color end,
+  info = function() return style.accent end,
+}
+
+-- the message gone to (next/previous error, or clicked) marks its line's gutter
 local doc_view_draw_line_gutter = DocView.draw_line_gutter
 function DocView:draw_line_gutter(idx, x, y, width)
-  if build.message_view and self.doc.abs_filename == build.message_view.active_file
-    and build.message_view.active_message
-    and idx == build.message_view.active_line
-  then
-    renderer.draw_rect(x, y, style.padding.x, self:get_line_height(), build.error_color)
+  local message = build.view and build.view.active_message
+  if message and idx == message.line and self.doc.abs_filename == message.file then
+    renderer.draw_rect(x, y, style.padding.x, self:get_line_height(), type_colors[message.type]())
   end
   return doc_view_draw_line_gutter(self, idx, x, y, width)
 end
 
-local BuildMessageView = View:extend()
-function BuildMessageView:new()
-  BuildMessageView.super.new(self)
-  self.messages = { }
+
+---The build's terminal, in a drawer: each command of a build runs in it, on
+---a pty of its own, after the output of those before. Compilers' messages in
+---it are found as lines complete (build.parse_compile_line, or the backend's),
+---and can be clicked to go to their file.
+local BuildView = TerminalView:extend()
+BuildView.close_on_exit = false
+
+function BuildView:new()
+  BuildView.super.new(self, { shell = "DUMMY" })
+  self.size.y = 0
   self.target_size = build.drawer_size
-  self.minimized = false
-  self.scrollable = true
-  self.init_size = true
-  self.hovered_message = nil
   self.visible = false
+  -- messages found, in order: { type, file (absolute), line, col, message,
+  -- first, last }, first and last naming its rows as row + terminal:scrolled()
+  self.messages = {}
+  -- the first message of the last build
+  self.first_message = 1
+  self.hovered_message = nil
   self.active_message = nil
-  self.active_file = nil
-  self.active_line = nil
+  -- the command running: { cmd, cwd, dirs (make's directories), parsed (the
+  -- first row not parsed yet, as an id), source (the pty's watch source) }
+  self.job = nil
 end
 
-function BuildMessageView:update()
-  local dest = self.visible and ((self.minimized and style.code_font:get_height() + style.padding.y * 2) or self.target_size) or 0
-  if self.init_size then
-    self.size.y = dest
-    self.init_size = false
-  else
-    self:move_towards(self.size, "y", dest)
-  end
-  BuildMessageView.super.update(self)
+function BuildView:get_name() return "Build" end
+
+function BuildView:update()
+  -- no animation: a terminal resized a little at a time pushes its lines into
+  -- the scrollback (and hidden, at 0, it keeps its size)
+  self.size.y = self.visible and self.target_size or 0
+  BuildView.super.update(self)
+  if self.hovered_message and self.terminal and not self.terminal:mouse_tracking_mode() then self.cursor = "hand" end
 end
 
-function BuildMessageView:set_target_size(axis, value)
+function BuildView:set_target_size(axis, value)
   if axis == "y" then
     self.target_size = value
     return true
   end
 end
 
-function BuildMessageView:clear_messages()
-  self.messages = {}
-  self.hovered_message = nil
-  self.active_message = nil
-  self.active_file = nil
-  self.active_line = nil
+function BuildView:accepts_input()
+  return self.job ~= nil
 end
 
-function BuildMessageView:add_message(message)
-  local should_scroll = self:get_scrollable_size() <= self.size.y or self.scroll.to.y == self:get_scrollable_size() - self.size.y
-  table.insert(self.messages, message)
-  if should_scroll then
-    self.scroll.to.y = self:get_scrollable_size() - self.size.y
+function BuildView:input(text)
+  if self.job then return BuildView.super.input(self, text) end
+  return false
+end
+
+-- no cursor without a program to type to
+function BuildView:get_cursor()
+  local x, y, mode = self.terminal:cursor()
+  return x, y, self.job and mode or "hidden"
+end
+
+function BuildView:clear()
+  self.terminal:clear()
+  self.messages, self.first_message = {}, 1
+  self.hovered_message, self.active_message = nil, nil
+end
+
+---The terminal, made now if the drawer hasn't been shown yet.
+function BuildView:get_terminal()
+  if not self.terminal then
+    self.size.y = self.target_size
+    if self.size.x <= 0 then self.size.x = core.root_view.size.x end
+    BuildView.super.update(self)
   end
+  return self.terminal
 end
 
-function BuildMessageView:get_item_height()
-  return style.build.font:get_height() + style.padding.y
+---Writes text as if a program had (escape sequences included).
+function BuildView:write(text)
+  local shifts = self:get_terminal():output(text)
+  self:on_output(shifts)
+  core.redraw = true
 end
 
-function BuildMessageView:get_h_scrollable_size()
-  return math.huge
+---Starts a new build's output on a line of its own.
+function BuildView:begin()
+  local terminal = self:get_terminal()
+  self.terminal:scrollback(0)
+  local x = terminal:cursor()
+  if x > 0 then self:write("\r\n") end
 end
 
-function BuildMessageView:get_scrollable_size()
-  return #self.messages and self:get_item_height() * (#self.messages + 1)
+function BuildView:on_output(shifts)
+  BuildView.super.on_output(self, shifts)
+  if self.job then self:parse_output(false) end
 end
 
-function BuildMessageView:on_mouse_moved(px, py, ...)
-  BuildMessageView.super.on_mouse_moved(self, px, py, ...)
-  if self.dragging_scrollbar then return end
-  local ox, oy = self:get_content_offset()
-  if px > self.position.x and py > self.position.y and px < self.position.x + self.size.x and py < self.position.y + self.size.y then
-    local offset = math.floor((py - oy) / self:get_item_height())
-    self.hovered_message = offset >= 1 and offset <= #self.messages and offset
-  else
-    self.hovered_message = nil
+---Runs a command (see build.run_command), then `on_done(status)`.
+function BuildView:run(cmd, on_done)
+  local terminal = self:get_terminal()
+  local cwd = common.normalize_path(cmd.cwd or core.root_project().path)
+  local env = {}
+  for name, value in pairs(self.options.environment) do env[name] = value end
+  for name, value in pairs(cmd.env or {}) do env[name] = value end
+  -- where libterminal starts it
+  env.PWD = cwd
+  -- the program relative to the directory, if in it
+  local shown = { table.unpack(cmd) }
+  if common.is_absolute_path(shown[1]) and common.path_belongs_to(shown[1], cwd) then
+    shown[1] = "." .. PATHSEP .. common.relative_path(cwd, shown[1])
   end
-end
-
-
-local ansi_colors = {
-  [30] = { 0, 0, 0 },
-  [31] = { 205, 49, 49 },
-  [32] = { 13, 188, 121 },
-  [33] = { 229, 229, 16 },
-  [34] = { 36, 114 , 200 },
-  [35] = { 188, 63, 188 },
-  [36] = { 17, 168, 205 },
-  [37] = { 229, 229, 229 },
-  [38] = { 102, 120, 102 },
-  [91] = { 241, 76, 76 },
-  [92] = { 35, 209, 139 },
-  [93] = { 245, 245, 67 },
-  [94] = { 59, 142, 234 },
-  [95] = { 214, 112, 214 },
-  [96] = { 41, 184, 219 },
-  [97] = { 255, 255, 255 }
-}
-function BuildMessageView:draw()
-  self:draw_background(style.background3)
-  local item_height = self:get_item_height()
-  local ox, oy = self:get_content_offset()
-  local title = "Build Messages"
-  local subtitle = { }
-  if build.is_running() then
-    local t = { "|", "/", "-", "\\", "|", "/", "-", "\\" }
-    title = title .. " " .. t[(math.floor(system.get_time()*8) % #t) + 1]
+  local line = build.command_line(shown)
+  local root = common.normalize_path(core.root_project().path)
+  if cwd ~= root then
+    line = "(in " .. (common.path_belongs_to(cwd, root) and common.relative_path(root, cwd) or common.home_encode(cwd)) .. ") " .. line
+  end
+  self:write(sgr_color(style.dim) .. "$ " .. line .. "\x1b[0m\r\n")
+  local args = {}
+  for i = 2, #cmd do args[i - 1] = tostring(cmd[i]) end
+  local ok, err = pcall(terminal.spawn, terminal, self.options.term, cmd[1], args, env)
+  if not ok then
+    self:write(sgr_color(build.error_color) .. err .. "\x1b[0m\r\n")
+    on_done(-1)
+    return
+  end
+  local job = { cmd = cmd, cwd = cwd, dirs = {}, parsed = terminal:scrolled() + select(2, terminal:cursor()), source = terminal:watch_source() }
+  self.job = job
+  core.add_thread(function()
+    while true do
+      local read = self:shift_selection_update()
+      if read then core.redraw = true end
+      local source = terminal:watch_source()
+      -- done once the output has ended, or the program exited and there's no more
+      -- (a program it started in the background can keep the pty open)
+      if not source or (not read and terminal:exited()) then break end
+      if read then
+        coroutine.yield(1 / config.fps)
+      else
+        -- woken by output; and now and then, to notice an exit without any
+        core.wait_for(core.watch_readable(source), 1)
+      end
+    end
+    while terminal:exited() == false do coroutine.yield(0.01) end
+    if job.source then core.unwatch_readable(job.source) end
+    self:parse_output(true)
+    self.job = nil
+    local code, signal = terminal:exited()
     core.redraw = true
-  elseif type(self.messages[#self.messages]) == "table" and #self.messages[#self.messages] == 2 then
-    subtitle = self.messages[#self.messages]
-  end
-  local colors = {
-    error = build.error_color,
-    warning = build.warning_color,
-    good = build.good_color
-  }
-  local x = common.draw_text(style.build.font, style.accent, title, "left", ox + style.padding.x, self.position.y + style.padding.y, 0, item_height)
-  if subtitle and #subtitle == 2 then
-    common.draw_text(style.build.font, colors[subtitle[1]] or style.accent, subtitle[2], "left", x + style.padding.x, self.position.y + style.padding.y, 0, item_height)
-  end
-  core.push_clip_rect(self.position.x, self.position.y + item_height  + style.padding.y, self.size.x, self.size.y - item_height - style.padding.y)
-  local default_color = style.text
-  for i,v in ipairs(self.messages) do
-    local yoffset = style.padding.y + i*item_height
-    if type(v) == "table" and self.hovered_message == i or self.active_message == i then
-      renderer.draw_rect(ox, oy + yoffset, self.size.x, item_height, style.line_highlight)
-    end
-    if type(v) == "table" then
-      if #v > 2 then
-        common.draw_text(style.build.font, colors[v[1]] or style.text, v[2] .. ":" .. v[3] .. " [" .. v[1] .. "]: " .. v[5], "left", ox + style.padding.x, oy + yoffset, 0, item_height)
-      else
-        common.draw_text(style.build.font, colors[v[1]] or style.text, v[2], "left", ox + style.padding.x, oy + yoffset, 0, item_height)
-      end
-    else
-      if v:find("\x1b") then
-        local x = ox + style.padding.x
-        while true do
-          local s,e,color = v:find("\x1b%[%d+;(%d+)m")
-          default_color = ansi_colors[tonumber(color)] or style.text
-          local line = v:sub(1, s and (s-1) or #v):gsub("\x1b%[[^a-zA-Z]*%a", "")
-          x = common.draw_text(style.build.font, default_color, line, "left", x, oy + yoffset, 0, item_height)
-          if not e then break end
-          v = v:sub(e + 1)
-        end
-      else
-        common.draw_text(style.build.font, default_color, v, "left", ox + style.padding.x, oy + yoffset, 0, item_height)
-      end
-    end
-  end
-  core.pop_clip_rect()
-  self:draw_scrollbar()
+    on_done(code == -1 and signal and signal > 0 and 128 + signal or code)
+  end)
 end
 
+---Signals the command running (default SIGTERM).
+function BuildView:kill(signal)
+  if self.job then self.terminal:kill(signal) end
+end
+
+---Parses the lines the command has written since last time, but for the one
+---the cursor is on (it may not be complete yet) unless `final`.
+function BuildView:parse_output(final)
+  local job, terminal = self.job, self.terminal
+  if not job then return end
+  local scrolled = terminal:scrolled()
+  local _, total = terminal:scrollback()
+  local _, cursor_y = terminal:cursor()
+  local first = math.max(job.parsed - scrolled, -total)
+  if cursor_y < first then return end
+  local doc = search.snapshot(self, first, cursor_y)
+  for i, text in ipairs(doc.lines) do
+    local segments = doc.segments[i]
+    if i == #doc.lines and not final then break end
+    -- without the newline, and the blank cells at the end
+    self:parse_line(text:gsub("%s+$", ""), segments[1].row + scrolled, segments[#segments].row + scrolled)
+    job.parsed = segments[#segments].row + scrolled + 1
+  end
+end
+
+function BuildView:parse_line(text, first, last)
+  local job = self.job
+  -- make's and ninja's directories, which the paths after are relative to
+  local dir = text:match("Entering directory [`'\"](.*)['\"]%s*$")
+  if dir then
+    table.insert(job.dirs, common.normalize_path(common.is_absolute_path(dir) and dir or (job.dirs[#job.dirs] or job.cwd) .. PATHSEP .. dir))
+    return
+  end
+  if text:find("Leaving directory [`'\"]") then
+    table.remove(job.dirs)
+    return
+  end
+  local backend = build.current and build.current.target.backend
+  local message = (backend and backend.parse_compile_line or build.parse_compile_line)(text)
+  if not message then return end
+  local file = message.file
+  if not common.is_absolute_path(file) then
+    file = (job.dirs[#job.dirs] or job.cwd) .. PATHSEP .. file
+  end
+  file = common.normalize_path(file)
+  local info = system.get_file_info(file)
+  if not info or info.type ~= "file" then return end
+  message.file, message.first, message.last = file, first, last
+  table.insert(self.messages, message)
+end
+
+---The message on a row of the screen (0 is its top), if any.
+function BuildView:get_message_at(row)
+  if not self.terminal then return nil end
+  local id = row - self.terminal:scrollback() + self.terminal:scrolled()
+  -- messages are in order: a binary search for the last that starts at or above it
+  local lo, hi = 1, #self.messages
+  while lo <= hi do
+    local mid = (lo + hi) // 2
+    if self.messages[mid].first <= id then lo = mid + 1 else hi = mid - 1 end
+  end
+  local message = self.messages[hi]
+  return message and id <= message.last and message or nil
+end
+
+---The y of a message's first row on screen, and its height.
+function BuildView:get_message_rect(message)
+  local _, padding_y = self:get_padding()
+  local lh = self:get_line_height()
+  local row = message.first - self.terminal:scrolled() + self.terminal:scrollback()
+  return self.position.y + padding_y + row * lh, (message.last - message.first + 1) * lh
+end
+
+function BuildView:draw_background(color)
+  BuildView.super.draw_background(self, color)
+  if not self.terminal then return end
+  for _, message in pairs({ hovered = self.hovered_message, active = self.active_message }) do
+    local y, h = self:get_message_rect(message)
+    if y + h > self.position.y and y < self.position.y + self.size.y then
+      renderer.draw_rect(self.position.x, y, self.size.x, h, style.line_highlight)
+      if message == self.active_message then
+        renderer.draw_rect(self.position.x, y, math.ceil(2 * SCALE), h, type_colors[message.type]())
+      end
+    end
+  end
+end
+
+function BuildView:on_mouse_moved(x, y, ...)
+  local result = BuildView.super.on_mouse_moved(self, x, y, ...)
+  local hovered = nil
+  if not self.v_scrollbar.dragging and x >= self.position.x and x < self.position.x + self.size.x
+    and y >= self.position.y and y < self.position.y + self.size.y then
+    local _, row = self:convert_coordinates(x, y)
+    hovered = self:get_message_at(row)
+  end
+  if hovered ~= self.hovered_message then
+    self.hovered_message = hovered
+    core.redraw = true
+  end
+  return result
+end
+
+function BuildView:on_mouse_left()
+  BuildView.super.on_mouse_left(self)
+  self.hovered_message = nil
+end
+
+function BuildView:on_mouse_pressed(button, x, y, clicks)
+  self.pressed_message = button == "left" and clicks == 1 and self.hovered_message or nil
+  return BuildView.super.on_mouse_pressed(self, button, x, y, clicks)
+end
+
+function BuildView:on_mouse_released(button, x, y)
+  BuildView.super.on_mouse_released(self, button, x, y)
+  local s = self.selection
+  -- a click, not a drag selecting text
+  if button == "left" and self.pressed_message and self.pressed_message == self.hovered_message
+    and (not s or (s[1] == s[3] and s[2] == s[4])) then
+    self.selection = nil
+    build.go_to_message(self.pressed_message)
+  end
+  self.pressed_message = nil
+end
+
+---Opens a message's file at its line, marking it in the terminal and the gutter.
+function build.go_to_message(message)
+  build.view.active_message = message
+  -- scrolled into view if it isn't
+  local view = build.view
+  if view.terminal then
+    local y, h = view:get_message_rect(message)
+    if y < view.position.y or y + h > view.position.y + view.size.y then
+      local scrollback, total = view.terminal:scrollback()
+      local row = message.first - view.terminal:scrolled()
+      view.terminal:scrollback(common.clamp(math.floor(view.lines / 3) - row, 0, total))
+    end
+  end
+  jump_to_file(message.file, message.line, message.col)
+  core.redraw = true
+end
+
+---The last build's errors and warnings, in order.
+function build.get_errors()
+  local errors = {}
+  for i = build.view.first_message, #build.view.messages do
+    local message = build.view.messages[i]
+    if message.type ~= "info" then table.insert(errors, message) end
+  end
+  return errors
+end
+
+---Goes to the last build's next error or warning (previous if `step` is -1).
+function build.next_error(step)
+  step = step or 1
+  local errors = build.get_errors()
+  if #errors == 0 then return end
+  local index = nil
+  for i, message in ipairs(errors) do
+    if message == build.view.active_message then index = i end
+  end
+  if not index then
+    -- from the active message (an info one, or an earlier build's) onward
+    local active = build.view.active_message
+    index = step > 0 and 0 or #errors + 1
+    if active then
+      for i, message in ipairs(errors) do
+        if step > 0 and message.first < active.first then index = i end
+        if step < 0 and message.first > active.first and index > i then index = i end
+      end
+    end
+  end
+  index = index + step
+  if index < 1 or index > #errors then
+    core.log("No %s errors or warnings", step > 0 and "more" or "earlier")
+    return
+  end
+  build.go_to_message(errors[index])
+end
 
 
 local BuildBarView = ToolbarView:extend()
@@ -809,9 +961,9 @@ function BuildBarView:new()
 end
 
 build.build_bar_view = BuildBarView()
-build.message_view = BuildMessageView()
+build.view = BuildView()
 local node = core.root_view:get_active_node()
-build.message_view_node = node:split("down", build.message_view, { y = true }, true)
+build.view_node = node:split("down", build.view, { y = true }, true)
 -- above the file browser's toolbar, if it has one (toolbarview isn't disabled)
 if TreeView and build.toolbar then
   build.build_bar_node = TreeView.node.b and TreeView.node.b:split("up", build.build_bar_view, {y = true})
@@ -819,27 +971,11 @@ if TreeView and build.toolbar then
 end
 
 
-
-
-command.add(function(x, y)
-  return core.active_view and core.active_view:is(BuildMessageView) and build.message_view.visible and (y == nil or y <= build.message_view.position.y + style.padding.y * 2 + style.build.font:get_height())
-end, {
-  ["build:toggle-minimize"] = function()
-    build.message_view.minimized = not build.message_view.minimized
-  end
-})
-
 command.add(function()
-  local mv = build.message_view
-  return mv.hovered_message and type(mv.messages[mv.hovered_message]) == "table" and #mv.messages[mv.hovered_message] > 2
+  return #build.get_errors() > 0
 end, {
-  ["build:jump-to-hovered"] = function()
-    local mv = build.message_view
-    mv.active_message = mv.hovered_message
-    mv.active_file = core.root_project():absolute_path(mv.messages[mv.hovered_message][2])
-    mv.active_line = tonumber(mv.messages[mv.hovered_message][3])
-    jump_to_file(mv.active_file, tonumber(mv.messages[mv.hovered_message][3]), tonumber(mv.messages[mv.hovered_message][4]))
-  end
+  ["build:next-error"] = function() build.next_error(1) end,
+  ["build:previous-error"] = function() build.next_error(-1) end,
 })
 
 local tried_term = false
@@ -961,6 +1097,14 @@ end, {
   end
 })
 
+---Shows or hides the drawer; hidden, it gives the keyboard back.
+function build.set_drawer_visible(visible)
+  build.view.visible = visible
+  if not visible and core.active_view == build.view and core.last_active_view then
+    core.set_active_view(core.last_active_view)
+  end
+end
+
 local function select_target_commandview(submit, target, condition)
   if target then submit(target) end
   local target_names = {}
@@ -985,7 +1129,7 @@ end
 
 command.add(nil, {
   ["build:toggle-drawer"] = function()
-    build.message_view.visible = not build.message_view.visible
+    build.set_drawer_visible(not build.view.visible)
   end,
   ["build:select-target"] = function(target)
     select_target_commandview(function(target, idx)
@@ -1008,16 +1152,16 @@ command.add(nil, {
   end
 })
 
+-- escape in the build terminal goes to its program while one runs
 command.add(function()
-  return core.active_view == build.message_view and build.message_view.visible
+  return core.active_view == build.view and build.view.visible and not build.view:accepts_input()
 end, {
   ["build:contextual-close-drawer"] = function()
-    build.message_view.visible = false
+    build.set_drawer_visible(false)
   end
 })
 
 keymap.add {
-  ["lclick"]             = { "build:toggle-minimize", "build:jump-to-hovered" },
   ["ctrl+b"]             = { "build:build", "build:terminate" },
   ["alt+b"]         = "build:build-and-run",
   ["ctrl+alt+b"]         = "build:clean-and-build",
@@ -1029,6 +1173,8 @@ keymap.add {
   ["ctrl+shift+alt+b"]   = "build:select-target-and-build",
   ["ctrl+shift+b"]       = "build:clean",
   ["f6"]                 = "build:toggle-drawer",
+  ["f4"]                 = "build:next-error",
+  ["shift+f4"]           = "build:previous-error",
   ["escape"]             = "build:contextual-close-drawer"
 }
 
