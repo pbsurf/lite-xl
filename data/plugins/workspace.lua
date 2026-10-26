@@ -59,24 +59,6 @@ local function get_workspace_filename(project_dir)
 end
 
 
-local function has_no_locked_children(node)
-  if node.locked then return false end
-  if node.type == "leaf" then return true end
-  return has_no_locked_children(node.a) and has_no_locked_children(node.b)
-end
-
-
-local function get_unlocked_root(node)
-  if node.type == "leaf" then
-    return not node.locked and node
-  end
-  if has_no_locked_children(node) then
-    return node
-  end
-  return get_unlocked_root(node.a) or get_unlocked_root(node.b)
-end
-
-
 local function save_view(view)
   local mt = getmetatable(view)
   if mt == DocView then
@@ -151,6 +133,9 @@ local function save_node(node)
         end
       end
     end
+  elseif node.a.is_panel or node.b.is_panel then
+    -- the bottom panel's tool views aren't restored: just the editor area
+    return save_node(node.a.is_panel and node.b or node.a)
   else
     res.divider = node.divider
     res.a = save_node(node.a)
@@ -202,7 +187,7 @@ end
 
 
 local function save_workspace()
-  local root = get_unlocked_root(core.root_view.root_node)
+  local root = core.root_view:get_unlocked_root()
   local workspace_filename = get_workspace_filename(core.project_dir)
   local fp = io.open(workspace_filename, "w")
   if fp then
@@ -217,7 +202,7 @@ end
 local function load_workspace()
   local workspace = consume_workspace_file(core.project_dir)
   if workspace then
-    local root = get_unlocked_root(core.root_view.root_node)
+    local root = core.root_view:get_unlocked_root()
     local active_view = load_node(root, workspace.documents)
     if active_view then
       core.set_active_view(active_view)

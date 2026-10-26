@@ -99,11 +99,12 @@ function View:get_name()
 end
 
 ---The font to draw this view's name in (tab titles, tab lists), derived from
----`font`, the one the caller would use; e.g. an italic copy.
+---`font`, the one the caller would use; e.g. an italic copy. Italic for the
+---view its kind's next search or run reuses (`reusable`, core.panel).
 ---@param font renderer.font
 ---@return renderer.font
 function View:get_name_style(font)
-  return font
+  return self.reusable and common.italic_font(font) or font
 end
 
 ---How far along the view's work is, 0 to 1, drawn as a fill behind its tab's

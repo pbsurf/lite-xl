@@ -10,6 +10,9 @@ local View = require "core.view"
 ---@field fit_tab_width? boolean For this node instead of config.fit_tab_width
 ---@field max_tab_width? number For this node instead of config.max_tab_width
 ---(pixels at scale 1)
+---@field is_panel? boolean The bottom panel's node (core.panel)
+---@field on_collapse? fun(node: core.node) Called when the node's last view is
+---removed and the node goes away, its sibling taking its parent's place
 local Node = Object:extend()
 
 ---A button at the right end of the tab bar, shown while the node's tabs scroll.
@@ -159,6 +162,7 @@ function Node:remove_view(root, view)
       self.views = {}
       self:add_view(EmptyView())
     else
+      if self.on_collapse then self:on_collapse() end
       if other == next_primary then
         next_primary = parent
       end

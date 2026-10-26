@@ -4,8 +4,10 @@ local style = require "core.style"
 local Node = require "core.node"
 local View = require "core.view"
 local DocView = require "core.docview"
+local EmptyView = require "core.emptyview"
 local ContextMenu = require "core.contextmenu"
 local tooltip = require "core.tooltip"
+local panel = require "core.panel"
 
 ---@class core.rootview : core.view
 ---@field super core.view
@@ -76,7 +78,7 @@ local function get_last_visited_node(node)
     if n.type ~= "leaf" then
       visit(n.a)
       visit(n.b)
-    elseif not n.locked and n.active_view then
+    elseif not n.locked and not n.is_panel and n.active_view then
       local v = core.view_visit_order[n.active_view]
       local doc = n.active_view:is(DocView) and n.active_view.context == "session"
       if v and (not best or (doc and not best_doc)
@@ -133,13 +135,13 @@ function RootView:peek_file(filename, line1, col1, line2, col2)
 end
 
 
----The active node, or, when that's locked (a panel like the tree view's),
----get_last_used_node(), which then becomes active.
+---The active node, or, when that's locked (a panel like the tree view's) or
+---the bottom panel (core.panel), get_last_used_node(), which then becomes active.
 ---@return core.node
 function RootView:get_active_node_default()
   local node = self.root_node:get_node_for_view(core.active_view)
   if not node then node = self:get_primary_node() end
-  if node.locked then
+  if node.locked or node.is_panel then
     node = self:get_last_used_node()
     local default_view = node.active_view or node.views[1]
     assert(default_view, "internal error: cannot find original document node.")
@@ -156,6 +158,30 @@ function RootView:get_primary_node()
 end
 
 
+local function has_no_locked_children(node)
+  if node.locked then return false end
+  if node.type == "leaf" then return true end
+  return has_no_locked_children(node.a) and has_no_locked_children(node.b)
+end
+
+local function get_unlocked_root(node)
+  if node.type == "leaf" then
+    return not node.locked and node
+  end
+  if has_no_locked_children(node) then
+    return node
+  end
+  return get_unlocked_root(node.a) or get_unlocked_root(node.b)
+end
+
+---The largest node with no locked nodes in it: the editor area, with the bottom
+---panel (core.panel) if it's shown, without the tree view and other locked panels.
+---@return core.node
+function RootView:get_unlocked_root()
+  return get_unlocked_root(self.root_node)
+end
+
+
 ---@param node core.node
 ---@return core.node
 local function select_next_primary_node(node)
@@ -164,7 +190,7 @@ local function select_next_primary_node(node)
     return select_next_primary_node(node.a) or select_next_primary_node(node.b)
   else
     local lx, ly = node:get_locked_size()
-    if not lx and not ly then
+    if not lx and not ly and not node.is_panel then
       return node
     end
   end
@@ -257,6 +283,8 @@ function RootView:on_mouse_pressed(button, x, y, clicks)
     else
       if button == "left" then
         self.dragged_node = { node = node, idx = idx, dragging = false, drag_start_x = x, drag_start_y = y}
+        -- double-click: keeps the view the next search or run would reuse
+        if clicks > 1 and node.views[idx].reusable then panel.keep(node.views[idx]) end
       end
       node:set_active_view(node.views[idx])
       return true
@@ -871,6 +899,15 @@ RootView.tab_menu_items = {
     command = function(node)
       close_views(node, { table.unpack(node.views) })
     end },
+  ContextMenu.DIVIDER,
+  { text = "Move to Panel",
+    show = function(node, view)
+      return not node.is_panel and not view:is(DocView) and not view:is(EmptyView)
+    end,
+    command = function(_, view) panel.move_to_panel(view) end },
+  { text = "Move to Editor",
+    show = function(node) return node.is_panel end,
+    command = function(_, view) panel.move_to_editor(view) end },
   ContextMenu.DIVIDER,
   { text = "Copy Path", show = has_file,
     command = function(_, view) system.set_clipboard(view.doc.abs_filename) end },
