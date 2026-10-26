@@ -121,6 +121,13 @@ function View:get_name_color()
   return nil
 end
 
+---Facts about the view for its tab's tooltip, shown on one line: e.g. what
+---a search searched and how long it took.
+---@return string[]
+function View:get_tab_tooltip_info()
+  return {}
+end
+
 ---The icon drawn with this view's name in tab lists (and in tabs by an icon
 ---plugin such as nerdicons), or nil for none.
 ---@param hovered? boolean

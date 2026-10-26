@@ -716,8 +716,8 @@ end
 
 
 -- Tab tooltips: a view's get_filename() (a doc's full path), when it says more
--- than the tab's title, and a line of facts about it (get_tab_tooltip_info),
--- timed by core.tooltip
+-- than the tab's title, else the title when the tab cuts it short; and a line of
+-- facts about the view (get_tab_tooltip_info), timed by core.tooltip
 
 local get_tab_tooltip
 
@@ -728,7 +728,7 @@ function RootView:update_tab_tooltip()
   local tt = self.tab_tooltip
   if view ~= tt.view then
     tt.view, tt.node = view, node
-    local has_tooltip = view and (get_tab_tooltip(view)
+    local has_tooltip = view and (get_tab_tooltip(view, node)
       or #self:get_tab_tooltip_info(view) > 0)
     tooltip.hover(tt, has_tooltip and view or nil)
   end
@@ -738,10 +738,17 @@ end
 ---The tooltip's text and, for a file in a project directory, that directory's
 ---part of it (drawn dimmed, so files outside the project stand out).
 ---@param view core.view
+---@param node core.node The view's
 ---@return string? text, string? project_part
-function get_tab_tooltip(view)
+function get_tab_tooltip(view, node)
   local text = view.get_filename and view:get_filename()
-  if not text or text == "" or text == view:get_name() then return end
+  if not text or text == "" or text == view:get_name() then
+    local idx = node:get_view_idx(view)
+    if idx and node:get_tab_width(idx) < node:get_tab_fit_width(view) - 0.5 then
+      return view:get_name()
+    end
+    return
+  end
   local abs = view.doc and view.doc.abs_filename
   for _, dir in ipairs(core.project_directories) do
     if abs and common.path_belongs_to(abs, dir.name) then
@@ -754,15 +761,19 @@ end
 
 
 ---Facts about a tab's view for its tooltip: for a doc's file, its size and
----age on disk, and whether it has unsaved changes. Plugins can add to them.
+---age on disk, and whether it has unsaved changes; then the view's own
+---(View:get_tab_tooltip_info). Plugins can add to them.
 ---@param view core.view
 ---@return string[]
 function RootView:get_tab_tooltip_info(view)
+  local t = {}
   local doc = view.doc
   local info = doc and doc.abs_filename and system.get_file_info(doc.abs_filename)
-  if not info then return {} end
-  local t = { common.format_size(info.size), "modified " .. common.format_age(info.modified) }
-  if doc:is_dirty() then table.insert(t, "unsaved changes") end
+  if info then
+    t = { common.format_size(info.size), "modified " .. common.format_age(info.modified) }
+    if doc:is_dirty() then table.insert(t, "unsaved changes") end
+  end
+  for _, fact in ipairs(view:get_tab_tooltip_info()) do table.insert(t, fact) end
   return t
 end
 
@@ -772,7 +783,7 @@ function RootView:draw_tab_tooltip()
   if not tt.view or not tooltip.shown(tt, tt.view) then return end
   local idx = tt.node:get_view_idx(tt.view)
   if not idx then return end
-  local text, project_part = get_tab_tooltip(tt.view)
+  local text, project_part = get_tab_tooltip(tt.view, tt.node)
   local info = table.concat(self:get_tab_tooltip_info(tt.view), " · ")
   if not text and info == "" then return end
   local tx, ty, _, th = tt.node:get_tab_rect(idx)
