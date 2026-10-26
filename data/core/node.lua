@@ -7,6 +7,9 @@ local EmptyView = require "core.emptyview"
 local View = require "core.view"
 
 ---@class core.node : core.object
+---@field fit_tab_width? boolean For this node instead of config.fit_tab_width
+---@field max_tab_width? number For this node instead of config.max_tab_width
+---(pixels at scale 1)
 local Node = Object:extend()
 
 ---A button at the right end of the tab bar, shown while the node's tabs scroll.
@@ -368,15 +371,19 @@ end
 ---Each tab's width, once it's done animating: target_tab_width(); or with
 ---config.fit_tab_width, its fit width within config.min_tab_width and
 ---config.max_tab_width, the widest shrunk as needed to fit the tab area, and none
----wider than target_tab_width() while the tabs scroll.
+---wider than target_tab_width() while the tabs scroll. The node's own
+---fit_tab_width and max_tab_width override config's.
 ---@return number[]
 function Node:get_tab_target_widths()
   local widths, w = {}, self:target_tab_width()
-  if not config.fit_tab_width then
+  local fit = self.fit_tab_width
+  if fit == nil then fit = config.fit_tab_width end
+  if not fit then
     for i = 1, #self.views do widths[i] = w end
     return widths
   end
-  local min_w, max_w = config.min_tab_width * SCALE, config.max_tab_width * SCALE
+  local min_w = config.min_tab_width * SCALE
+  local max_w = (self.max_tab_width or config.max_tab_width) * SCALE
   for i, view in ipairs(self.views) do
     widths[i] = math.max(min_w, math.min(self:get_tab_fit_width(view), max_w))
   end
@@ -787,13 +794,20 @@ function Node:draw_tab(view, is_active, is_hovered, is_close_hovered, x, y, w, h
   core.pop_clip_rect()
 end
 
+---The tab bar's background: style.background2; a node that sets itself apart
+---(the bottom panel's) has its own method.
+---@return renderer.color
+function Node:get_tab_bar_color()
+  return style.background2
+end
+
 function Node:draw_tabs()
   local x, y = self.position.x, self.position.y
   local h = self:get_tab_bar_height()
   local ds = style.divider_size
   local dots_width = style.font:get_width("…")
   core.push_clip_rect(x, y, self.size.x, h)
-  renderer.draw_rect(x, y, self.size.x, h, style.background2)
+  renderer.draw_rect(x, y, self.size.x, h, self:get_tab_bar_color())
   renderer.draw_rect(x, y + h - ds, self.size.x, ds, style.divider)
 
   core.push_clip_rect(x, y, self:get_tab_area_width(), h)
