@@ -364,6 +364,20 @@ function common.draw_text(font, color, text, align, x,y,w,h)
 end
 
 
+local italic_fonts = setmetatable({}, { __mode = "k" })
+
+---An italic copy of a font (a synthesized slant, same advances), made once per
+---font: e.g. for a tab title that the next one of its kind replaces.
+---@param font renderer.font
+---@return renderer.font
+function common.italic_font(font)
+  if not italic_fonts[font] then
+    italic_fonts[font] = font:copy(font:get_size(), { italic = true })
+  end
+  return italic_fonts[font]
+end
+
+
 ---Draws a dot at the top right corner of an icon drawn with
 ---`common.draw_text(font, color, icon, nil, x, y, 0, h)`, ringed with the
 ---background color to set it apart from the icon.
