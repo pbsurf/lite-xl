@@ -36,6 +36,13 @@ upstream's `release/v2.1.x`. Additions to the editor:
 * **Tab tooltips and menu:** hovering a tab shows the file's full path, size and
   age (and git state, with gitfiles); right clicking it offers close others / to
   the right / all and copy path.
+* **Bottom panel** (`core.panel`): tool views (project search and lsp results,
+  build output and Problems, the terminal) are tabs in one split below the editor,
+  rather than drawers and panels of their own. A tab's title is the view's status
+  (`Search "foo": 42`, `Build lite-xl: failed, 3 errors` in red), with progress
+  drawn behind it and details in its tooltip. A new search reuses its kind's
+  italic tab; double-clicking that tab keeps it. Files never open there, and its
+  tabs can be dragged or moved (tab menu) to the editor and back.
 * **Reopen closed tab:** ctrl+shift+t reopens the file whose tab was closed last
   (again for the one before), beside the tab that was next to it, at the cursor
   and scroll it had. Recent files (`core.recent_files`, kept between sessions)
@@ -88,6 +95,8 @@ upstream's `release/v2.1.x`. Additions to the editor:
   (`DocView:get_line_marks`), `command.hidden` for commands that exist only
   for key bindings (not listed by Do Command or menus),
   `View:get_name_style` (the font of a view's name in tabs and tab lists),
+  a tab's status (`View:get_progress`, `View:get_name_color`,
+  `View:get_tab_tooltip_info`),
   `View:get_icon` (the icon shown with it; the treeview gives docs their file's),
   `View:is_transient` (views the workspace doesn't restore),
   facts in tooltips (`TreeView:get_item_info`, `RootView:get_tab_tooltip_info`),
