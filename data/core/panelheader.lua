@@ -10,6 +10,9 @@ local Object = require "core.object"
 ---tab and to close it, which also tell a panel from a tab; in a tab, a button
 ---to move it back into a panel.
 ---
+---A view can give its own buttons instead (a drawer's, which only closes it),
+---shown in a tab and in a panel alike.
+---
 ---Each kind of view (its class) has one panel, which a new search reuses:
 ---get_panel() and show_panel(). Moving a view into a tab leaves its kind
 ---without one, and moving a tab back replaces the panel there.
@@ -19,11 +22,21 @@ local Object = require "core.object"
 ---@field view core.view
 ---@field kind core.object The view's class
 ---@field text string
----@field color renderer.color? Of the text; style.text if nil
----@field divider_color renderer.color? style.dim if nil
+---@field foreground renderer.color? The view's text color, for a view not in
+---the theme's colors (a terminal): of hovered buttons and progress, and the
+---text's unless `color`; style.text if nil
+---@field dim renderer.color? Its dim color, of buttons and the divider; style.dim if nil
+---@field color renderer.color? Of the text; `foreground` if nil
+---@field divider_color renderer.color? `dim` if nil
 ---@field progress number? 0 to 1: drawn over the divider while set
 ---@field panel_height number? The view's height when it last was a panel
+---@field buttons core.panelheader.button[]? The view's own buttons
 local PanelHeader = Object:extend()
+
+---@class core.panelheader.button
+---@field icon string In style.icon_font
+---@field action string|fun(header: core.panelheader) A method of the header, or a function
+---@field tooltip string
 
 local panel_buttons = {
   { icon = "w", action = "move_to_tab", tooltip = "Open in Tab" },
@@ -39,8 +52,10 @@ local tab_buttons = {
 local panels = {}
 
 ---@param view core.view
-function PanelHeader:new(view)
+---@param buttons? core.panelheader.button[] Instead of moving and closing the panel
+function PanelHeader:new(view, buttons)
   self.view = view
+  self.buttons = buttons
   self.kind = getmetatable(view)
   self.text = ""
   self.rects = {} -- each shown button's {button, x, y, w, h}, as last drawn
@@ -71,12 +86,12 @@ function PanelHeader:draw(x, y, w)
   local right = x + w - pad.x
   -- none before the view is placed
   if core.root_view.root_node:get_node_for_view(self.view) then
-    local buttons = self:is_panel() and panel_buttons or tab_buttons
+    local buttons = self.buttons or self:is_panel() and panel_buttons or tab_buttons
     for i = #buttons, 1, -1 do
       local b = buttons[i]
       local bw = style.icon_font:get_width(b.icon)
       right = right - bw
-      local color = self.hovered == b and style.text or style.dim
+      local color = self.hovered == b and (self.foreground or style.text) or self.dim or style.dim
       common.draw_text(style.icon_font, color, b.icon, nil, right, y + pad.y, 0,
         style.font:get_height())
       table.insert(self.rects, { b, right - pad.x / 2, y, bw + pad.x, h - pad.y })
@@ -86,14 +101,17 @@ function PanelHeader:draw(x, y, w)
 
   -- text, cut short before the buttons
   local text = common.truncate_text(style.font, self.text, right - x - pad.x * 2)
-  renderer.draw_text(style.font, text, x + pad.x, y + pad.y, self.color or style.text)
+  renderer.draw_text(style.font, text, x + pad.x, y + pad.y,
+    self.color or self.foreground or style.text)
 
   -- divider, and progress over it
   local dw = w - pad.x * 2
   local dy = y + h - pad.y
-  renderer.draw_rect(x + pad.x, dy, dw, style.divider_size, self.divider_color or style.dim)
+  renderer.draw_rect(x + pad.x, dy, dw, style.divider_size,
+    self.divider_color or self.dim or style.dim)
   if self.progress then
-    renderer.draw_rect(x + pad.x, dy, dw * self.progress, style.divider_size, style.text)
+    renderer.draw_rect(x + pad.x, dy, dw * self.progress, style.divider_size,
+      self.foreground or style.text)
   end
 
   if self.hovered and tooltip.shown(self, self.hovered) then
@@ -140,7 +158,15 @@ function PanelHeader:on_mouse_pressed(button, x, y)
   local b = button_at(self, x, y)
   if not b then return false end
   tooltip.dismiss()
-  if button == "left" then self[b.action](self) end
+  if button == "left" then
+    if type(b.action) == "function" then
+      b.action(self)
+      -- the view may be gone from under the pointer
+      self:on_mouse_left()
+    else
+      self[b.action](self)
+    end
+  end
   return true
 end
 
