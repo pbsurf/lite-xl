@@ -3,23 +3,19 @@
 -- @copyright Jefferson Gonzalez
 -- @license MIT
 --
--- A panel below the pane used last. Selecting a result (arrow keys, a click)
--- shows it in that pane, with the symbol's name selected, while the focus stays
--- here; Enter or a double click moves the focus there, Escape closes the panel.
--- Its header's button moves it into a tab, keeping the results; the next search
+-- A panel below the pane used last, to step through with the keyboard
+-- (core.resultslist), the symbol's name selected in the file shown. Its
+-- header's button moves it into a tab, keeping the results; the next search
 -- opens a new panel. In a tab, the button moves it back, replacing the panel.
--- In a tab sharing a pane with the docs, showing a result
--- would hide the list, so there a click, double click or Enter opens it.
 --
 -- ReferenceResults, the same for the references to a symbol, is a subclass.
 --
 
 local core = require "core"
 local common = require "core.common"
-local command = require "core.command"
-local keymap = require "core.keymap"
 local style = require "core.style"
 local PanelHeader = require "core.panelheader"
+local ResultsList = require "core.resultslist"
 local Widget = require "libraries.widget"
 local ListBox = require "libraries.widget.listbox"
 local Server = require "plugins.lsp.server"
@@ -53,8 +49,7 @@ function SymbolResults:new()
   self:add_columns()
 
   self.list.on_row_click = function(_, idx, _, clicks)
-    self:select(idx)
-    if clicks > 1 or not self:can_peek() then self:open_selected() end
+    self:click_result(idx, clicks)
   end
 
   -- valid before a first reset() too (e.g. made by an older workspace save)
@@ -143,47 +138,25 @@ function SymbolResults:stop_searching()
   self.searching = false
 end
 
----Shows a location in the pane used last (RootView:peek_file), with the
----symbol's name selected.
----@return core.docview?
-local function show_location(location)
+-- for core.resultslist: a result's range is the symbol's name (the start of a
+-- range over several lines)
+function SymbolResults:get_result_count() return #self.list.rows end
+
+function SymbolResults:get_result_location(idx)
+  local location = self.list:get_row_data(idx).location
   local filename = common.home_expand(util.tofilename(location.uri))
   -- the doc converts the range's UTF-16 columns; peek_file logs a failed open
   local ok, doc = pcall(core.open_doc, filename)
   local line1, col1, line2, col2 = util.toselection(location.range, ok and doc or nil)
-  -- just the start of a range over several lines
   if line2 ~= line1 then line2, col2 = line1, col1 end
-  return core.root_view:peek_file(filename, line1, col1, line2, col2)
+  return filename, line1, col1, line2, col2
 end
 
----Whether a result can be shown without hiding this list (in a tab sharing
----the docs' pane, it can't).
----@return boolean
-function SymbolResults:can_peek()
-  return core.root_view:can_peek(self)
-end
+function SymbolResults:get_selected_index() return self.list:get_selected() end
 
----Selects a result (clamped to the list) and shows it, if that can be done
----without hiding the list.
----@param idx integer
-function SymbolResults:select(idx)
-  if #self.list.rows == 0 then return end
-  idx = common.clamp(idx, 1, #self.list.rows)
+function SymbolResults:set_selected_index(idx)
   self.list:set_selected(idx)
   self.list:scroll_to_row(idx)
-  self.shown = nil
-  if self:can_peek() then
-    self.shown = show_location(self.list:get_row_data(idx).location)
-  end
-end
-
----Shows the selected result, or the first, and focuses it.
-function SymbolResults:open_selected()
-  local idx = self.list:get_selected()
-  if not idx then self:select(1) idx = self.list:get_selected() end
-  if not idx then return end
-  local dv = self.shown or show_location(self.list:get_row_data(idx).location)
-  if dv then core.set_active_view(dv) end
 end
 
 ---Results per page, by the first row's height (each is about as tall).
@@ -229,39 +202,8 @@ function SymbolResults:on_mouse_left()
   self.header:on_mouse_left()
 end
 
-local function step(rs, n)
-  local sel = rs.list:get_selected()
-  rs:select(sel and sel + n or (n > 0 and 1 or #rs.list.rows))
-end
-
-command.add(SymbolResults, {
-  ["symbol-results:select-previous"] = function(rs) step(rs, -1) end,
-  ["symbol-results:select-next"] = function(rs) step(rs, 1) end,
-  ["symbol-results:select-previous-page"] = function(rs) step(rs, -rs:get_page_size()) end,
-  ["symbol-results:select-next-page"] = function(rs) step(rs, rs:get_page_size()) end,
-  ["symbol-results:select-first"] = function(rs) rs:select(1) end,
-  ["symbol-results:select-last"] = function(rs) rs:select(#rs.list.rows) end,
-  ["symbol-results:open-selected"] = function(rs) rs:open_selected() end,
-})
-
--- Escape closes the panel; a tab is closed as any other
-command.add(function()
-  return core.active_view:extends(SymbolResults) and core.active_view.header:is_panel(),
-    core.active_view
-end, {
-  ["symbol-results:close"] = function(rs) rs.header:close() end,
-})
-
-keymap.add {
-  ["up"] = "symbol-results:select-previous",
-  ["down"] = "symbol-results:select-next",
-  ["pageup"] = "symbol-results:select-previous-page",
-  ["pagedown"] = "symbol-results:select-next-page",
-  ["home"] = "symbol-results:select-first",
-  ["end"] = "symbol-results:select-last",
-  ["return"] = "symbol-results:open-selected",
-  ["escape"] = "symbol-results:close",
-}
+-- also for ReferenceResults, which extends it
+ResultsList.add_to(SymbolResults, "symbol-results")
 
 
 ---The references to a symbol: a row for each, its location and line of code.
