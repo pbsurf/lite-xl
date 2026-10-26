@@ -7,6 +7,7 @@ local common = require "core.common"
 local View = require "core.view"
 local keymap = require "core.keymap"
 local StatusView = require "core.statusview"
+local PanelHeader = require "core.panelheader"
 
 local terminal_native = require "plugins.terminal.libterminal"
 local search = require "plugins.terminal.search"
@@ -377,6 +378,21 @@ function TerminalView:get_padding()
 end
 
 
+---The height of the header above the rows: the view's `header` (a
+---core.panelheader: the drawers' status line), if it has one. It's in the
+---terminal's colors, as a results panel's header is in its.
+function TerminalView:get_header_height()
+  return self.header and self.header:get_height() or 0
+end
+
+
+---Sets the header's text (and color, progress) before it's drawn: the
+---terminal's title.
+function TerminalView:update_header()
+  self.header.text = self.terminal and self.terminal:name() or "Terminal"
+end
+
+
 -- row height: the font's, plus line_spacing rounded to whole pixels
 function TerminalView:get_line_height()
   local font = self.options.font
@@ -397,7 +413,7 @@ function TerminalView:update()
   if self.size.x > 0 and self.size.y > 0 and ((self.last_font_size and self.last_font_size ~= self.options.font:get_size()) or not self.terminal or self.last_size.x ~= self.size.x or self.last_size.y ~= self.size.y) then
     local padding_x, padding_y = self:get_padding()
     self.columns = math.max(math.floor((self.size.x - padding_x*2) / self.options.font:get_width("W")), 1)
-    self.lines = math.max(math.floor((self.size.y - padding_y*2) / self:get_line_height()), 1)
+    self.lines = math.max(math.floor((self.size.y - self:get_header_height() - padding_y*2) / self:get_line_height()), 1)
     if self.lines > 0 and self.columns > 0 then
       if not self.terminal then
         self:spawn()
@@ -416,7 +432,7 @@ function TerminalView:update()
       self.cursor = "ibeam"
       if self.terminal:mouse_tracking_mode()
          or self.v_scrollbar.hovering.track
-         or self.v_scrollbar.hovering.track then
+         or self.header_hovered then
         self.cursor = "arrow"
       end
       if (core.active_view == self and not self.focused) or (core.active_view ~= self and self.focused) then
@@ -443,7 +459,8 @@ function TerminalView:update()
       -- the scrollbar's percent is the scroll offset from the top over the scrollable
       -- size (as View sets it), so at 0 scrollback it's (size - visible) / size
       local scrollable = self:get_scrollable_size()
-      self.v_scrollbar:set_size(self.position.x, self.position.y, self.size.x, self.size.y, scrollable)
+      local header_h = self:get_header_height()
+      self.v_scrollbar:set_size(self.position.x, self.position.y + header_h, self.size.x, self.size.y - header_h, scrollable)
       self.v_scrollbar:set_percent((total_scrollback - scrollback) * lh / scrollable)
       self.v_scrollbar:update()
     else
@@ -499,7 +516,7 @@ function TerminalView:draw()
     local space_width = self.options.font:get_width(" ")
     local padding_x, padding_y = self:get_padding()
 
-    local y = self.position.y + padding_y
+    local y = self.position.y + self:get_header_height() + padding_y
     local lh = self:get_line_height()
     local text_y = math.floor((lh - self.options.font:get_height()) / 2)
     core.redraw = self:shift_selection_update() or core.redraw
@@ -604,6 +621,16 @@ function TerminalView:draw()
     end
   end
   TerminalView.super.draw_scrollbar(self)
+  if self.header then
+    local options = self.options
+    if self.header.foreground ~= options.text then
+      self.header.foreground = options.text
+      self.header.dim = common.lerp(options.background, options.text, 0.5)
+    end
+    self:update_header()
+    renderer.draw_rect(self.position.x, self.position.y, self.size.x, self:get_header_height(), options.background)
+    self.header:draw(self.position.x, self.position.y, self.size.x)
+  end
 end
 
 -- the search_ui plugin's Highlight All: the matches on screen, as lists of
@@ -646,7 +673,7 @@ function TerminalView:convert_coordinates(x, y)
   local padding_x, padding_y = self:get_padding()
   local col_exact = math.floor((x - self.position.x - padding_x) / w)
   local col_approx = common.round((x - self.position.x - padding_x) / w)
-  local row = math.floor((y - self.position.y - padding_y) / self:get_line_height())
+  local row = math.floor((y - self.position.y - self:get_header_height() - padding_y) / self:get_line_height())
   return math.max(0, col_exact), math.max(0, row), math.max(0, col_approx)
 end
 
@@ -674,6 +701,10 @@ function TerminalView:get_word_boundaries(col, row)
 end
 
 function TerminalView:on_mouse_pressed(button, x, y, clicks)
+  if self.header_hovered then
+    self.header:on_mouse_pressed(button, x, y)
+    return true
+  end
   local result = self.v_scrollbar:on_mouse_pressed(button, x, y, clicks)
   if result then
     if type(result) == "string" then
@@ -711,6 +742,18 @@ function TerminalView:on_mouse_pressed(button, x, y, clicks)
 end
 
 function TerminalView:on_mouse_moved(x, y, dx, dy)
+  -- the header's, unless dragging (a selection, the scrollbar)
+  local in_header = self.header and not (self.pressing or self.word_selecting or self.row_selecting or self.v_scrollbar.dragging)
+    and y >= self.position.y and y < self.position.y + self:get_header_height()
+  if in_header then
+    self.mouse_x, self.mouse_y = x, y
+    self.header_hovered = true
+    self.header:on_mouse_moved(x, y)
+    return true
+  elseif self.header_hovered then
+    self.header_hovered = false
+    self.header:on_mouse_left()
+  end
   local result = self.v_scrollbar:on_mouse_moved(x, y, dx, dy)
   if result then
     if result ~= true then
@@ -721,7 +764,7 @@ function TerminalView:on_mouse_moved(x, y, dx, dy)
   self.mouse_x = x
   self.mouse_y = y
   if self.pressing or self.word_selecting or self.row_selecting then
-    if y < self.position.y then
+    if y < self.position.y + self:get_header_height() then
       self.scrolling_offscreen = 1
     elseif y > self.position.y + self.size.y then
       self.scrolling_offscreen = -1
@@ -779,6 +822,15 @@ function TerminalView:on_mouse_released(button, x, y)
 end
 
 
+function TerminalView:on_mouse_left()
+  TerminalView.super.on_mouse_left(self)
+  if self.header_hovered then
+    self.header_hovered = false
+    self.header:on_mouse_left()
+  end
+end
+
+
 -- inverse of the percent set in update: a scrollbar result to scrollback lines
 function TerminalView:scroll_to_percent(percent)
   local _, total_scrollback = self.terminal:scrollback()
@@ -790,7 +842,7 @@ function TerminalView:get_scrollable_size()
   if not self.terminal then return self.size.y end
   local lh = self:get_line_height()
   local _, total_scrollback = self.terminal:scrollback()
-  return total_scrollback * lh + self.size.y
+  return total_scrollback * lh + self.size.y - self:get_header_height()
 end
 
 
@@ -1051,9 +1103,22 @@ end, {
   end
 })
 
-local function toggle_drawer(open)
+local toggle_drawer
+
+-- the drawer's header closes it, as terminal:toggle-drawer does
+local drawer_buttons = {
+  { icon = "C", tooltip = "Close", action = function()
+    toggle_drawer(false)
+    if core.active_view == core.terminal_view and core.last_active_view then
+      core.set_active_view(core.last_active_view)
+    end
+  end },
+}
+
+function toggle_drawer(open)
   if not core.terminal_view  then
     core.terminal_view = TerminalView(config.plugins.terminal)
+    core.terminal_view.header = PanelHeader(core.terminal_view, drawer_buttons)
   end
   if not core.terminal_view_node then
     core.terminal_view_node = core.root_view:get_active_node_default():split("down", core.terminal_view, { y = true }, true)
