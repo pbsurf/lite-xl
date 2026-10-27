@@ -2,7 +2,7 @@
 --
 -- repl: evaluate Lua sent from outside the editor (client: scripts/lxeval).
 --
--- Requests are files req-<id>.lua in $XDG_RUNTIME_DIR/lite-xl-<pid>/, and each reply
+-- Requests are files req-<id>.lua in $XDG_RUNTIME_DIR/lite-xl-<pid>/ (%TEMP% on Windows), and each reply
 -- is written to resp-<id>.  The directory is watched with a dirmonitor, and a core
 -- thread waits for its changes ("dirchange"), so requests are picked up at once
 -- without polling.
@@ -33,29 +33,39 @@ config.plugins.repl = common.merge({
   always_armed = false,
 }, config.plugins.repl)
 
+-- Requests and replies go through files in a per-process directory under $XDG_RUNTIME_DIR
+-- (Linux) or %TEMP% (Windows).
+local pid = system.get_process_id()
 local runtime_dir = os.getenv("XDG_RUNTIME_DIR")
-local pid
-do
-  local f = io.open("/proc/self/stat")
-  if f then pid = f:read("n"); f:close() end
-end
-if not runtime_dir or not pid then
-  core.warn("repl: needs $XDG_RUNTIME_DIR and /proc; disabled")
+                    or (PLATFORM == "Windows" and (os.getenv("TEMP") or os.getenv("TMP")))
+if not runtime_dir then
+  core.warn("repl: needs $XDG_RUNTIME_DIR (or %%TEMP%% on Windows); disabled")
   return
+end
+runtime_dir = runtime_dir:gsub("\\", "/")
+
+local dir = runtime_dir .. "/lite-xl-" .. pid
+
+-- Whether the lite-xl whose directory this is is gone.  Windows has no /proc: there the
+-- process keeps its "lock" file open, which can't be deleted until the process ends.
+local function is_stale(other_dir, other_pid)
+  if PLATFORM == "Windows" then return os.remove(other_dir .. "/lock") ~= nil end
+  return not system.get_file_info("/proc/" .. other_pid)
 end
 
 -- remove directories left by lite-xl processes that are gone
 for _, name in ipairs(system.list_dir(runtime_dir) or {}) do
   local other = name:match("^lite%-xl%-(%d+)$")
-  if other and not system.get_file_info("/proc/" .. other) then
-    local d = runtime_dir .. "/" .. name
+  local d = runtime_dir .. "/" .. name
+  if other and other ~= tostring(pid) and is_stale(d, other) then
     for _, f in ipairs(system.list_dir(d) or {}) do os.remove(d .. "/" .. f) end
     os.remove(d)
   end
 end
 
-local dir = runtime_dir .. "/lite-xl-" .. pid
 system.mkdir(dir)
+-- kept open (and referenced, so it isn't collected) for as long as this process runs
+package.loaded["plugins.repl.lock"] = io.open(dir .. "/lock", "wb")
 
 
 local function format_scalar(v)

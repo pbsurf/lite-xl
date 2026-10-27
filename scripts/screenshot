@@ -10,6 +10,19 @@
 set -e
 [ $# -ge 2 ] || { sed -n '4p' "$0" | sed 's/^# //'; exit 1; }
 pid=$1 out=$2; shift 2
+# A lite-xl on Windows (seen from WSL): it saves the PNG itself, asked through the repl
+# plugin with renderer.save_screenshot(); no debugger or Python needed.
+if [ ! -d "/proc/$pid" ] && command -v cmd.exe >/dev/null; then
+  tmp=$(wslpath "$(cmd.exe /c 'echo %TEMP%' 2>/dev/null | tr -d '\r')")/lxshot-$$.png
+  args=; [ $# -ge 4 ] && args=", $1, $2, $3, $4${5:+, $5}"
+  reply=$("$(dirname "$0")/lxeval" -p "$pid" "renderer.save_screenshot([[$(wslpath -w "$tmp")]]$args)")
+  case $reply in
+    true) mv -f "$tmp" "$out" ;;
+    *) echo "screenshot: $reply" >&2; exit 1 ;;
+  esac
+  exit 0
+fi
+
 bmp=$(mktemp --suffix=.bmp)
 trap 'rm -f "$bmp"' EXIT
 gdb -p "$pid" -batch \

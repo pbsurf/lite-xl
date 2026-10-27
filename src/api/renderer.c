@@ -1,7 +1,9 @@
+#include <stdlib.h>
 #include <string.h>
 #include "api.h"
 #include "../renderer.h"
 #include "../rencache.h"
+#include "../renwindow.h"
 #include "lua.h"
 
 // a reference index to a table that stores the fonts
@@ -452,9 +454,97 @@ static int f_draw_shadow(lua_State *L) {
   return 0;
 }
 
+// Saves what the window shows as a PNG, for inspecting a running editor (scripts/screenshot).
+// Stored (uncompressed) deflate blocks keep the encoder tiny; the files are large, not slow.
+static uint32_t png_crc(uint32_t crc, const uint8_t *p, size_t n) {
+  static uint32_t table[256];
+  if (!table[1]) {
+    for (uint32_t i = 0; i < 256; i++) {
+      uint32_t c = i;
+      for (int k = 0; k < 8; k++) c = (c & 1) ? 0xEDB88320u ^ (c >> 1) : c >> 1;
+      table[i] = c;
+    }
+  }
+  crc = ~crc;
+  while (n--) crc = table[(crc ^ *p++) & 0xFF] ^ (crc >> 8);
+  return ~crc;
+}
+
+static void png_be32(uint8_t *p, uint32_t v) {
+  p[0] = v >> 24; p[1] = v >> 16; p[2] = v >> 8; p[3] = v;
+}
+
+static bool png_chunk(SDL_IOStream *io, const char *type, const uint8_t *data, size_t len) {
+  uint8_t head[8], tail[4];
+  png_be32(head, (uint32_t) len);
+  memcpy(head + 4, type, 4);
+  png_be32(tail, png_crc(png_crc(0, head + 4, 4), data, len));
+  return SDL_WriteIO(io, head, 8) == 8 && (!len || SDL_WriteIO(io, data, len) == len)
+      && SDL_WriteIO(io, tail, 4) == 4;
+}
+
+// renderer.save_screenshot(path [, x, y, w, h [, zoom]]): the window surface (or the part
+// at x, y of size w, h, in surface pixels), scaled up by an integer zoom with nearest
+// neighbor, as a PNG. Returns true, or nil and an error.
+static int f_save_screenshot(lua_State *L) {
+  const char *path = luaL_checkstring(L, 1);
+  SDL_Surface *src = renwin_get_surface(&window_renderer).surface;
+  if (!src) { lua_pushnil(L); lua_pushstring(L, "no window surface"); return 2; }
+  int x0 = luaL_optinteger(L, 2, 0), y0 = luaL_optinteger(L, 3, 0);
+  int w = luaL_optinteger(L, 4, src->w), h = luaL_optinteger(L, 5, src->h);
+  int zoom = luaL_optinteger(L, 6, 1);
+  if (x0 < 0 || y0 < 0 || x0 >= src->w || y0 >= src->h) return luaL_error(L, "area outside the window");
+  if (w > src->w - x0) w = src->w - x0;
+  if (h > src->h - y0) h = src->h - y0;
+  if (w <= 0 || h <= 0 || zoom < 1 || zoom > 16) return luaL_error(L, "bad area or zoom");
+
+  SDL_Surface *rgb = SDL_ConvertSurface(src, SDL_PIXELFORMAT_RGB24);
+  if (!rgb) { lua_pushnil(L); lua_pushstring(L, SDL_GetError()); return 2; }
+  size_t ow = (size_t) w * zoom, oh = (size_t) h * zoom;
+  size_t stride = ow * 3 + 1, rawlen = stride * oh;
+  size_t nblocks = (rawlen + 65534) / 65535;
+  size_t zlen = 2 + rawlen + nblocks * 5 + 4;
+  uint8_t *raw = malloc(rawlen), *z = malloc(zlen);
+  if (!raw || !z) { free(raw); free(z); SDL_DestroySurface(rgb); return luaL_error(L, "out of memory"); }
+
+  for (size_t y = 0; y < oh; y++) {
+    uint8_t *row = raw + y * stride;
+    const uint8_t *s = (const uint8_t *) rgb->pixels + (y0 + y / zoom) * (size_t) rgb->pitch + x0 * 3;
+    *row++ = 0; // filter: none
+    for (size_t x = 0; x < ow; x++, row += 3) memcpy(row, s + (x / zoom) * 3, 3);
+  }
+  SDL_DestroySurface(rgb);
+
+  uint32_t a = 1, b = 0;
+  for (size_t i = 0; i < rawlen; i++) { a = (a + raw[i]) % 65521; b = (b + a) % 65521; }
+  uint8_t *p = z;
+  *p++ = 0x78; *p++ = 0x01;
+  for (size_t off = 0; off < rawlen; off += 65535) {
+    uint16_t n = rawlen - off < 65535 ? rawlen - off : 65535;
+    *p++ = off + n == rawlen; // final block
+    *p++ = n; *p++ = n >> 8; *p++ = ~n; *p++ = (uint8_t) (~n >> 8);
+    memcpy(p, raw + off, n); p += n;
+  }
+  png_be32(p, (b << 16) | a); p += 4;
+
+  uint8_t ihdr[13];
+  png_be32(ihdr, (uint32_t) ow); png_be32(ihdr + 4, (uint32_t) oh);
+  ihdr[8] = 8; ihdr[9] = 2; ihdr[10] = ihdr[11] = ihdr[12] = 0; // 8-bit RGB
+  static const uint8_t sig[8] = { 0x89, 'P', 'N', 'G', '\r', '\n', 0x1A, '\n' };
+  SDL_IOStream *io = SDL_IOFromFile(path, "wb");
+  bool ok = io && SDL_WriteIO(io, sig, 8) == 8 && png_chunk(io, "IHDR", ihdr, 13)
+         && png_chunk(io, "IDAT", z, (size_t) (p - z)) && png_chunk(io, "IEND", NULL, 0);
+  if (io && !SDL_CloseIO(io)) ok = false;
+  free(raw); free(z);
+  if (!ok) { lua_pushnil(L); lua_pushstring(L, SDL_GetError()); return 2; }
+  lua_pushboolean(L, 1);
+  return 1;
+}
+
 static const luaL_Reg lib[] = {
   { "show_debug",         f_show_debug         },
   { "get_size",           f_get_size           },
+  { "save_screenshot",    f_save_screenshot    },
   { "begin_frame",        f_begin_frame        },
   { "end_frame",          f_end_frame          },
   { "set_clip_rect",      f_set_clip_rect      },

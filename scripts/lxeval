@@ -1,5 +1,6 @@
 #!/bin/bash
-# Evaluate Lua in a running lite-xl (needs the repl plugin, addons/plugins/repl.lua,
+# Evaluate Lua in a running lite-xl (needs the repl plugin, addons/plugins/repl.lua; from WSL it
+# also reaches a lite-xl on Windows, through %TEMP%, without -g;
 # installed in its user dir: `scripts/lpm install --symlink repl`).
 #
 # Usage: lxeval [-g] [-p PID] [-t SECONDS] CODE...
@@ -30,12 +31,29 @@ while getopts gp:t:f:h opt; do
 done
 shift $((OPTIND - 1))
 
-base=${XDG_RUNTIME_DIR:?XDG_RUNTIME_DIR is not set}
+base=${XDG_RUNTIME_DIR:-}
+winmode=
+if [ -z "$base" ]; then
+  # from WSL, talk to a lite-xl running on Windows through its %TEMP%
+  command -v cmd.exe >/dev/null && command -v wslpath >/dev/null ||
+    { echo "lxeval: XDG_RUNTIME_DIR is not set" >&2; exit 2; }
+  base=$(wslpath "$(cmd.exe /c 'echo %TEMP%' 2>/dev/null | tr -d '\r')")
+  winmode=1
+  [ -z "$use_gdb" ] || { echo "lxeval: -g needs gdb on Linux; not available for Windows" >&2; exit 64; }
+fi
 if [ -z "$pid" ]; then
   # newest live lite-xl that has a repl directory
+  if [ -n "$winmode" ]; then
+    live=$(powershell.exe -NoProfile -c '(Get-Process lite-xl -ErrorAction SilentlyContinue).Id' | tr -d '\r')
+    alive() { grep -qx "$1" <<<"$live"; }
+    started() { stat -c %Y "$base/lite-xl-$1/lock" 2>/dev/null || echo 0; }
+  else
+    alive() { [ -d "/proc/$1" ]; }
+    started() { stat -c %Y "/proc/$1"; }
+  fi
   pid=$(for d in "$base"/lite-xl-*; do
           p=${d##*-}
-          [ -d "/proc/$p" ] && echo "$(stat -c %Y "/proc/$p") $p"
+          alive "$p" && echo "$(started "$p") $p"
         done | sort -n | tail -1 | cut -d' ' -f2)
   [ -n "$pid" ] || { echo "lxeval: no running lite-xl with the repl plugin" >&2; exit 2; }
 fi

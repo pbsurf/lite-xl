@@ -131,6 +131,19 @@ function renderer.show_debug(enable) end
 function renderer.get_size() end
 
 ---
+---Save what the window shows as a PNG, for inspecting a running editor.
+---
+---@param path string
+---@param x? integer Left of the area, in surface pixels (default 0).
+---@param y? integer Top of the area (default 0).
+---@param w? integer Width of the area (default: to the right edge).
+---@param h? integer Height of the area (default: to the bottom edge).
+---@param zoom? integer Integer scale-up with nearest neighbor, 1 to 16 (default 1).
+---@return boolean? ok
+---@return string? err
+function renderer.save_screenshot(path, x, y, w, h, zoom) end
+
+---
 ---Tell the rendering system that we want to build a new frame to render.
 function renderer.begin_frame() end
 
