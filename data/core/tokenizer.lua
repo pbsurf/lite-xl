@@ -10,11 +10,23 @@ local anchored = setmetatable({}, { __index = function(t, pattern)
   return t[pattern]
 end })
 
+-- String functions for the line being tokenized: when it's all ASCII, the byte
+-- ones, which give the same results without converting between character and
+-- byte positions. Set by tokenizer.tokenize, which doesn't yield.
+local find, sub, len, byte = string.ufind, string.usub, string.ulen, string.ubyte
+-- Patterns that string.find matches as utf8.find does in ASCII text: without
+-- bytes above 127 (to utf8.find a UTF-8 character is one item, which a
+-- quantifier repeats) and utf8.find's own classes (%t, %z)
+local byte_safe = setmetatable({}, { __index = function(t, pattern)
+  t[pattern] = not pattern:find("[\128-\255]") and not pattern:find("%%[tTzZ]")
+  return t[pattern]
+end })
+
 local function push_token(t, type, text)
   type = type or "normal"
   local prev_type = t[#t-1]
   local prev_text = t[#t]
-  if prev_type and (prev_type == type or (prev_text:ufind("^%s*$") and type ~= "incomplete")) then
+  if prev_type and (prev_type == type or (find(prev_text, "^%s*$") and type ~= "incomplete")) then
     t[#t-1] = type
     t[#t] = prev_text .. text
   else
@@ -47,11 +59,11 @@ local function push_tokens(t, syn, pattern, full_text, s, e, find_results)
       local fin = find_results[i + 1] - 1
       local type = pattern.type[i - 2]
         -- ↑ (i - 2) to convert from [3; n] to [1; n]
-      local text = full_text:usub(start, fin)
+      local text = sub(full_text, start, fin)
       push_token(t, syn.symbols[text] or type, text)
     end
   else
-    local text = full_text:usub(s, e)
+    local text = sub(full_text, s, e)
     push_token(t, syn.symbols[text] or pattern.type, text)
   end
 end
@@ -144,6 +156,13 @@ function tokenizer.tokenize(incoming_syntax, text, state, resume)
 
   if #incoming_syntax.patterns == 0 then
     return { "normal", text }, state
+  end
+
+  local ascii = not text:find("[\128-\255]")
+  if ascii then
+    find, sub, len, byte = string.find, string.sub, string.len, string.byte
+  else
+    find, sub, len, byte = string.ufind, string.usub, string.ulen, string.ubyte
   end
 
   if resume then
@@ -245,13 +264,15 @@ function tokenizer.tokenize(incoming_syntax, text, state, resume)
       local capture
       if p.pattern then
         local pattern = (at_start or p.whole_line[p_idx]) and anchored[code] or code
-        s, e, capture = text:ufind(pattern, next)
-        res = capture ~= nil and { text:ufind(pattern, next) } or nil
+        local find = byte_safe[code] and find or string.ufind
+        s, e, capture = find(text, pattern, next)
+        res = capture ~= nil and { find(text, pattern, next) } or nil
       else
         local flags = (at_start or p.whole_line[p_idx]) and regex.ANCHORED or 0
-        s, e, capture = regex.find(code, text, text:ucharpos(next), flags)
-        res = capture ~= nil and { regex.find(code, text, text:ucharpos(next), flags) } or nil
-        if s then -- set correct utf8 len for regex result
+        local offset = ascii and next or text:ucharpos(next)
+        s, e, capture = regex.find(code, text, offset, flags)
+        res = capture ~= nil and { regex.find(code, text, offset, flags) } or nil
+        if s and not ascii then -- set correct utf8 len for regex result
           local char_pos_1 = s > next and string.ulen(text:sub(1, s)) or next
           local char_pos_2 = string.ulen(text:sub(1, e))
           if res then
@@ -268,7 +289,7 @@ function tokenizer.tokenize(incoming_syntax, text, state, resume)
         -- and if it is not itself escaped.
         local count = 0
         for i = s - 1, 1, -1 do
-          if text:ubyte(i) ~= target[3]:ubyte() then break end
+          if byte(text, i) ~= target[3]:ubyte() then break end
           count = count + 1
         end
         if count % 2 == 0 then
@@ -283,7 +304,7 @@ function tokenizer.tokenize(incoming_syntax, text, state, resume)
     return s, e, res
   end
 
-  local text_len = text:ulen()
+  local text_len = len(text)
   local start_time = system.get_time()
   local starting_i = i
   while i <= text_len do
@@ -292,7 +313,7 @@ function tokenizer.tokenize(incoming_syntax, text, state, resume)
       starting_i = i
       if system.get_time() - start_time > 0.5 / config.fps then
         -- We're out of time
-        push_token(res, "incomplete", string.usub(text, i))
+        push_token(res, "incomplete", sub(text, i))
         return res, string.char(0), {
           res = res,
           i = i,
@@ -316,7 +337,7 @@ function tokenizer.tokenize(incoming_syntax, text, state, resume)
         -- treat the bit after as a token to be normally parsed
         -- (as it's the syntax delimiter).
         if ss and (s == nil or ss < s) then
-          push_token(res, p.type, text:usub(i, ss - 1))
+          push_token(res, p.type, sub(text, i, ss - 1))
           i = ss
           cont = false
         end
@@ -327,14 +348,14 @@ function tokenizer.tokenize(incoming_syntax, text, state, resume)
         if s then
           -- Push remaining token before the end delimiter
           if s > i then
-            push_token(res, p.type, text:usub(i, s - 1))
+            push_token(res, p.type, sub(text, i, s - 1))
           end
           -- Push the end delimiter
           push_tokens(res, current_syntax, p, text, s, e, find_results)
           set_subsyntax_pattern_idx(0)
           i = e + 1
         else
-          push_token(res, p.type, text:usub(i))
+          push_token(res, p.type, sub(text, i))
           break
         end
       end
@@ -345,7 +366,7 @@ function tokenizer.tokenize(incoming_syntax, text, state, resume)
     while subsyntax_info do
       local s, e = find_text(text, subsyntax_info, i, true, true)
       if s then
-        push_token(res, subsyntax_info.type, text:usub(i, e))
+        push_token(res, subsyntax_info.type, sub(text, i, e))
         -- On finding unescaped delimiter, pop it.
         pop_subsyntax()
         i = e + 1
@@ -403,7 +424,7 @@ function tokenizer.tokenize(incoming_syntax, text, state, resume)
 
     -- consume character if we didn't match
     if not matched then
-      push_token(res, "normal", text:usub(i, i))
+      push_token(res, "normal", sub(text, i, i))
       i = i + 1
     end
   end
