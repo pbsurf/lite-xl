@@ -30,6 +30,12 @@ config.undo_merge_timeout = 0.3
 -- is selected; if true, they take the whole line where nothing is selected
 config.copy_whole_line = false
 config.max_undos = 10000
+-- Syntax highlighting tokenizes each line from where the line before ended. When
+-- the view is more than this many lines below what's tokenized, it starts near
+-- the view instead (from the default state, wrong only inside a long comment or
+-- string), so a view far into a large file doesn't take tokenizing everything
+-- above it; false to always tokenize from the top
+config.highlighter_sync_lines = 5000
 -- Tabs scroll once a split has more than max_tabs, or they would get narrower than
 -- min_tab_width (pixels at scale 1); 0 disables either limit
 config.max_tabs = 0
