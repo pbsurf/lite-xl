@@ -19,8 +19,9 @@ local function push_token(t, type, text)
 end
 
 
-local function push_tokens(t, syn, pattern, full_text, find_results)
-  if #find_results > 2 then
+-- s, e: the match; find_results: everything find returned, if it had captures
+local function push_tokens(t, syn, pattern, full_text, s, e, find_results)
+  if find_results and #find_results > 2 then
     -- We do some manipulation with find_results so that it's arranged
     -- like this:
     -- { start, end, i_1, i_2, i_3, …, i_last }
@@ -45,8 +46,7 @@ local function push_tokens(t, syn, pattern, full_text, find_results)
       push_token(t, syn.symbols[text] or type, text)
     end
   else
-    local start, fin = find_results[1], find_results[2]
-    local text = full_text:usub(start, fin)
+    local text = full_text:usub(s, e)
     push_token(t, syn.symbols[text] or pattern.type, text)
   end
 end
@@ -199,8 +199,11 @@ function tokenizer.tokenize(incoming_syntax, text, state, resume)
       retrieve_syntax_state(incoming_syntax, state)
   end
 
+  -- Returns the start and end of the match, and when the pattern has captures,
+  -- a table of everything find returned (only then, to not make garbage for each
+  -- pattern tried at each position)
   local function find_text(text, p, offset, at_start, close)
-    local target, res = p.pattern or p.regex, { 1, offset - 1 }
+    local target = p.pattern or p.regex
     local p_idx = close and 2 or 1
     local code = type(target) == "table" and target[p_idx] or target
     if p.disabled then return end
@@ -227,28 +230,39 @@ function tokenizer.tokenize(incoming_syntax, text, state, resume)
       code = p._regex
     end
 
+    local s, e, res = 1, offset - 1
     repeat
-      local next = res[2] + 1
+      local next = e + 1
       -- If the pattern contained '^', allow matching only the whole line
       if p.whole_line[p_idx] and next > 1 then
         return
       end
-      res = p.pattern and { text:ufind((at_start or p.whole_line[p_idx]) and "^" .. code or code, next) }
-        or { regex.find(code, text, text:ucharpos(next), (at_start or p.whole_line[p_idx]) and regex.ANCHORED or 0) }
-      if p.regex and #res > 0 then -- set correct utf8 len for regex result
-        local char_pos_1 = res[1] > next and string.ulen(text:sub(1, res[1])) or next
-        local char_pos_2 = string.ulen(text:sub(1, res[2]))
-        for i=3,#res do
-          res[i] = string.ulen(text:sub(1, res[i] - 1)) + 1
+      local capture
+      if p.pattern then
+        local pattern = (at_start or p.whole_line[p_idx]) and "^" .. code or code
+        s, e, capture = text:ufind(pattern, next)
+        res = capture ~= nil and { text:ufind(pattern, next) } or nil
+      else
+        local flags = (at_start or p.whole_line[p_idx]) and regex.ANCHORED or 0
+        s, e, capture = regex.find(code, text, text:ucharpos(next), flags)
+        res = capture ~= nil and { regex.find(code, text, text:ucharpos(next), flags) } or nil
+        if s then -- set correct utf8 len for regex result
+          local char_pos_1 = s > next and string.ulen(text:sub(1, s)) or next
+          local char_pos_2 = string.ulen(text:sub(1, e))
+          if res then
+            for i=3,#res do
+              res[i] = string.ulen(text:sub(1, res[i] - 1)) + 1
+            end
+            res[1], res[2] = char_pos_1, char_pos_2
+          end
+          s, e = char_pos_1, char_pos_2
         end
-        res[1] = char_pos_1
-        res[2] = char_pos_2
       end
-      if res[1] and target[3] then
+      if s and target[3] then
         -- Check to see if the escaped character is there,
         -- and if it is not itself escaped.
         local count = 0
-        for i = res[1] - 1, 1, -1 do
+        for i = s - 1, 1, -1 do
           if text:ubyte(i) ~= target[3]:ubyte() then break end
           count = count + 1
         end
@@ -260,8 +274,8 @@ function tokenizer.tokenize(incoming_syntax, text, state, resume)
           return
         end
       end
-    until not res[1] or not close or not target[3]
-    return table.unpack(res)
+    until not s or not close or not target[3]
+    return s, e, res
   end
 
   local text_len = text:ulen()
@@ -284,8 +298,7 @@ function tokenizer.tokenize(incoming_syntax, text, state, resume)
     -- continue trying to match the end pattern of a pair if we have a state set
     if current_pattern_idx > 0 then
       local p = current_syntax.patterns[current_pattern_idx]
-      local find_results = { find_text(text, p, i, false, true) }
-      local s, e = find_results[1], find_results[2]
+      local s, e, find_results = find_text(text, p, i, false, true)
 
       local cont = true
       -- If we're in subsyntax mode, always check to see if we end our syntax
@@ -312,7 +325,7 @@ function tokenizer.tokenize(incoming_syntax, text, state, resume)
             push_token(res, p.type, text:usub(i, s - 1))
           end
           -- Push the end delimiter
-          push_tokens(res, current_syntax, p, text, find_results)
+          push_tokens(res, current_syntax, p, text, s, e, find_results)
           set_subsyntax_pattern_idx(0)
           i = e + 1
         else
@@ -339,10 +352,10 @@ function tokenizer.tokenize(incoming_syntax, text, state, resume)
     -- find matching pattern
     local matched = false
     for n, p in ipairs(current_syntax.patterns) do
-      local find_results = { find_text(text, p, i, true, false) }
-      if find_results[1] then
+      local s, e, find_results = find_text(text, p, i, true, false)
+      if s then
         -- Check for patterns successfully matching nothing
-        if find_results[1] > find_results[2] then
+        if s > e then
           report_bad_pattern(core.warn, current_syntax, n,
               "Pattern successfully matched, but nothing was captured.")
           goto continue
@@ -351,20 +364,21 @@ function tokenizer.tokenize(incoming_syntax, text, state, resume)
         -- Check for patterns with mismatching number of `types`
         local type_is_table = type(p.type) == "table"
         local n_types = type_is_table and #p.type or 1
-        if #find_results == 2 and type_is_table then
+        local n_results = find_results and #find_results or 2
+        if n_results == 2 and type_is_table then
           report_bad_pattern(core.warn, current_syntax, n,
             "Token type is a table, but a string was expected.")
           p.type = p.type[1]
-        elseif #find_results - 1 > n_types then
+        elseif n_results - 1 > n_types then
           report_bad_pattern(core.error, current_syntax, n,
-            "Not enough token types: got %d needed %d.", n_types, #find_results - 1)
-        elseif #find_results - 1 < n_types then
+            "Not enough token types: got %d needed %d.", n_types, n_results - 1)
+        elseif n_results - 1 < n_types then
           report_bad_pattern(core.warn, current_syntax, n,
-            "Too many token types: got %d needed %d.", n_types, #find_results - 1)
+            "Too many token types: got %d needed %d.", n_types, n_results - 1)
         end
 
         -- matched pattern; make and add tokens
-        push_tokens(res, current_syntax, p, text, find_results)
+        push_tokens(res, current_syntax, p, text, s, e, find_results)
         -- update state if this was a start|end pattern pair
         if type(p.pattern or p.regex) == "table" then
           -- If we have a subsyntax, push that onto the subsyntax stack.
@@ -375,7 +389,7 @@ function tokenizer.tokenize(incoming_syntax, text, state, resume)
           end
         end
         -- move cursor past this token
-        i = find_results[2] + 1
+        i = e + 1
         matched = true
         break
         ::continue::
