@@ -4,23 +4,12 @@ local config = require "core.config"
 
 local tokenizer = {}
 local bad_patterns = {}
--- "^" .. pattern for each pattern, made once rather than for each try
-local anchored = setmetatable({}, { __index = function(t, pattern)
-  t[pattern] = "^" .. pattern
-  return t[pattern]
-end })
-
--- String functions for the line being tokenized: when it's all ASCII, the byte
--- ones, which give the same results without converting between character and
--- byte positions. Set by tokenizer.tokenize, which doesn't yield.
+-- Whether the line being tokenized is all ASCII, and the string functions for
+-- it: then the byte ones, which give the same results without converting
+-- between character and byte positions. Set by tokenizer.tokenize, which
+-- doesn't yield.
+local ascii
 local find, sub, len, byte = string.ufind, string.usub, string.ulen, string.ubyte
--- Patterns that string.find matches as utf8.find does in ASCII text: without
--- bytes above 127 (to utf8.find a UTF-8 character is one item, which a
--- quantifier repeats) and utf8.find's own classes (%t, %z)
-local byte_safe = setmetatable({}, { __index = function(t, pattern)
-  t[pattern] = not pattern:find("[\128-\255]") and not pattern:find("%%[tTzZ]")
-  return t[pattern]
-end })
 
 local function push_token(t, type, text)
   type = type or "normal"
@@ -145,6 +134,113 @@ local function report_bad_pattern(log_fn, syntax, pattern_idx, msg, ...)
             syntax.name or "unnamed", ...)
 end
 
+-- What find_text needs of the open (1) or close (2) part of pattern p, worked
+-- out on its first use rather than on each try (again if p.pattern or p.regex
+-- is replaced)
+local function get_matcher(p, p_idx)
+  local target = p.pattern or p.regex
+  local m = p._matchers and p._matchers[p_idx]
+  if m and m.target == target then return m end
+
+  local code = type(target) == "table" and target[p_idx] or target
+  if p.whole_line == nil then p.whole_line = { } end
+  if p.whole_line[p_idx] == nil then
+    -- Match patterns that start with '^'
+    p.whole_line[p_idx] = code:umatch("^%^") and true or false
+    if p.whole_line[p_idx] then
+      -- Remove '^' from the beginning of the pattern
+      if type(target) == "table" then
+        target[p_idx] = code:usub(2)
+        code = target[p_idx]
+      else
+        p.pattern = p.pattern and code:usub(2)
+        p.regex = p.regex and code:usub(2)
+        code = p.pattern or p.regex
+      end
+    end
+  end
+
+  target = p.pattern or p.regex
+  m = { target = target, whole_line = p.whole_line[p_idx] }
+  if p.pattern then
+    m.pattern, m.anchored = code, "^" .. code
+    -- whether string.find matches it as utf8.find does in ASCII text: not with
+    -- bytes above 127 (to utf8.find a UTF-8 character is one item, which a
+    -- quantifier repeats) or utf8.find's own classes (%t, %z)
+    m.byte_safe = not code:find("[\128-\255]") and not code:find("%%[tTzZ]")
+  elseif type(p.regex) ~= "table" then
+    p._regex = p._regex or regex.compile(p.regex)
+    m.regex = p._regex
+  else
+    -- a string would be compiled by each regex.find
+    m.regex = regex.compile(code) or code
+  end
+  if type(target) == "table" and target[3] then
+    m.escape = target[3]:ubyte()
+  end
+  p._matchers = p._matchers or {}
+  p._matchers[p_idx] = m
+  return m
+end
+
+-- Returns the start and end of the match, and when the pattern has captures,
+-- a table of everything find returned (only then, to not make garbage for each
+-- pattern tried at each position)
+local function find_text(text, p, offset, at_start, close)
+  if p.disabled then return end
+  local m = get_matcher(p, close and 2 or 1)
+  local anchor = at_start or m.whole_line
+
+  local s, e, res = 1, offset - 1
+  repeat
+    local next = e + 1
+    -- If the pattern contained '^', allow matching only the whole line
+    if m.whole_line and next > 1 then
+      return
+    end
+    local capture
+    if m.pattern then
+      local pattern = anchor and m.anchored or m.pattern
+      local find = m.byte_safe and find or string.ufind
+      s, e, capture = find(text, pattern, next)
+      res = capture ~= nil and { find(text, pattern, next) } or nil
+    else
+      local flags = anchor and regex.ANCHORED or 0
+      local offset = ascii and next or text:ucharpos(next)
+      s, e, capture = regex.find(m.regex, text, offset, flags)
+      res = capture ~= nil and { regex.find(m.regex, text, offset, flags) } or nil
+      if s and not ascii then -- set correct utf8 len for regex result
+        local char_pos_1 = s > next and string.ulen(text:sub(1, s)) or next
+        local char_pos_2 = string.ulen(text:sub(1, e))
+        if res then
+          for i=3,#res do
+            res[i] = string.ulen(text:sub(1, res[i] - 1)) + 1
+          end
+          res[1], res[2] = char_pos_1, char_pos_2
+        end
+        s, e = char_pos_1, char_pos_2
+      end
+    end
+    if s and m.escape then
+      -- Check to see if the escaped character is there,
+      -- and if it is not itself escaped.
+      local count = 0
+      for i = s - 1, 1, -1 do
+        if byte(text, i) ~= m.escape then break end
+        count = count + 1
+      end
+      if count % 2 == 0 then
+        -- The match is not escaped, so confirm it
+        break
+      elseif not close then
+        -- The *open* match is escaped, so avoid it
+        return
+      end
+    end
+  until not s or not close or not m.escape
+  return s, e, res
+end
+
 ---@param incoming_syntax table
 ---@param text string
 ---@param state string
@@ -158,7 +254,7 @@ function tokenizer.tokenize(incoming_syntax, text, state, resume)
     return { "normal", text }, state
   end
 
-  local ascii = not text:find("[\128-\255]")
+  ascii = not text:find("[\128-\255]")
   if ascii then
     find, sub, len, byte = string.find, string.sub, string.len, string.byte
   else
@@ -221,87 +317,6 @@ function tokenizer.tokenize(incoming_syntax, text, state, resume)
     set_subsyntax_pattern_idx(0)
     current_syntax, subsyntax_info, current_pattern_idx, current_level =
       retrieve_syntax_state(incoming_syntax, state)
-  end
-
-  -- Returns the start and end of the match, and when the pattern has captures,
-  -- a table of everything find returned (only then, to not make garbage for each
-  -- pattern tried at each position)
-  local function find_text(text, p, offset, at_start, close)
-    local target = p.pattern or p.regex
-    local p_idx = close and 2 or 1
-    local code = type(target) == "table" and target[p_idx] or target
-    if p.disabled then return end
-
-    if p.whole_line == nil then p.whole_line = { } end
-    if p.whole_line[p_idx] == nil then
-      -- Match patterns that start with '^'
-      p.whole_line[p_idx] = code:umatch("^%^") and true or false
-      if p.whole_line[p_idx] then
-        -- Remove '^' from the beginning of the pattern
-        if type(target) == "table" then
-          target[p_idx] = code:usub(2)
-          code = target[p_idx]
-        else
-          p.pattern = p.pattern and code:usub(2)
-          p.regex = p.regex and code:usub(2)
-          code = p.pattern or p.regex
-        end
-      end
-    end
-
-    if p.regex and type(p.regex) ~= "table" then
-      p._regex = p._regex or regex.compile(p.regex)
-      code = p._regex
-    end
-
-    local s, e, res = 1, offset - 1
-    repeat
-      local next = e + 1
-      -- If the pattern contained '^', allow matching only the whole line
-      if p.whole_line[p_idx] and next > 1 then
-        return
-      end
-      local capture
-      if p.pattern then
-        local pattern = (at_start or p.whole_line[p_idx]) and anchored[code] or code
-        local find = byte_safe[code] and find or string.ufind
-        s, e, capture = find(text, pattern, next)
-        res = capture ~= nil and { find(text, pattern, next) } or nil
-      else
-        local flags = (at_start or p.whole_line[p_idx]) and regex.ANCHORED or 0
-        local offset = ascii and next or text:ucharpos(next)
-        s, e, capture = regex.find(code, text, offset, flags)
-        res = capture ~= nil and { regex.find(code, text, offset, flags) } or nil
-        if s and not ascii then -- set correct utf8 len for regex result
-          local char_pos_1 = s > next and string.ulen(text:sub(1, s)) or next
-          local char_pos_2 = string.ulen(text:sub(1, e))
-          if res then
-            for i=3,#res do
-              res[i] = string.ulen(text:sub(1, res[i] - 1)) + 1
-            end
-            res[1], res[2] = char_pos_1, char_pos_2
-          end
-          s, e = char_pos_1, char_pos_2
-        end
-      end
-      if s and target[3] then
-        -- Check to see if the escaped character is there,
-        -- and if it is not itself escaped.
-        local count = 0
-        for i = s - 1, 1, -1 do
-          if byte(text, i) ~= target[3]:ubyte() then break end
-          count = count + 1
-        end
-        if count % 2 == 0 then
-          -- The match is not escaped, so confirm it
-          break
-        elseif not close then
-          -- The *open* match is escaped, so avoid it
-          return
-        end
-      end
-    until not s or not close or not target[3]
-    return s, e, res
   end
 
   local text_len = len(text)
