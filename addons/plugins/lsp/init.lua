@@ -2493,6 +2493,16 @@ function RootView:on_mouse_moved(x, y, dx, dy)
   lsp.hover_timer:restart()
 end
 
+-- Losing the window's focus closes the popup (a hover, signature help, a list)
+-- and cancels a hover under way, as menus close.
+local root_view_on_focus_lost = RootView.on_focus_lost
+function RootView:on_focus_lost(...)
+  lsp.hover_timer:stop()
+  lsp.hover_position.triggered = false
+  listbox.hide()
+  return root_view_on_focus_lost(self, ...)
+end
+
 -- Pressing the hover modifier with the mouse resting on a document starts the
 -- hover delay; releasing it hides a popup that needed it (in "important" mode,
 -- the errors and warnings come back after the delay).
