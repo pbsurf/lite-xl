@@ -28,7 +28,9 @@ local RootView = require "core.rootview"
 local TreeView = require "plugins.treeview"
 
 config.plugins.gitfiles = common.merge({
-  -- the git command: a name looked up in PATH, or a path
+  -- the git command: a name looked up in PATH, or a path (on Windows e.g. "git.exe", or
+  -- "C:\\Utils\\Tools\\wslgit.exe" to use git from WSL: paths in its arguments and output
+  -- are translated)
   git = "git",
   -- seconds to wait after a change before asking git again, so that a burst
   -- of changes runs it once
@@ -51,10 +53,6 @@ local function showing_all()
   return show_all[core.project_dir] == true
 end
 
-
-local function shell_quote(s)
-  return "'" .. s:gsub("'", "'\\''") .. "'"
-end
 
 local function status_args(dir_name)
   return { config.plugins.gitfiles.git, "-C", dir_name, "--no-optional-locks", "status", "--porcelain",
@@ -116,14 +114,24 @@ local function parse_status(out, prefix)
   return ignored, untracked, summary, changes
 end
 
--- Blocking: the first scan of a directory needs the answer
+-- Blocking: the first scan of a directory needs the answer.  Not through a shell
+-- (io.popen), whose quoting and redirections differ between systems.
 local function read_command(args)
-  local quoted = {}
-  for i, arg in ipairs(args) do quoted[i] = shell_quote(arg) end
-  local f = io.popen(table.concat(quoted, " ") .. " 2>/dev/null")
-  if not f then return end
-  local out = f:read("a")
-  return f:close() and out or nil
+  local ok, proc = pcall(process.start, args, { stderr = process.REDIRECT_DISCARD })
+  if not ok then return end
+  local out = {}
+  local deadline = system.get_time() + 30
+  while true do
+    local s = proc:read_stdout(65536)
+    if not s then break end
+    if s == "" then
+      if system.get_time() > deadline then proc:kill() return end
+      proc:wait(2) -- nothing yet: for the process to end, or a moment
+    else
+      table.insert(out, s)
+    end
+  end
+  return proc:wait(1000) == 0 and table.concat(out) or nil
 end
 
 -- In a core thread: waits for the output without blocking the editor
