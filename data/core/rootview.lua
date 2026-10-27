@@ -593,6 +593,8 @@ function RootView:on_ime_text_editing(...)
 end
 
 function RootView:on_focus_lost(...)
+  -- an open menu closes, as menus do elsewhere
+  if core.context_menu then core.context_menu:hide() end
   -- We force a redraw so documents can redraw without the cursor.
   core.redraw = true
 end
