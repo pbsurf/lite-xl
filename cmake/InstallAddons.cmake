@@ -8,6 +8,7 @@
 #         -P InstallAddons.cmake
 #
 # With BUILD, the native modules built into <build>/addons (libterminal) are copied in too.
+# On Windows, clangd is installed into <user dir>/tools/clangd too (-DCLANGD=OFF: not).
 #
 # Keep ADDONS' default in step with the --symlink list in the user dir's addons.sh.
 
@@ -147,3 +148,38 @@ foreach(id ${wanted})
     message(FATAL_ERROR "unknown add-on: ${id}")
   endif()
 endforeach()
+
+# ---- tools: clangd for the lsp plugin, into <USERDIR>/tools/clangd (Windows) --------------
+# The release lpm's lsp_c would fetch (lite-xl-lsp-servers), and its hash; init.lua uses it
+# when LITE_CLANGD isn't set.  -DCLANGD=OFF skips it (44 MB download, ~140 MB unpacked).
+set(clangd_version 20.1.8)
+set(clangd_url https://github.com/clangd/clangd/releases/download/${clangd_version}/clangd-windows-${clangd_version}.zip)
+set(clangd_sha 717a0700fc660574647468b3d0b67e46a077d27e4da794d9d0c212add6ba6765)
+if(NOT DEFINED CLANGD)
+  set(CLANGD ${CMAKE_HOST_WIN32})
+endif()
+if(CLANGD)
+  set(dest "${USERDIR}/tools/clangd")
+  set(stamp "${dest}/.sha256")   # the zip it was unpacked from
+  set(have)
+  if(EXISTS "${stamp}")
+    file(READ "${stamp}" have)
+  endif()
+  if(NOT have STREQUAL clangd_sha)
+    set(zip "${USERDIR}/tools/clangd-${clangd_version}.zip")
+    set(tmp "${USERDIR}/tools/clangd.tmp")
+    message(STATUS "downloading clangd ${clangd_version}")
+    file(DOWNLOAD "${clangd_url}" "${zip}" EXPECTED_HASH SHA256=${clangd_sha} STATUS st)
+    list(GET st 0 code)
+    if(NOT code EQUAL 0)
+      file(REMOVE "${zip}")
+      message(FATAL_ERROR "downloading ${clangd_url}: ${st}")
+    endif()
+    file(REMOVE_RECURSE "${tmp}" "${dest}")
+    file(ARCHIVE_EXTRACT INPUT "${zip}" DESTINATION "${tmp}")
+    file(RENAME "${tmp}/clangd_${clangd_version}" "${dest}")
+    file(REMOVE_RECURSE "${tmp}" "${zip}")
+    file(WRITE "${stamp}" "${clangd_sha}")
+  endif()
+  message(STATUS "installed clangd ${clangd_version} (tools/clangd)")
+endif()
