@@ -153,15 +153,17 @@ FetchContent_Declare(freetype
   URL_HASH SHA256=0550350666d427c74daeb85d5ac7bb353acba5f76956395995311a9c6f063289
   ${_exclude})
 
-# ---- SDL3, static, with the features as upstream's scripts/build.sh ---------------------
+# ---- SDL3, static, with the features as upstream's scripts/build.sh, plus the file dialogs
+# (system.open_file_dialog; Windows: comdlg32, Linux: the portal or zenity at runtime) -----
 set(SDL_STATIC ON CACHE BOOL "" FORCE)
 set(SDL_SHARED OFF CACHE BOOL "" FORCE)
 set(SDL_TESTS OFF CACHE BOOL "" FORCE)
 set(SDL_EXAMPLES OFF CACHE BOOL "" FORCE)
 set(SDL_INSTALL OFF CACHE BOOL "" FORCE)
-foreach(opt AUDIO CAMERA JOYSTICK HAPTIC HIDAPI SENSOR POWER DIALOG GPU VULKAN)
+foreach(opt AUDIO CAMERA JOYSTICK HAPTIC HIDAPI SENSOR POWER GPU VULKAN)
   set(SDL_${opt} OFF CACHE BOOL "" FORCE)
 endforeach()
+set(SDL_DIALOG ON CACHE BOOL "" FORCE)
 set(SDL_VENDOR_INFO "lite-xl" CACHE STRING "" FORCE)
 if(UNIX AND NOT APPLE)
   set(SDL_RPATH OFF CACHE BOOL "" FORCE)
