@@ -142,6 +142,15 @@ static SDL_HitTestResult hit_test_area(SDL_Window *window, const SDL_Point *pt) 
 static SDL_Point last_hit_point;
 static SDL_HitTestResult last_hit_area;
 
+/* Windows tests on every mouse move, and SDL posts SDL_EVENT_WINDOW_HIT_TEST for
+** each draggable result, not just for a press (X11 tests on motion, before the
+** press, and posts the event for the press only). So there a press is a draggable
+** test with the left button down, kept until its event comes. */
+#ifdef _WIN32
+static bool hit_press_pending;
+static SDL_Point hit_press_point;
+#endif
+
 static SDL_HitTestResult SDLCALL hit_test(SDL_Window *window, const SDL_Point *pt, void *data) {
   SDL_HitTestResult rc = hit_test_area(window, pt);
   last_hit_point = *pt;
@@ -150,6 +159,13 @@ static SDL_HitTestResult SDLCALL hit_test(SDL_Window *window, const SDL_Point *p
     title_press.pass_next = true;
     return SDL_HITTEST_NORMAL;
   }
+#ifdef _WIN32
+  float mx, my;
+  if (rc == SDL_HITTEST_DRAGGABLE && (SDL_GetGlobalMouseState(&mx, &my) & SDL_BUTTON_LMASK)) {
+    hit_press_pending = true;
+    hit_press_point = *pt;
+  }
+#endif
   return rc;
 }
 
@@ -390,20 +406,27 @@ top:
         ** pass the press on */
         /* X11 reports a press twice, from the master and the slave device,
         ** each starting a move */
+#ifdef _WIN32
+        if (!hit_press_pending) goto top; /* a move, not a press */
+        hit_press_pending = false;
+        const SDL_Point press_point = hit_press_point;
+#else
         static Uint64 last_timestamp;
         const bool duplicate = e.window.timestamp - last_timestamp < SDL_MS_TO_NS(20);
         last_timestamp = e.window.timestamp;
         if (duplicate || last_hit_area != SDL_HITTEST_DRAGGABLE) goto top;
+        const SDL_Point press_point = last_hit_point;
+#endif
         int wx, wy;
         SDL_GetWindowPosition(window_renderer.window, &wx, &wy);
-        const float gx = wx + last_hit_point.x, gy = wy + last_hit_point.y;
+        const float gx = wx + press_point.x, gy = wy + press_point.y;
         title_press.clicks = title_double_click_at(gx, gy) ? title_press.clicks + 1 : 1;
         title_press.ticks = SDL_GetTicks();
         title_press.x = gx;
         title_press.y = gy;
         lua_pushstring(L, "hittest");
-        lua_pushinteger(L, last_hit_point.x * window_renderer.scale_x);
-        lua_pushinteger(L, last_hit_point.y * window_renderer.scale_y);
+        lua_pushinteger(L, press_point.x * window_renderer.scale_x);
+        lua_pushinteger(L, press_point.y * window_renderer.scale_y);
         lua_pushinteger(L, title_press.clicks);
         return 4;
       }
