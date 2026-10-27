@@ -1770,10 +1770,8 @@ function lsp.request_references(doc, line, col)
               if index % 100 == 0 then
                 coroutine.yield()
                 if rr.generation ~= generation then return end
-                rr.list:resize_to_parent()
               end
             end
-            rr.list:resize_to_parent()
           end
           rr:stop_searching()
         end

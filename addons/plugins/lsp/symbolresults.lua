@@ -7,7 +7,8 @@
 -- kept, to step through with the keyboard (core.resultslist), the symbol's
 -- name selected in the file shown. The tab's title is the search's status.
 --
--- ReferenceResults, the same for the references to a symbol, is a subclass.
+-- ReferenceResults, the same for the references to a symbol, is a
+-- core.resultsview.
 --
 
 local core = require "core"
@@ -15,6 +16,7 @@ local common = require "core.common"
 local style = require "core.style"
 local panel = require "core.panel"
 local ResultsList = require "core.resultslist"
+local ResultsView = require "core.resultsview"
 local Widget = require "libraries.widget"
 local ListBox = require "libraries.widget.listbox"
 local Server = require "plugins.lsp.server"
@@ -69,7 +71,7 @@ function SymbolResults:add_columns()
   self.list:add_column("Location")
 end
 
----Shows the class's current view in the bottom panel (a subclass has its own),
+---Shows the class's current view in the bottom panel (each class has its own),
 ---or a new one, cleared for a new search, and focuses it. Called on the class:
 ---`SymbolResults:open(symbol, server)`.
 ---@param symbol string
@@ -194,34 +196,80 @@ function SymbolResults:update()
   )
 end
 
--- also for ReferenceResults, which extends it
 ResultsList.add_to(SymbolResults, "symbol-results")
 
 
----The references to a symbol: a row for each, its location and line of code.
----@class lsp.referenceresults : lsp.symbolresults
-local ReferenceResults = SymbolResults:extend()
+---The references to a symbol, a row for each (core.resultsview): its location
+---and line of code, the reference highlighted. The same tab and status as
+---SymbolResults, which lends it its methods.
+---@class lsp.referenceresults : core.resultsview
+local ReferenceResults = ResultsView:extend()
 ReferenceResults.results_label = "References"
+
+function ReferenceResults:__tostring() return "ReferenceResults" end
 
 function ReferenceResults:new()
   ReferenceResults.super.new(self)
-  self.name = "References"
+  self.symbol = ""
+  self.searching = false
+  self.generation = 0
 end
 
-function ReferenceResults:add_columns()
-  self.list:add_column("Location")
-  self.list:add_column("Code")
+ReferenceResults.open = SymbolResults.open
+ReferenceResults.get_progress = SymbolResults.get_progress
+ReferenceResults.get_tab_tooltip_info = SymbolResults.get_tab_tooltip_info
+ReferenceResults.is_transient = SymbolResults.is_transient
+
+---@param symbol string
+---@param server? string
+function ReferenceResults:reset(symbol, server)
+  self:clear()
+  self.symbol = symbol
+  self.server = server
+  self.started, self.finished = system.get_time(), nil
+  self.searching = true
+  self.generation = self.generation + 1
+  self.file, self.file_lines = nil, nil
 end
 
+function ReferenceResults:get_name()
+  if self.searching and #self.results == 0 then
+    return string.format("%s \"%s\"", self.results_label, self.symbol)
+  end
+  return string.format("%s \"%s\": %d", self.results_label, self.symbol, #self.results)
+end
 
+---Adds a reference. Those in one file are best added together: its lines are
+---kept until a reference in another file.
 ---@param location table An LSP Location
 function ReferenceResults:add_result(location)
-  local preview, position = require("plugins.lsp").get_location_preview(location)
-  self.list:add_row({
-    style.text, position,
-    ListBox.COLEND,
-    { container = style, name = "code_font" }, style.accent, preview
-  }, { location = location })
+  local filename = common.home_expand(util.tofilename(location.uri))
+  if self.file ~= filename then
+    self.file, self.file_lines = filename, {}
+    local fp = io.open(filename, "rb")
+    if fp then
+      for line in fp:lines() do table.insert(self.file_lines, line) end
+      fp:close()
+    end
+  end
+  local range = location.range
+  local line = range.start.line + 1
+  local text = (self.file_lines[line] or ""):gsub("\r$", "")
+  -- the range's UTF-16 columns, in a doc of that line (with its newline, for
+  -- the column after its end); one over several lines is its start
+  local doc = { lines = { [line] = text .. "\n" } }
+  local col1 = util.doc_utf16_to_utf8(doc, line, range.start.character + 1)
+  local col2 = col1
+  if range["end"].line == range.start.line then
+    col2 = util.doc_utf16_to_utf8(doc, line, range["end"].character + 1)
+  end
+  table.insert(self.results, ResultsView.make_result(filename, text, line, col1, col2))
+  core.redraw = true
+end
+
+function ReferenceResults:stop_searching()
+  SymbolResults.stop_searching(self)
+  self.file, self.file_lines = nil, nil
 end
 
 SymbolResults.ReferenceResults = ReferenceResults
