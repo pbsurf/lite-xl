@@ -24,9 +24,12 @@ datadir=$prefix/share/lite-xl
 ninja -C "$build" >&2
 
 mkdir -p "$prefix/bin" "$datadir/core"
-# copy then rename so this works while another instance is running
-cp "$build/src/lite-xl" "$prefix/bin/lite-xl.new"
-mv -f "$prefix/bin/lite-xl.new" "$prefix/bin/lite-xl"
+# copy then rename so this works while another instance is running; only when
+# changed, so running instances keep a binary on disk (perf, gdb need it)
+if ! cmp -s "$build/src/lite-xl" "$prefix/bin/lite-xl"; then
+  cp "$build/src/lite-xl" "$prefix/bin/lite-xl.new"
+  mv -f "$prefix/bin/lite-xl.new" "$prefix/bin/lite-xl"
+fi
 
 find "$datadir" -maxdepth 1 -type l ! -exec test -e {} \; -delete  # drop stale links
 for d in plugins colors fonts; do ln -sfn "$src/data/$d" "$datadir/$d"; done
