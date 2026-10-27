@@ -4,6 +4,7 @@ local command = require "core.command"
 local keymap = require "core.keymap"
 local ContextMenu = require "core.contextmenu"
 local RootView = require "core.rootview"
+local DocView = require "core.docview"
 
 local menu = ContextMenu()
 local on_view_mouse_pressed = RootView.on_view_mouse_pressed
@@ -16,7 +17,35 @@ function RootView:on_mouse_moved(...)
   on_mouse_moved(self, ...)
 end
 
+-- Whether line, col is within one of doc's (non-empty) selections.
+local function in_selection(doc, line, col)
+  for _, l1, c1, l2, c2 in doc:get_selections(true) do
+    if (l1 ~= l2 or c1 ~= c2)
+      and (line > l1 or line == l1 and col >= c1)
+      and (line < l2 or line == l2 and col <= c2) then
+      return true
+    end
+  end
+  return false
+end
+
+-- A right-click on a doc's text moves the caret there first, so the menu's items
+-- (and their predicates) act on what was clicked; a click within the selection
+-- keeps it, for Cut, Copy and the like.
+local function set_caret_at(x, y)
+  local dv = core.active_view
+  if not dv:extends(DocView) or dv:scrollbar_hovering()
+    or x < dv.position.x + dv:get_gutter_click_width() then
+    return
+  end
+  local line, col = dv:resolve_screen_position(x, y)
+  if not in_selection(dv.doc, line, col) then
+    dv.doc:set_selection(line, col)
+  end
+end
+
 function RootView.on_view_mouse_pressed(button, x, y, clicks)
+  if button == "right" and not menu.show_context_menu then set_caret_at(x, y) end
   -- We give the priority to the menu to process mouse pressed events.
   local handled = menu:on_mouse_pressed(button, x, y, clicks)
   return handled or on_view_mouse_pressed(button, x, y, clicks)
