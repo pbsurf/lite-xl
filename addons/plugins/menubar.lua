@@ -887,10 +887,11 @@ function keymap.on_key_released(k, ...)
 end
 
 -- Alt+Tab: the window loses focus with Alt down (where Alt's release comes
--- after)
+-- after). The bar and its menus close, as other menus do.
 local root_on_focus_lost = RootView.on_focus_lost
 function RootView:on_focus_lost(...)
   alt_used = true
+  if state.active then menubar.hide() end
   return root_on_focus_lost(self, ...)
 end
 
