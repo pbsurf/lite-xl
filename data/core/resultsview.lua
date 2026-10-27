@@ -1,13 +1,15 @@
 local core = require "core"
 local common = require "core.common"
 local style = require "core.style"
+local syntax = require "core.syntax"
+local tokenizer = require "core.tokenizer"
 local View = require "core.view"
 local ResultsList = require "core.resultslist"
 
 ---A list of places in files, as project search's results and lsp's
 ---references, grouped by file: a row with the file's path and its number of
----results, then a row for each, its line number and code with the match (the
----searched text, the reference) highlighted. Stepped through with the
+---results, then a row for each, its line number and code, syntax highlighted,
+---with the match (the searched text, the reference) marked. Stepped through with the
 ---keyboard and peeked as core.resultslist describes; subclasses add to
 ---`self.results` (made with ResultsView.make_result; a file's together) and
 ---name the view.
@@ -27,6 +29,11 @@ ResultsView.context = "session"
 ---@field text string The line's code drawn: an excerpt, without indentation
 ---@field match1? integer The match's start in `text`
 ---@field match2? integer The position after the match in `text`
+---@field code_start integer Where the line's code starts in `text` (after "...")
+---@field code_len integer Its length (without a trailing "...")
+---@field code_col integer Its column in the line
+---@field tokens? table Its syntax tokens, once drawn
+---@field tokens_exact? boolean If from its doc, tokenized from the top
 
 function ResultsView:new()
   ResultsView.super.new(self)
@@ -82,7 +89,8 @@ function ResultsView.make_result(file, line_text, line, col, col2)
   end
   return {
     file = file, line = line, col = col, col2 = col2,
-    text = text, match1 = match1, match2 = match2
+    text = text, match1 = match1, match2 = match2,
+    code_start = #prefix + 1, code_len = stop - start + 1, code_col = start
   }
 end
 
@@ -223,6 +231,61 @@ function ResultsView:draw_header(header, x, y, h)
 end
 
 
+---The tokens of columns col to col + len - 1 of a doc's line.
+local function doc_tokens(doc, line, col, len)
+  local res, pos = {}, 1
+  for _, type, text in doc.highlighter:each_token(line) do
+    local s, e = math.max(col, pos), math.min(col + len, pos + #text)
+    if s < e then
+      table.insert(res, type)
+      table.insert(res, text:sub(s - pos + 1, e - pos))
+    end
+    pos = pos + #text
+  end
+  return res
+end
+
+
+-- Whether a doc's line is tokenized from what's above it (core.doc.highlighter):
+-- from the top, or in a sync region.
+local function is_highlighted(highlighter, line)
+  if line < highlighter.first_invalid_line then return true end
+  for _, sync in ipairs(highlighter.syncs) do
+    if sync.line and sync.stop and line >= sync.line and line < sync.stop then
+      return true
+    end
+  end
+  return false
+end
+
+
+---Sets the syntax tokens of a result's code: those of its line in the file's
+---doc if it's open, the line unchanged and highlighted (else asked for, to be
+---taken when drawn again); until then of the code alone, as if the line didn't
+---start in a comment or string spanning lines.
+---@param item core.resultsview.result
+local function update_tokens(item)
+  if item.tokens_exact then return end
+  local code = item.text:sub(item.code_start, item.code_start + item.code_len - 1)
+  local abs = core.project_absolute_path(item.file)
+  for _, doc in ipairs(core.docs) do
+    if doc.abs_filename == abs then
+      local text = doc.lines[item.line]
+      if text and text:sub(item.code_col, item.code_col + item.code_len - 1) == code then
+        if is_highlighted(doc.highlighter, item.line) then
+          item.tokens = doc_tokens(doc, item.line, item.code_col, item.code_len)
+          item.tokens_exact = true
+          return
+        end
+        doc.highlighter:get_line(item.line)
+      end
+      break
+    end
+  end
+  item.tokens = item.tokens or (tokenizer.tokenize(syntax.get(item.file), code))
+end
+
+
 ---Draws a result's line number and code from x, in a row at y of height h.
 ---@param item core.resultsview.result
 ---@param selected boolean
@@ -230,16 +293,52 @@ end
 function ResultsView:draw_result(item, x, y, h, selected)
   local font = style.code_font
   -- line numbers right-aligned; dim is hard to read on the selection's color
+  local dim = selected and style.text or style.dim
   local w = font:get_width(tostring(self.max_line))
-  common.draw_text(font, selected and style.text or style.dim, tostring(item.line), "right", x, y, w, h)
+  common.draw_text(font, dim, tostring(item.line), "right", x, y, w, h)
   x = x + w + style.padding.x
-  local text = item.text
-  if item.match1 then
-    x = common.draw_text(font, style.text, text:sub(1, item.match1 - 1), "left", x, y, 0, h)
-    x = common.draw_text(font, style.accent, text:sub(item.match1, item.match2 - 1), "left", x, y, 0, h)
-    text = text:sub(item.match2)
+
+  -- the pieces drawn: "..." around the code's tokens, split where the match
+  -- starts and ends; with the match's span
+  update_tokens(item)
+  local pieces, pos = {}, 1
+  local function add(type, text)
+    local cuts = { pos + #text }
+    if item.match1 then cuts = { item.match1, item.match2, pos + #text } end
+    for _, cut in ipairs(cuts) do
+      if cut > pos and cut <= pos + #text then
+        local n = cut - pos
+        table.insert(pieces, { type = type, text = text:sub(1, n), pos = pos })
+        text, pos = text:sub(n + 1), cut
+      end
+    end
   end
-  return common.draw_text(font, style.text, text, "left", x, y, 0, h)
+  add(nil, item.text:sub(1, item.code_start - 1))
+  for _, type, text in tokenizer.each_token(item.tokens) do add(type, text) end
+  add(nil, item.text:sub(item.code_start + item.code_len))
+
+  local mx1, mx2
+  for _, piece in ipairs(pieces) do
+    piece.font = style.syntax_fonts[piece.type] or font
+    piece.x = x
+    if piece.pos == item.match1 then mx1 = x end
+    x = x + piece.font:get_width(piece.text)
+    if piece.pos + #piece.text == item.match2 then mx2 = x end
+  end
+  if mx1 and mx2 then
+    local color = style.search_match
+    if not color then
+      local a = style.accent
+      color = { a[1], a[2], a[3], 80 }
+    end
+    local th = font:get_height()
+    renderer.draw_rect(mx1, y + (h - th) / 2, mx2 - mx1, th, color)
+  end
+  for _, piece in ipairs(pieces) do
+    local color = piece.type and (style.syntax[piece.type] or style.syntax.normal) or dim
+    common.draw_text(piece.font, color, piece.text, "left", piece.x, y, 0, h)
+  end
+  return x
 end
 
 

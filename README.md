@@ -108,7 +108,9 @@ upstream's `release/v2.1.x`. Additions to the editor:
   menu items built when the menu opens (`ContextMenu:register` with a function), and
   results lists' keyboard stepping and peeking for any view (`core.resultslist`,
   used by project search, lsp's Symbols Search and References, and build's
-  Problems), threads that wait for events rather than time (`core.wait_for`, `core.wake`,
+  Problems), a view of places in files (`core.resultsview`: project search's
+  results and lsp's references, grouped by file, the code syntax highlighted
+  and the match marked), threads that wait for events rather than time (`core.wait_for`, `core.wake`,
   `core.watch_readable` with `process:watch_source`).
 
 ### Add-ons
