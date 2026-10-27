@@ -697,6 +697,13 @@ static int f_show_fatal_error(lua_State *L) {
   const char *title = luaL_checkstring(L, 1);
   const char *msg = luaL_checkstring(L, 2);
 
+  // LITE_XL_NO_DIALOG: for headless testing and scripts, which can't dismiss a dialog
+  const char *no_dialog = getenv("LITE_XL_NO_DIALOG");
+  if (no_dialog && *no_dialog && strcmp(no_dialog, "0") != 0) {
+    fprintf(stderr, "%s: %s\n", title, msg);
+    return 0;
+  }
+
 #ifdef _WIN32
   MessageBox(0, msg, title, MB_OK | MB_ICONERROR);
 #else
