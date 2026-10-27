@@ -4,7 +4,8 @@ local command = require "core.command"
 local keymap = require "core.keymap"
 
 ---Behaviour shared by views listing results that are places in files, as
----project search's results and lsp's Symbols Search do. Selecting a result
+---core.resultsview (project search's results, lsp's references) and lsp's
+---Symbols Search do. Selecting a result
 ---(arrow keys, page up/down, home/end, a click) shows it in the pane used
 ---last (RootView:peek_file), while the focus stays in the list; Enter or a
 ---double click moves the focus there. Where showing it would hide the list (a
