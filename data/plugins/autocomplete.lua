@@ -598,6 +598,7 @@ local on_text_input = RootView.on_text_input
 local on_text_remove = Doc.remove
 local update = RootView.update
 local draw = RootView.draw
+local on_focus_lost = RootView.on_focus_lost
 
 RootView.on_text_input = function(...)
   on_text_input(...)
@@ -644,6 +645,12 @@ RootView.draw = function(...)
     -- draw suggestions box after everything else
     core.root_view:defer_draw(draw_suggestions_box, av)
   end
+end
+
+-- the suggestions close when the window loses focus, as menus do
+RootView.on_focus_lost = function(...)
+  reset_suggestions()
+  return on_focus_lost(...)
 end
 
 --
