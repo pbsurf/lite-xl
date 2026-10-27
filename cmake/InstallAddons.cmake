@@ -4,7 +4,10 @@
 # checked against their hashes.  Run again after changing the list or the add-ons (a copy
 # doesn't follow the checkout).
 #
-#   cmake -DSRC=<lite-xl checkout> -DUSERDIR=<user dir> [-DADDONS="id;id;..."] -P InstallAddons.cmake
+#   cmake -DSRC=<lite-xl checkout> -DUSERDIR=<user dir> [-DBUILD=<build dir>] [-DADDONS="id;id;..."] \
+#         -P InstallAddons.cmake
+#
+# With BUILD, the native modules built into <build>/addons (libterminal) are copied in too.
 #
 # Keep ADDONS' default in step with the --symlink list in the user dir's addons.sh.
 
@@ -101,6 +104,17 @@ foreach(id ${wanted})
     file(REMOVE_RECURSE "${dest}")   # also drops files an update removed, or a hard link
     file(COPY "${from}" DESTINATION "${USERDIR}/${kind}")
     message(STATUS "installed ${id} (${kind}/${name})")
+    # the add-on's native module, built into <build>/addons, goes into its directory
+    if(BUILD AND id STREQUAL "terminal")
+      file(GLOB modules "${BUILD}/addons/libterminal.*-*.*")
+      list(FILTER modules EXCLUDE REGEX "\\.(pdb|ilk|exp|lib)$")
+      if(modules)
+        file(COPY ${modules} DESTINATION "${dest}")
+        message(STATUS "  with its native module")
+      else()
+        message(WARNING "terminal: no libterminal in ${BUILD}/addons; build the libterminal target")
+      endif()
+    endif()
   elseif(id IN_LIST upstream_ids)
     foreach(entry ${UPSTREAM})
       string(REPLACE "|" ";" f "${entry}")

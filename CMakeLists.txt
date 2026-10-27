@@ -272,6 +272,37 @@ endif()
 #===============================================================================
 configure_file(data/core/start.lua "${CMAKE_CURRENT_BINARY_DIR}/start.lua" @ONLY)
 
+#===============================================================================
+# Native parts of our add-ons, built into <build>/addons (not installed): InstallAddons.cmake
+# (and scripts/run.sh) put each into the installed plugin, where package.cpath finds it as
+# <module>.<arch_tuple>.<so|dll|lib>.  They don't link Lua: lite_xl_plugin_api.h finds it
+# in the executable.  hunspell (spellcheck) is not ported.
+#===============================================================================
+if(WIN32)
+  set(module_ext dll)
+elseif(APPLE)
+  set(module_ext lib)
+else()
+  set(module_ext so)
+endif()
+
+add_library(libterminal MODULE addons/plugins/terminal/libterminal.c)
+set_target_properties(libterminal PROPERTIES
+  PREFIX ""
+  OUTPUT_NAME libterminal
+  SUFFIX ".${arch_tuple}.${module_ext}"
+  RUNTIME_OUTPUT_DIRECTORY "${CMAKE_CURRENT_BINARY_DIR}/addons"
+  LIBRARY_OUTPUT_DIRECTORY "${CMAKE_CURRENT_BINARY_DIR}/addons")
+target_include_directories(libterminal PRIVATE resources/include)
+if(MSVC)
+  # the entry point isn't marked for export; Windows has no forkpty, the plugin uses ConPTY
+  target_link_options(libterminal PRIVATE /EXPORT:luaopen_lite_xl_libterminal /DEBUG)
+  target_compile_definitions(libterminal PRIVATE _CRT_SECURE_NO_WARNINGS)
+  target_compile_options(libterminal PRIVATE /utf-8)
+elseif(CMAKE_SYSTEM_NAME STREQUAL "Linux")
+  target_link_libraries(libterminal PRIVATE util)
+endif()
+
 # Run in place from the build directory: build/data next to the executable (and its PDB)
 add_custom_command(TARGET lite-xl POST_BUILD
   COMMAND "${CMAKE_COMMAND}" -DSRC=${CMAKE_CURRENT_SOURCE_DIR} -DBIN=${CMAKE_CURRENT_BINARY_DIR}

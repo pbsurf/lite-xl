@@ -310,6 +310,8 @@ function TerminalView:new(options)
     for k,v in pairs(common.merge(terminal_native.getenv(), self.options.environment)) do
       if v ~= false then table.insert(t, k .. "=" .. v) end
     end
+    -- CreateProcess wants the block sorted by name, ignoring case ("=C:=..." first)
+    table.sort(t, function(a, b) return a:match("^[^=]*"):upper() < b:match("^[^=]*"):upper() end)
     self.options.environment = table.concat(t, "\0") .. "\0\0"
   end
   self.cursor = "ibeam"

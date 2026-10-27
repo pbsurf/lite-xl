@@ -541,9 +541,9 @@ static int terminal_escape_sequence(terminal_t* terminal, terminal_escape_type_e
       } break;
       case 'c': {
         if (seq[2] == '>') // secondary: as xterm 277, the first with SGR mouse (1006)
-          terminal_input(terminal, "\e[>0;277;0c", 11);
+          terminal_input(terminal, "\033[>0;277;0c", 11);
         else if (seq[2] != '=')
-          terminal_input(terminal, "\e[?1;2c", 7);
+          terminal_input(terminal, "\033[?1;2c", 7);
       } break;
       case 'd': view->cursor_y = min(max(max(parse_number(&seq[2], 1), 1) - 1, 0), terminal->lines - 1); break;
       case 'h': {
@@ -931,7 +931,7 @@ static int terminal_output(terminal_t* terminal, const char* str, int len) {
     } else {
       int end = (view->scrolling_region_end == -1 ? terminal->lines : view->scrolling_region_end);
       offset += utf8_to_codepoint(&str[offset], &codepoint);
-      if (codepoint != '\e')
+      if (codepoint != '\033')
         view->last_graphical_character = 0;
       switch (codepoint) {
         case 0x00:
@@ -1477,23 +1477,24 @@ static int f_terminal_lines(lua_State* L) {
 
 
 #if _WIN32
+// Converts the utf8len bytes at str, embedded NULs included (an environment block is a list
+// of NUL-terminated strings), to UTF-16 and pushes them as a Lua string, with a UTF-16 NUL
+// after them: a Lua string has only a one-byte NUL.  Returns the pushed string, or NULL.
 static LPCWSTR lua_tolutf16(lua_State* L, const char* str, size_t utf8len) {
-  if (str && str[0] == 0)
-    return L"";
-  int len = MultiByteToWideChar(CP_UTF8, 0, str, utf8len, NULL, 0);
-  if (len > 0) {
-    LPWSTR output = (LPWSTR) malloc(sizeof(WCHAR) * len);
-    if (output) {
-      len = MultiByteToWideChar(CP_UTF8, 0, str, -1, output, len);
-      if (len > 0) {
-        lua_pushlstring(L, (char*)output, len * 2);
-        free(output);
-        return (LPCWSTR)lua_tostring(L, -1);
-      }
-      free(output);
-    }
+  int len = utf8len ? MultiByteToWideChar(CP_UTF8, 0, str, (int)utf8len, NULL, 0) : 0;
+  if (len < 0 || (len == 0 && utf8len))
+    return NULL;
+  LPWSTR output = (LPWSTR) malloc(sizeof(WCHAR) * (len + 1));
+  if (!output)
+    return NULL;
+  if (len && !MultiByteToWideChar(CP_UTF8, 0, str, (int)utf8len, output, len)) {
+    free(output);
+    return NULL;
   }
-  return NULL;
+  output[len] = 0;
+  lua_pushlstring(L, (char*)output, sizeof(WCHAR) * (len + 1));
+  free(output);
+  return (LPCWSTR)lua_tostring(L, -1);
 }
 
 static const char* lua_toutf8(lua_State* L, LPCWSTR str) {
