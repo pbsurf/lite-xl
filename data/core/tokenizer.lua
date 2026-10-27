@@ -4,6 +4,11 @@ local config = require "core.config"
 
 local tokenizer = {}
 local bad_patterns = {}
+-- "^" .. pattern for each pattern, made once rather than for each try
+local anchored = setmetatable({}, { __index = function(t, pattern)
+  t[pattern] = "^" .. pattern
+  return t[pattern]
+end })
 
 local function push_token(t, type, text)
   type = type or "normal"
@@ -239,7 +244,7 @@ function tokenizer.tokenize(incoming_syntax, text, state, resume)
       end
       local capture
       if p.pattern then
-        local pattern = (at_start or p.whole_line[p_idx]) and "^" .. code or code
+        local pattern = (at_start or p.whole_line[p_idx]) and anchored[code] or code
         s, e, capture = text:ufind(pattern, next)
         res = capture ~= nil and { text:ufind(pattern, next) } or nil
       else
