@@ -17,10 +17,10 @@ end
 
 -- init incremental syntax highlighting
 function Highlighter:start()
-  if self.running then return end
+  if self.running or self.stopped then return end
   self.running = true
   core.add_thread(function()
-    while self.first_invalid_line <= self.max_wanted_line do
+    while not self.stopped and self.first_invalid_line <= self.max_wanted_line do
       local max = math.min(self.first_invalid_line + 40, self.max_wanted_line)
       local retokenized_from
       for i = self.first_invalid_line, max do
@@ -54,6 +54,12 @@ function Highlighter:start()
     self.max_wanted_line = 0
     self.running = false
   end, self)
+end
+
+-- stop tokenizing for good: the doc was closed (else the thread would go on
+-- tokenizing up to the line last viewed, in a large file for minutes)
+function Highlighter:stop()
+  self.stopped = true
 end
 
 local function set_max_wanted_lines(self, amount)

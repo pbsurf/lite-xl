@@ -743,6 +743,7 @@ end
 
 -- For plugins to get notified when a document is closed
 function Doc:on_close()
+  self.highlighter:stop()
   core.log_quiet("Closed doc \"%s\"", self:get_name())
 end
 
