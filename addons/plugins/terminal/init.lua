@@ -348,10 +348,21 @@ TerminalView.close_on_exit = true
 function TerminalView:get_name() return (self.modified_since_last_focus and "* " or "") .. (self.terminal and self.terminal:name() or "Terminal") end
 function TerminalView:supports_text_input() return true end
 
--- the workspace plugin reopens a terminal tab (as a new shell) with its profile
+-- the workspace plugin reopens a terminal tab (as a new shell) with its profile and
+-- the directory it started in (not where it's cd'd to since: that isn't known); the
+-- directory only if a new tab wouldn't start there, so the rest follow the project
 -- (called on the saved view's class, which may extend TerminalView)
-function TerminalView:get_workspace_state() return self.options.profile and { profile = self.options.profile } end
-function TerminalView:from_workspace_state(state) return self({ profile = state.profile }) end
+function TerminalView:get_workspace_state()
+  local pwd = config.plugins.terminal.environment.PWD
+  if type(pwd) == "function" then pwd = pwd() end
+  local cwd = self.cwd ~= pwd and self.cwd or nil
+  if self.options.profile or cwd then return { profile = self.options.profile, cwd = cwd } end
+end
+function TerminalView:from_workspace_state(state)
+  local info = state.cwd and system.get_file_info(state.cwd)
+  local environment = info and info.type == "dir" and { PWD = state.cwd } or nil
+  return self({ profile = state.profile, environment = environment })
+end
 
 ---Options are config.plugins.terminal, overridden by the profile (options.profile,
 ---else the configured one; none if options.shell is given, as for the build and
@@ -382,6 +393,8 @@ function TerminalView:new(options)
   for k,v in pairs(self.options.environment) do
     self.options.environment[k] = type(v) == "function" and v() or v
   end
+  -- the directory the shell starts in
+  self.cwd = self.options.environment.PWD or nil
   if PLATFORM == "Windows" then
     local t = {}
     for k,v in pairs(common.merge(terminal_native.getenv(), self.options.environment)) do
