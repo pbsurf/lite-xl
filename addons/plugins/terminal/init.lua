@@ -399,8 +399,25 @@ function TerminalView:new(options)
     local environment = common.merge(terminal_native.getenv(), self.options.environment)
     -- cmd's title (the tab's name) is its path, and cd doesn't change it: its prompt
     -- sets it to the current directory (OSC 0) instead, unless PROMPT is configured
-    if self.options.shell:lower():match("[^/\\]*$") == "cmd.exe" and self.options.environment.PROMPT == nil then
+    local program = self.options.shell:lower():match("[^/\\]*$")
+    if program == "cmd.exe" and self.options.environment.PROMPT == nil then
       environment.PROMPT = "$E]0;$P$E\\" .. (environment.PROMPT or "$P$G")
+    end
+    -- PowerShell's likewise: its prompt function (after $PROFILE, which may replace it)
+    -- is wrapped to set it first, unless the arguments run something themselves
+    if program == "powershell.exe" or program == "pwsh.exe" then
+      local runs = false
+      for _, argument in ipairs(self.options.arguments) do
+        local a = argument:lower()
+        if a:find("^[-/]c") or a:find("^[-/]f") or a:find("^[-/]e[nc]") or a:find("^[-/]noe") then runs = true end
+      end
+      if not runs then
+        self.options.arguments = common.merge(self.options.arguments, {})
+        table.insert(self.options.arguments, "-NoExit")
+        table.insert(self.options.arguments, "-Command")
+        table.insert(self.options.arguments, "$global:__lite_xl_prompt = $function:prompt; "
+          .. "function global:prompt { $Host.UI.RawUI.WindowTitle = $PWD.Path; & $global:__lite_xl_prompt }")
+      end
     end
     local t = {}
     for k,v in pairs(environment) do
