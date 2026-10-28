@@ -396,8 +396,14 @@ function TerminalView:new(options)
   -- the directory the shell starts in
   self.cwd = self.options.environment.PWD or nil
   if PLATFORM == "Windows" then
+    local environment = common.merge(terminal_native.getenv(), self.options.environment)
+    -- cmd's title (the tab's name) is its path, and cd doesn't change it: its prompt
+    -- sets it to the current directory (OSC 0) instead, unless PROMPT is configured
+    if self.options.shell:lower():match("[^/\\]*$") == "cmd.exe" and self.options.environment.PROMPT == nil then
+      environment.PROMPT = "$E]0;$P$E\\" .. (environment.PROMPT or "$P$G")
+    end
     local t = {}
-    for k,v in pairs(common.merge(terminal_native.getenv(), self.options.environment)) do
+    for k,v in pairs(environment) do
       if v ~= false then table.insert(t, k .. "=" .. v) end
     end
     -- CreateProcess wants the block sorted by name, ignoring case ("=C:=..." first)
