@@ -41,10 +41,11 @@ local default_config = {
   },
   -- the amount of time between line scrolling when we're dragging offscreen
   scrolling_speed = 0.01,
-  -- the newline character to use
-  -- We set ICRNL, so that this is translated to `\n` at input time... but this seems to be necessary. `micro`
-  -- doesn't allow you to newline if you don't set it to `\r`.
-  newline = ((config.plugins.terminal.shell or default_shell):find("cmd.exe") and "\r\n" or "\r"),
+  -- what Enter sends: `\r`, as the Return key on a real terminal. We set ICRNL, so that this is
+  -- translated to `\n` at input time... but this seems to be necessary. `micro` doesn't allow
+  -- you to newline if you don't set it to `\r`. On Windows too: ConPTY makes `\r` an Enter key
+  -- press for cmd, and `\r\n` was two in a shell started from it (`wsl` from cmd).
+  newline = "\r",
   -- the backspace character to use
   backspace = "\x7F",
   -- the delete character to use
