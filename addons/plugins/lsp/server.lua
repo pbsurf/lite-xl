@@ -319,6 +319,14 @@ function Server:new(options)
   self.event_listeners = {}
   self.message_listeners = {}
   self.request_listeners = {}
+  -- the server's work done progress ($/progress), as core tasks by token
+  self.progress_tasks = {}
+  self:add_request_listener("window/workDoneProgress/create", function(server, request)
+    server:respond(request.id, json.null)
+  end)
+  self:add_message_listener("$/progress", function(server, params)
+    server:on_progress(params)
+  end)
   self.request_list = {}
   self.response_list = {}
   self.notification_list = {}
@@ -509,7 +517,8 @@ function Server:initialize(workspace, editor_name, editor_version)
           -- moniker = {dynamicRegistration = false} -- not supported
         },
         window = {
-          -- workDoneProgress = true,
+          -- reported on the status bar (core.add_task)
+          workDoneProgress = true,
           -- showMessage = {},
           showDocument = { support = true }
         },
@@ -1620,11 +1629,41 @@ end
 function Server:stop()
   self.initialized = false
   self.proc = nil
+  for _, progress in pairs(self.progress_tasks) do progress.task:done() end
+  self.progress_tasks = {}
 
   self.request_list = {}
   self.response_list = {}
   self.notification_list = {}
   self.raw_list = {}
+end
+
+---Shows work done progress (a $/progress notification) on the status bar:
+---a task from "begin" to "end", "<Title> (<server>)", its progress the latest
+---message (a report without one keeps the previous), else the percentage.
+--- params table
+function Server:on_progress(params)
+  local value = type(params) == "table" and params.value
+  if type(value) ~= "table" or params.token == nil then return end
+  local token = tostring(params.token)
+  local progress = self.progress_tasks[token]
+  if value.kind == "begin" then
+    if progress then progress.task:done() end
+    local title = type(value.title) == "string" and value.title ~= "" and value.title or "working"
+    title = title:sub(1, 1):upper() .. title:sub(2)
+    progress = { task = core.add_task(title .. " (" .. self.name .. ")") }
+    self.progress_tasks[token] = progress
+  elseif not progress then
+    return
+  elseif value.kind == "end" then
+    progress.task:done()
+    self.progress_tasks[token] = nil
+    return
+  end
+  if type(value.message) == "string" and value.message ~= "" then progress.message = value.message end
+  if type(value.percentage) == "number" then progress.percentage = value.percentage end
+  progress.task:update(progress.message
+    or progress.percentage and string.format("%d%%", math.floor(progress.percentage)))
 end
 
 ---Shutdown the server if not running or amount of write fails
