@@ -28,6 +28,13 @@ local default_config = {
   shell = default_shell,
   -- the arguments to pass to your shell
   arguments = { },
+  -- named shells to open terminals with ({ name = "WSL", shell = ..., arguments = ... }):
+  -- each overrides any of the options here for its terminals (environment is merged
+  -- into the one here); nil: the shells found installed (cmd, PowerShell, WSL on
+  -- Windows; /etc/shells elsewhere)
+  profiles = nil,
+  -- the name of the profile terminals open with; nil: shell and arguments above
+  profile = nil,
   -- the environmental variable to set on shell instantiation; false unsets one
   environment = {
     PWD = function() return core.root_project and core.root_project().path or core.project_dir end,
@@ -182,6 +189,11 @@ default_config.config_spec = set_config_default_values {
     path = "arguments", type = "LIST_STRINGS"
   },
   {
+    label = "Profile",
+    description = "The name of the profile (see `profiles`) new terminals use; empty for the shell above.",
+    path = "profile", type = "STRING"
+  },
+  {
     label = "Terminal Type",
     description = "The type to terminal to appear as (sets the $TERM environment variable).",
     path = "term", type = "STRING"
@@ -204,6 +216,54 @@ default_config.config_spec = set_config_default_values {
 }
 config.plugins.terminal = common.merge(default_config, config.plugins.terminal)
 if not config.plugins.terminal.bold_font then config.plugins.terminal.bold_font = config.plugins.terminal.font:copy(style.code_font:get_size(), { smoothing = true }) end
+
+-- the path of a program: name itself if it has a directory, else found on PATH
+local function find_program(name)
+  if name:find("[/\\]") then return system.get_file_info(name) and name end
+  for dir in (os.getenv("PATH") or ""):gmatch(PLATFORM == "Windows" and "[^;]+" or "[^:]+") do
+    local path = dir:gsub("[/\\]+$", "") .. PATHSEP .. name
+    if system.get_file_info(path) then return path end
+  end
+end
+
+local function detect_profiles()
+  local profiles = {}
+  local function add(name, program, arguments)
+    local path = find_program(program)
+    if path then table.insert(profiles, { name = name, shell = path, arguments = arguments }) end
+    return path
+  end
+  if PLATFORM == "Windows" then
+    add("cmd", os.getenv("COMSPEC") or "C:\\Windows\\System32\\cmd.exe")
+    -- PowerShell 7 if installed, else the one Windows comes with
+    if not add("PowerShell", "pwsh.exe", { "-NoLogo" }) then
+      add("PowerShell", "powershell.exe", { "-NoLogo" })
+    end
+    -- (wsl.exe exists even with no distribution installed: then it says so and exits);
+    -- it starts in its working directory (PWD) under /mnt, as the others do in it
+    add("WSL", "wsl.exe")
+  else
+    -- the login shells, one per name (/etc/shells often has both /bin/x and /usr/bin/x)
+    local seen = {}
+    local f = io.open("/etc/shells")
+    if f then
+      for line in f:lines() do
+        local name = line:match("^%s*/%S-([^/%s]+)%s*$")
+        if name and not seen[name] and add(name, line:match("%S+")) then seen[name] = true end
+      end
+      f:close()
+    end
+  end
+  return profiles
+end
+
+if config.plugins.terminal.profiles == nil then config.plugins.terminal.profiles = detect_profiles() end
+
+local function find_profile(name)
+  for _, profile in ipairs(config.plugins.terminal.profiles or {}) do
+    if profile.name == name then return profile end
+  end
+end
 
 -- contrast functions pulled from https://github.com/xtermjs/xterm.js/blob/99df13b085aecb051f1373c5b7f8e819c4f41442/src/common/Color.ts#L285.
 local function contrastRatio(l1, l2)
@@ -288,9 +348,20 @@ TerminalView.close_on_exit = true
 function TerminalView:get_name() return (self.modified_since_last_focus and "* " or "") .. (self.terminal and self.terminal:name() or "Terminal") end
 function TerminalView:supports_text_input() return true end
 
+---Options are config.plugins.terminal, overridden by the profile (options.profile,
+---else the configured one; none if options.shell is given, as for the build and
+---debugger plugins' "DUMMY" views), overridden by options; environment is merged
+---at each step.
 function TerminalView:new(options)
   TerminalView.super.new(self)
-  options = common.merge(common.merge({}, config.plugins.terminal), options)
+  options = options or {}
+  local base = config.plugins.terminal
+  local profile = not options.shell and find_profile(options.profile or base.profile) or {}
+  local environment = common.merge(common.merge(base.environment, profile.environment), options.environment)
+  options = common.merge(common.merge(base, profile), options)
+  options.environment = environment
+  options.profile = profile.name
+  options.name = nil
   self.options = options
   -- with letter spacing, draw with a copy of the font, kept at its size in update
   self.base_font = self.options.font
@@ -1049,8 +1120,19 @@ end, {
 -- (core.panel), shown and hidden by alt+t and shift+alt+t, its shell running on
 -- while it's hidden; made when first shown.
 local function show_panel_terminal()
-  core.terminal_view = core.terminal_view or TerminalView(config.plugins.terminal)
+  core.terminal_view = core.terminal_view or TerminalView()
   panel.show(core.terminal_view)
+end
+
+-- a new terminal tab: in the panel while it has the focus (or in_panel), else the editor's
+local function open_tab(options, in_panel)
+  local tv = TerminalView(options)
+  local node = core.root_view.root_node:get_node_for_view(core.active_view)
+  if in_panel or (in_panel == nil and node and node.is_panel) then
+    panel.show(tv)
+  else
+    core.root_view:get_active_node_default():add_view(tv)
+  end
 end
 
 command.add(nil, {
@@ -1089,16 +1171,33 @@ command.add(nil, {
       execute(text)
     end
   end,
-  -- a new terminal tab: in the panel while it has the focus, else the editor's
-  ["terminal:open-tab"] = function()
-    local tv = TerminalView(config.plugins.terminal)
+  ["terminal:open-tab"] = function() open_tab() end,
+  -- a new terminal tab with a profile picked from config.plugins.terminal.profiles
+  ["terminal:open-tab-with-profile"] = function()
+    -- the command view's node is the editor's, not the panel's: pick where first
     local node = core.root_view.root_node:get_node_for_view(core.active_view)
-    if node and node.is_panel then
-      panel.show(tv)
-    else
-      core.root_view:get_active_node_default():add_view(tv)
-    end
-  end
+    local in_panel = node and node.is_panel
+    core.command_view:enter("Open Terminal", {
+      submit = function(text, item)
+        if item then open_tab({ profile = item.text }, in_panel) end
+      end,
+      suggest = function(text)
+        local items = {}
+        for _, profile in ipairs(config.plugins.terminal.profiles or {}) do
+          local score = system.fuzzy_match(profile.name, text)
+          if score then
+            table.insert(items, { text = profile.name, info = profile.shell, score = score, order = #items })
+          end
+        end
+        -- in the configured order until something is typed
+        table.sort(items, function(a, b)
+          if a.score ~= b.score and text ~= "" then return a.score > b.score end
+          return a.order < b.order
+        end)
+        return items
+      end
+    })
+  end,
 })
 
 -- "Terminal Here" in the treeview's context menu for folders: a terminal tab
@@ -1114,8 +1213,7 @@ if treeview then
   })
   command.add(hovered_dir, {
     ["treeview:terminal-here"] = function(item)
-      local environment = common.merge(config.plugins.terminal.environment, { PWD = item.abs_filename })
-      local tv = TerminalView({ environment = environment })
+      local tv = TerminalView({ environment = { PWD = item.abs_filename } })
       core.root_view:get_active_node_default():add_view(tv)
       core.set_active_view(tv)
     end
@@ -1138,7 +1236,7 @@ core.status_view:add_item({
     local dv = core.active_view
     local x, y = dv.terminal:size()
     return {
-      style.text, style.font, (dv.terminal:name() or config.plugins.terminal.shell),
+      style.text, style.font, (dv.terminal:name() or dv.options.shell),
       style.dim, style.font, core.status_view.separator2,
       style.text, style.font, x .. "x" .. y
     }
@@ -1148,6 +1246,7 @@ core.status_view:add_item({
 -- add in the terminal metacommands not related to actually sending things to the temrinal first
 keymap.add({
   ["ctrl+shift+`"] = "terminal:open-tab",
+  ["ctrl+alt+shift+`"] = "terminal:open-tab-with-profile",
   ["alt+t"]  = "terminal:swap-focus",
   ["shift+alt+t"]  = "terminal:toggle"
 })
@@ -1258,7 +1357,7 @@ end
 -- ctrl+shift+<key> (terminal:doc:save, ...). Hide all but these from Do Command and
 -- menus.
 local listed = {
-  "toggle", "swap-focus", "open-tab", "focus", "execute", "close-tab",
+  "toggle", "swap-focus", "open-tab", "open-tab-with-profile", "focus", "execute", "close-tab",
   "copy", "paste", "clear", "scroll-up", "scroll-down", "scroll-to-top", "scroll-to-end",
 }
 for i, name in ipairs(listed) do listed["terminal:" .. name] = true end
