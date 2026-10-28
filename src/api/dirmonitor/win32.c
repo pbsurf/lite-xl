@@ -15,6 +15,9 @@ int get_changes_dirmonitor(struct dirmonitor_internal* monitor, char* buffer, in
       return 0;
     return bytes_transferred;
   }
+  // no directory (unwatched, or it couldn't be opened): nothing to wait on, so
+  // a pause rather than the caller's loop spinning
+  SDL_Delay(100);
   return 0;
 }
 

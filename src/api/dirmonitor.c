@@ -64,8 +64,13 @@ static int dirmonitor_check_thread(void* data) {
       SDL_UnlockMutex(monitor->mutex);
     }
     SDL_Delay(1);
-    SDL_Event event = { .type = DIR_EVENT_TYPE };
-    SDL_PushEvent(&event);
+    // only while there are changes to check: an event wakes every thread waiting
+    // for "dirchange", and get_changes_dirmonitor can return none (kqueue's
+    // timeout; no watch, on Windows), which would make an idle editor spin
+    if (monitor->length > 0) {
+      SDL_Event event = { .type = DIR_EVENT_TYPE };
+      SDL_PushEvent(&event);
+    }
   }
   return 0;
 }
