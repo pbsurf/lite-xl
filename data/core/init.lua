@@ -1073,7 +1073,11 @@ function core.init()
 
   core.configure_borderless_window()
 
-  if #plugins_refuse_list.userdir.plugins > 0 or #plugins_refuse_list.datadir.plugins > 0 then
+  local any_refused = false
+  for _, entry in pairs(plugins_refuse_list) do
+    if #entry.plugins > 0 then any_refused = true end
+  end
+  if any_refused then
     local opt = {
       { text = "Exit", default_no = true },
       { text = "Continue", default_yes = true }
@@ -1299,6 +1303,42 @@ function core.restart()
 end
 
 
+---Directories of add-ons besides the user and data directories, laid out as they
+---are (plugins/, libraries/, colors/, native modules beside the Lua ones): searched
+---after the user directory and before the data directory, in the order added.
+---@type string[]
+core.addon_dirs = {}
+
+---Adds a directory of add-ons (see core.addon_dirs), e.g. a checkout's, so they're
+---used from there rather than copied into the user directory. From the user module:
+---its plugins load with the others, and it can require them once it's added.
+---@param dir string
+---@return boolean added false if it isn't a directory
+function core.add_addon_dir(dir)
+  local info = system.get_file_info(dir)
+  if not info or info.type ~= "dir" then return false end
+  dir = common.normalize_path(system.absolute_path(dir))
+  for _, d in ipairs(core.addon_dirs) do
+    if d == dir then return true end
+  end
+  table.insert(core.addon_dirs, dir)
+  -- before the data directory's entries, so after those of the dirs added before
+  local function insert(path, before, entries)
+    local i = path:find(before, 1, true)
+    return i and (path:sub(1, i - 1) .. entries .. path:sub(i)) or (path .. entries)
+  end
+  package.path = insert(package.path, DATADIR .. '/?/init.lua;',
+    dir .. '/?/init.lua;' .. dir .. '/?.lua;')
+  local suffix = PLATFORM == "Mac OS X" and 'lib' or (PLATFORM == "Windows" and 'dll' or 'so')
+  package.cpath = insert(package.cpath, DATADIR .. '/?.' .. ARCH .. "." .. suffix .. ";",
+    dir .. '/?.' .. ARCH .. "." .. suffix .. ";" ..
+    dir .. '/?/init.' .. ARCH .. "." .. suffix .. ";" ..
+    dir .. '/?.' .. suffix .. ";" ..
+    dir .. '/?/init.' .. suffix .. ";")
+  return true
+end
+
+
 local function get_plugin_details(filename)
   local info = system.get_file_info(filename)
   if info ~= nil and info.type == "dir" then
@@ -1339,28 +1379,42 @@ function core.load_plugins()
     userdir = {dir = USERDIR, plugins = {}},
     datadir = {dir = DATADIR, plugins = {}},
   }
+  -- the data directory's, then the added ones' (core.addon_dirs: the first added
+  -- last), then the user's: each replaces a plugin of the same name before it
+  local roots = { { dir = DATADIR, list = refused_list.datadir } }
+  for i = #core.addon_dirs, 1, -1 do
+    local entry = { dir = core.addon_dirs[i], plugins = {} }
+    refused_list[core.addon_dirs[i]] = entry
+    table.insert(roots, { dir = core.addon_dirs[i], list = entry })
+  end
+  table.insert(roots, { dir = USERDIR, list = refused_list.userdir })
   local files, ordered = {}, {}
-  for _, root_dir in ipairs {DATADIR, USERDIR} do
-    local plugin_dir = root_dir .. PATHSEP .. "plugins"
+  for _, root in ipairs(roots) do
+    local plugin_dir = root.dir .. PATHSEP .. "plugins"
     for _, filename in ipairs(system.list_dir(plugin_dir) or {}) do
-      if not files[filename] then
-        table.insert(
-          ordered, {file = filename}
-        )
+      -- not a plugin (a directory with only a native module, as a build's): it
+      -- doesn't replace one
+      local is_lua_file, details = get_plugin_details(plugin_dir .. PATHSEP .. filename)
+      if is_lua_file or not files[filename] then
+        if not files[filename] then
+          table.insert(
+            ordered, {file = filename}
+          )
+        end
+        files[filename] = { dir = plugin_dir, root = root, valid = is_lua_file, details = details }
       end
-      -- user plugins will always replace system plugins
-      files[filename] = plugin_dir
     end
   end
 
   for _, plugin in ipairs(ordered) do
-    local dir = files[plugin.file]
+    local found = files[plugin.file]
     local name = plugin.file:match("(.-)%.lua$") or plugin.file
-    local is_lua_file, details = get_plugin_details(dir .. PATHSEP .. plugin.file)
+    local details = found.details
 
-    plugin.valid = is_lua_file
+    plugin.valid = found.valid
     plugin.name = name
-    plugin.dir = dir
+    plugin.dir = found.dir
+    plugin.refused = found.root.list.plugins
     plugin.priority = details and details.priority or 100
     plugin.version_match = details and details.version_match or false
   end
@@ -1382,10 +1436,7 @@ function core.load_plugins()
           plugin.name,
           plugin.dir
         )
-        local rlist = plugin.dir:find(USERDIR, 1, true) == 1
-          and 'userdir' or 'datadir'
-        local list = refused_list[rlist].plugins
-        table.insert(list, plugin.file)
+        table.insert(plugin.refused, plugin.file)
       elseif config.plugins[plugin.name] ~= false then
         local start = system.get_time()
         local ok = core.try(require, "plugins." .. plugin.name)

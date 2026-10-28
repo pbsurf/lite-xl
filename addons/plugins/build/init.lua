@@ -102,14 +102,9 @@ function build.argument_string_to_table(str)
   return t
 end
 
-local function get_plugin_directory()
-  local paths = {
-    USERDIR .. PATHSEP .. "plugins" .. PATHSEP .. "build",
-    DATADIR .. PATHSEP .. "plugins" .. PATHSEP .. "build"
-  }
-  for i, v in ipairs(paths) do if system.get_file_info(v) then return v end end
-  return nil
-end
+-- this file's directory, wherever it was loaded from
+local plugin_directory = debug.getinfo(1, "S").source:match("^@(.*)[/\\]")
+local function get_plugin_directory() return plugin_directory end
 
 function build.get_backends(specific)
   local backends = {}

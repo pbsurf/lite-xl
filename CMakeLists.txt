@@ -275,9 +275,10 @@ endif()
 configure_file(data/core/start.lua "${CMAKE_CURRENT_BINARY_DIR}/start.lua" @ONLY)
 
 #===============================================================================
-# Native parts of our add-ons, built into <build>/addons (not installed): InstallAddons.cmake
-# (and scripts/run.sh) put each into the installed plugin, where package.cpath finds it as
-# <module>.<arch_tuple>.<so|dll|lib>.  They don't link Lua: lite_xl_plugin_api.h finds it
+# Native parts of our add-ons, built into <build>/addons/plugins/<plugin> (not installed), so
+# that <build>/addons is a directory of add-ons for core.add_addon_dir, with the module where
+# package.cpath finds it as <module>.<arch_tuple>.<so|dll|lib> (InstallAddons.cmake copies it
+# into the installed plugin instead, with COPY).  They don't link Lua: lite_xl_plugin_api.h finds it
 # in the executable.  hunspell (spellcheck) is not ported.
 #===============================================================================
 if(WIN32)
@@ -293,8 +294,8 @@ set_target_properties(libterminal PROPERTIES
   PREFIX ""
   OUTPUT_NAME libterminal
   SUFFIX ".${arch_tuple}.${module_ext}"
-  RUNTIME_OUTPUT_DIRECTORY "${CMAKE_CURRENT_BINARY_DIR}/addons"
-  LIBRARY_OUTPUT_DIRECTORY "${CMAKE_CURRENT_BINARY_DIR}/addons")
+  RUNTIME_OUTPUT_DIRECTORY "${CMAKE_CURRENT_BINARY_DIR}/addons/plugins/terminal"
+  LIBRARY_OUTPUT_DIRECTORY "${CMAKE_CURRENT_BINARY_DIR}/addons/plugins/terminal")
 target_include_directories(libterminal PRIVATE resources/include)
 if(MSVC)
   # the entry point isn't marked for export; Windows has no forkpty, the plugin uses ConPTY

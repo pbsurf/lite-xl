@@ -1,13 +1,15 @@
-# Installs the add-ons into a user dir by copying, for a machine without lpm (the Windows
-# counterpart of the user dir's addons.sh).  Ours come from this checkout, as listed in its
-# manifest.json; the few upstream ones are downloaded at the commits lpm would use, and
-# checked against their hashes.  Run again after changing the list or the add-ons (a copy
-# doesn't follow the checkout).
+# Sets up a user dir's add-ons on a machine without lpm (the Windows counterpart of the user
+# dir's addons.sh).  Ours are used from this checkout, as listed in its manifest.json: the
+# user module adds <checkout>/addons and <build>/addons (the native modules) with
+# core.add_addon_dir, so here they're only checked for, and copies of them left in the user
+# dir (which would be used instead) are removed.  With -DCOPY=ON they're copied in instead
+# (with the native modules from BUILD), for a user dir used without the checkout; run again
+# after changing them then (a copy doesn't follow the checkout).  The few upstream ones are
+# downloaded at the commits lpm would use, and checked against their hashes.
 #
-#   cmake -DSRC=<lite-xl checkout> -DUSERDIR=<user dir> [-DBUILD=<build dir>] [-DADDONS="id;id;..."] \
-#         -P InstallAddons.cmake
+#   cmake -DSRC=<lite-xl checkout> -DUSERDIR=<user dir> [-DBUILD=<build dir>] [-DCOPY=ON] \
+#         [-DADDONS="id;id;..."] -P InstallAddons.cmake
 #
-# With BUILD, the native modules built into <build>/addons (libterminal) are copied in too.
 # On Windows, clangd is installed into <user dir>/tools/clangd too (-DCLANGD=OFF: not).
 #
 # Keep ADDONS' default in step with the --symlink list in the user dir's addons.sh.
@@ -102,18 +104,35 @@ foreach(id ${wanted})
     get_filename_component(name "${path_${id}}" NAME)
     set(from "${SRC}/${path_${id}}")
     set(dest "${USERDIR}/${kind}/${name}")
+    if(NOT COPY)
+      if(NOT EXISTS "${from}")
+        message(FATAL_ERROR "${id}: no ${path_${id}} in ${SRC}")
+      endif()
+      # (a symlink, as lpm makes, is to the checkout already)
+      if(EXISTS "${dest}" AND NOT IS_SYMLINK "${dest}")
+        file(REMOVE_RECURSE "${dest}")
+        message(STATUS "removed the copy of ${id} (${kind}/${name}): used from ${SRC}/addons")
+      endif()
+      if(BUILD AND id STREQUAL "terminal")
+        file(GLOB modules "${BUILD}/addons/plugins/terminal/libterminal.*-*.*")
+        if(NOT modules)
+          message(WARNING "terminal: no libterminal in ${BUILD}/addons/plugins/terminal; build the libterminal target")
+        endif()
+      endif()
+      continue()
+    endif()
     file(REMOVE_RECURSE "${dest}")   # also drops files an update removed, or a hard link
     file(COPY "${from}" DESTINATION "${USERDIR}/${kind}")
     message(STATUS "installed ${id} (${kind}/${name})")
-    # the add-on's native module, built into <build>/addons, goes into its directory
+    # the add-on's native module, built into <build>/addons/plugins/terminal, goes into its directory
     if(BUILD AND id STREQUAL "terminal")
-      file(GLOB modules "${BUILD}/addons/libterminal.*-*.*")
+      file(GLOB modules "${BUILD}/addons/plugins/terminal/libterminal.*-*.*")
       list(FILTER modules EXCLUDE REGEX "\\.(pdb|ilk|exp|lib)$")
       if(modules)
         file(COPY ${modules} DESTINATION "${dest}")
         message(STATUS "  with its native module")
       else()
-        message(WARNING "terminal: no libterminal in ${BUILD}/addons; build the libterminal target")
+        message(WARNING "terminal: no libterminal in ${BUILD}/addons/plugins/terminal; build the libterminal target")
       endif()
     endif()
   elseif(id IN_LIST upstream_ids)

@@ -126,12 +126,14 @@ keymap.origin = {}
 
 -- chunk names, with "/" separators: package.path mixes them on Windows
 local function slashes(path) return (path:gsub("\\", "/")) end
-local plugin_dirs = { slashes(USERDIR .. "/plugins/"), slashes(DATADIR .. "/plugins/") }
 local user_module = slashes("@" .. USERDIR .. "/init.lua")
 
 ---Who is adding bindings: the first plugin or user module in the call stack.
 ---@return string
 local function get_origin()
+  -- (core.addon_dirs grows while the user module runs)
+  local plugin_dirs = { slashes(USERDIR .. "/plugins/"), slashes(DATADIR .. "/plugins/") }
+  for _, dir in ipairs(core.addon_dirs or {}) do table.insert(plugin_dirs, slashes(dir .. "/plugins/")) end
   local level = 3 -- the caller of keymap.add
   while true do
     local info = debug.getinfo(level, "S")
