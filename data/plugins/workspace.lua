@@ -81,7 +81,10 @@ local function save_view(view)
         type = "view",
         active = (core.active_view == view),
         module = name,
-        scroll = { x = view.scroll.to.x, y = view.scroll.to.y, to = { x = view.scroll.to.x, y = view.scroll.to.y } },
+        -- a view can save what it needs to be recreated (a table of plain values),
+        -- given back to view_class:from_workspace_state(state)
+        state = view.get_workspace_state and view:get_workspace_state(),
+        scroll ={ x = view.scroll.to.x, y = view.scroll.to.y, to = { x = view.scroll.to.x, y = view.scroll.to.y } },
       }
     end
   end
@@ -115,7 +118,10 @@ local function load_view(t)
   end
   -- skip views of plugins no longer loaded, rather than failing the whole restore
   local ok, view_class = pcall(require, t.module)
-  if ok then return view_class() end
+  if ok then
+    if t.state and view_class.from_workspace_state then return view_class:from_workspace_state(t.state) end
+    return view_class()
+  end
 end
 
 

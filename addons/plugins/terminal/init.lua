@@ -348,6 +348,11 @@ TerminalView.close_on_exit = true
 function TerminalView:get_name() return (self.modified_since_last_focus and "* " or "") .. (self.terminal and self.terminal:name() or "Terminal") end
 function TerminalView:supports_text_input() return true end
 
+-- the workspace plugin reopens a terminal tab (as a new shell) with its profile
+-- (called on the saved view's class, which may extend TerminalView)
+function TerminalView:get_workspace_state() return self.options.profile and { profile = self.options.profile } end
+function TerminalView:from_workspace_state(state) return self({ profile = state.profile }) end
+
 ---Options are config.plugins.terminal, overridden by the profile (options.profile,
 ---else the configured one; none if options.shell is given, as for the build and
 ---debugger plugins' "DUMMY" views), overridden by options; environment is merged
