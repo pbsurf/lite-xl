@@ -6,8 +6,9 @@
 -- treeview (style.git_untracked, green by default). "Show All Files" in the treeview's context menu shows everything
 -- but .git (ignored files dimmed), in any project; it's kept per project.
 --
--- `git status` runs once when a directory is first scanned (blocking), then
--- again, in the background, a moment after a change in the project or its
+-- `git status` runs once when a directory is first scanned (blocking; for the
+-- repository only, its submodules are asked right after, in the background),
+-- then again, in the background, a moment after a change in the project or its
 -- git directory (index, HEAD).
 --
 -- While the treeview is focused, the status bar shows the selected entry's
@@ -169,17 +170,29 @@ local function submodules_args(dir_name)
            'printf "%s\\0%s\\0" "$displaypath" "$(git rev-parse --absolute-git-dir)"' }
 end
 
+-- A path git printed, as this system's: on Windows with \ (git for Windows
+-- prints C:/...), and /mnt/<drive>/... from a shell in WSL (wslgit only
+-- translates git's own output) is <drive>:\...
+local function native_path(path)
+  if PLATFORM ~= "Windows" then return path end
+  local drive, rest = path:match("^/mnt/(%a)/(.*)$")
+  if drive then path = drive:upper() .. ":/" .. rest end
+  return (path:gsub("/", "\\"))
+end
+
 -- Asks git about the directory with run (read_command or run_command): sets
 -- the repo's ignored, untracked, summary and changes. git status doesn't look
--- into submodules, so each is asked too, and what it says about its files is
--- added to the sets (the summary stays the directory's repository's). Returns
--- whether the sets of ignored paths changed.
-local function query(repo, dir_name, run)
+-- into submodules, so each is asked too (unless `skip_submodules`: one run
+-- each, too slow to block on), and what it says about its files is added to
+-- the sets (the summary stays the directory's repository's). Returns whether
+-- the sets of ignored paths changed.
+local function query(repo, dir_name, run, skip_submodules)
   local status = run(status_args(dir_name))
   if not status then return false end
   local ignored, untracked, summary, changes = parse_status(status, repo.prefix)
-  local subs = run(submodules_args(dir_name)) or ""
+  local subs = not skip_submodules and run(submodules_args(dir_name)) or ""
   for path, git_dir in subs:gmatch("([^\0]*)\0([^\0]*)\0") do
+    git_dir = native_path(git_dir)
     if path:sub(1, 3) ~= "../" then
       local sub_status = run(status_args(dir_name .. PATHSEP .. path))
       if sub_status then
@@ -197,6 +210,16 @@ local function query(repo, dir_name, run)
   return changed
 end
 
+-- A change in a project directory of a repository, or in its git directory,
+-- makes the status stale; the worker below waits for things to settle, then
+-- updates, again if changes came meanwhile.
+local stale = false
+
+local function set_stale()
+  stale = true
+  core.wake("gitfiles")
+end
+
 local function get_repo(dir_name)
   local repo = repos[dir_name]
   if repo ~= nil then return repo end
@@ -205,11 +228,13 @@ local function get_repo(dir_name)
   local prefix, git_dir = (out or ""):match("^([^\n]*)\n([^\n]+)\n")
   if git_dir then
     local r = { git_dir = git_dir, prefix = prefix }
-    query(r, dir_name, read_command)
+    query(r, dir_name, read_command, true)
     if r.ignored then
       repo = r
       -- the index and HEAD change with add, rm, commit, checkout...
       git_watch:watch(git_dir)
+      -- the submodules, in the background
+      set_stale()
     end
   end
   repos[dir_name] = repo
@@ -248,16 +273,6 @@ local function update()
   if rescan then core.rescan_project_directories() end
 end
 
-
--- A change in a project directory of a repository, or in its git directory,
--- makes the status stale; the worker below waits for things to settle, then
--- updates, again if changes came meanwhile.
-local stale = false
-
-local function set_stale()
-  stale = true
-  core.wake("gitfiles")
-end
 
 local on_project_directory_change = core.on_project_directory_change
 function core.on_project_directory_change(topdir, path)
