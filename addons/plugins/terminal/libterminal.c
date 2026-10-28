@@ -1314,6 +1314,18 @@ static int set_error_step(const char* step) { strncpy(error_step, step, sizeof(e
     free(line);
     return commandline;
   }
+
+  // The directory to start in: PWD in the environment block, if it's a directory (else
+  // NULL, the editor's), as the child chdirs to $PWD elsewhere.
+  static const wchar_t* windows_start_directory(const wchar_t* environment) {
+    for (const wchar_t* entry = environment; entry && *entry; entry += wcslen(entry) + 1) {
+      if (_wcsnicmp(entry, L"PWD=", 4) == 0) {
+        DWORD attributes = GetFileAttributesW(entry + 4);
+        return attributes != INVALID_FILE_ATTRIBUTES && (attributes & FILE_ATTRIBUTE_DIRECTORY) ? entry + 4 : NULL;
+      }
+    }
+    return NULL;
+  }
 #endif
 
 // Starts a child on a new pty (ConPTY on Windows) of `columns` by `lines`.
@@ -1361,7 +1373,7 @@ static int terminal_spawn(terminal_t* terminal, int columns, int lines, const ch
     }
 
     wchar_t* commandline = windows_command_line(pathname, argv);
-    success = CreateProcessW(NULL, commandline, NULL, NULL, TRUE, EXTENDED_STARTUPINFO_PRESENT | CREATE_UNICODE_ENVIRONMENT, (void*)environment[0], NULL, &si_ex.StartupInfo, &terminal->process_information);
+    success = CreateProcessW(NULL, commandline, NULL, NULL, TRUE, EXTENDED_STARTUPINFO_PRESENT | CREATE_UNICODE_ENVIRONMENT, (void*)environment[0], windows_start_directory((const wchar_t*)environment[0]), &si_ex.StartupInfo, &terminal->process_information);
     DeleteProcThreadAttributeList(si_ex.lpAttributeList);
     free(si_ex.lpAttributeList);
     free(commandline);
