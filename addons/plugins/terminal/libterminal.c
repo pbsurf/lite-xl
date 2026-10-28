@@ -1254,6 +1254,68 @@ static int set_error_step(const char* step) { strncpy(error_step, step, sizeof(e
   static const char* terminal_get_last_error() { return error_step; }
 #endif
 
+#ifdef _WIN32
+  // `str` (UTF-8) as a new UTF-16 string.
+  static wchar_t* utf8_to_wide(const char* str) {
+    int len = MultiByteToWideChar(CP_UTF8, 0, str, -1, NULL, 0);
+    wchar_t* wide = malloc(sizeof(wchar_t)*(len+1));
+    MultiByteToWideChar(CP_UTF8, 0, str, -1, wide, len);
+    wide[len] = 0;
+    return wide;
+  }
+
+  // Appends `arg` to `out` quoted as CommandLineToArgvW and the C runtime split a command line
+  // (backslashes are literal except before a quote); returns the new end.
+  static char* windows_quote_argument(char* out, const char* arg) {
+    if (*arg && !strpbrk(arg, " \t\n\v\"")) {
+      strcpy(out, arg);
+      return out + strlen(arg);
+    }
+    *out++ = '"';
+    for (const char* c = arg; ; ++c) {
+      int backslashes = 0;
+      while (*c == '\\') { ++backslashes; ++c; }
+      if (!*c) {   // doubled, so the closing quote isn't escaped
+        for (int i = 0; i < backslashes * 2; ++i) *out++ = '\\';
+        break;
+      }
+      if (*c == '"')
+        backslashes = backslashes * 2 + 1;
+      for (int i = 0; i < backslashes; ++i) *out++ = '\\';
+      *out++ = *c;
+    }
+    *out++ = '"';
+    return out;
+  }
+
+  // The command line CreateProcessW runs: `pathname`, then `argv[1]...`, quoted. A `pathname` with
+  // spaces that isn't a file is a command line already (a shell of "cmd.exe /k init.bat"), as
+  // before arguments were passed on Windows.
+  static wchar_t* windows_command_line(const char* pathname, const char** argv) {
+    size_t size = strlen(pathname) + 3;
+    for (int i = 1; argv[i]; ++i)
+      size += 2 * strlen(argv[i]) + 3;
+    char* line = malloc(size);
+    char* out = line;
+    wchar_t* wide_path = utf8_to_wide(pathname);
+    int is_file = GetFileAttributesW(wide_path) != INVALID_FILE_ATTRIBUTES;
+    free(wide_path);
+    // the program's name has no escapes, only quotes (a path can't contain one)
+    if (strpbrk(pathname, " \t") && is_file)
+      out += sprintf(out, "\"%s\"", pathname);
+    else
+      out += sprintf(out, "%s", pathname);
+    for (int i = 1; argv[i]; ++i) {
+      *out++ = ' ';
+      out = windows_quote_argument(out, argv[i]);
+    }
+    *out = 0;
+    wchar_t* commandline = utf8_to_wide(line);
+    free(line);
+    return commandline;
+  }
+#endif
+
 // Starts a child on a new pty (ConPTY on Windows) of `columns` by `lines`.
 // 0 on success.
 static int terminal_spawn(terminal_t* terminal, int columns, int lines, const char* term_env, const char* pathname, const char** argv, const char** environment) {
@@ -1298,9 +1360,7 @@ static int terminal_spawn(terminal_t* terminal, int columns, int lines, const ch
       goto error;
     }
 
-    int len = MultiByteToWideChar(CP_UTF8, 0, pathname, -1, NULL, 0);
-    wchar_t* commandline = malloc(sizeof(wchar_t)*(len+1));
-    len = MultiByteToWideChar(CP_UTF8, 0, pathname, -1, commandline, len);
+    wchar_t* commandline = windows_command_line(pathname, argv);
     success = CreateProcessW(NULL, commandline, NULL, NULL, TRUE, EXTENDED_STARTUPINFO_PRESENT | CREATE_UNICODE_ENVIRONMENT, (void*)environment[0], NULL, &si_ex.StartupInfo, &terminal->process_information);
     DeleteProcThreadAttributeList(si_ex.lpAttributeList);
     free(si_ex.lpAttributeList);

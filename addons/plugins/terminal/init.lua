@@ -26,7 +26,7 @@ local default_config = {
   omit_escapes = nil,
   -- the default shell to boot up in
   shell = default_shell,
-  -- the arguments to pass to your shell; does not work on windows.
+  -- the arguments to pass to your shell
   arguments = { },
   -- the environmental variable to set on shell instantiation; false unsets one
   environment = {
@@ -178,7 +178,7 @@ default_config.config_spec = set_config_default_values {
   },
   {
     label = "Shell Arguments",
-    description = "Extra arguments to pass to the shell; does not function on windows.",
+    description = "Extra arguments to pass to the shell.",
     path = "arguments", type = "LIST_STRINGS"
   },
   {
