@@ -588,10 +588,18 @@ end
 
 -- The function below is needed to reload the project directories
 -- when the project's module changes.
+---Lists project directory `topdir` again (its top level and shown folders now,
+---if in files_limit mode) and indexes it anew (core.scan_project_directory).
+---@param topdir table
+function core.rescan_project_directory(topdir)
+  if topdir.files_limit then list_shown_subdirs(topdir) end
+  core.scan_project_directory(topdir)
+end
+
+
 function core.rescan_project_directories()
   for _, dir in ipairs(core.project_directories) do
-    if dir.files_limit then list_shown_subdirs(dir) end
-    core.scan_project_directory(dir)
+    core.rescan_project_directory(dir)
   end
 end
 

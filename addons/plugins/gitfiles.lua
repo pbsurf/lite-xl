@@ -6,10 +6,11 @@
 -- treeview (style.git_untracked, green by default). "Show All Files" in the treeview's context menu shows everything
 -- but .git (ignored files dimmed), in any project; it's kept per project.
 --
--- `git status` runs once when a directory is first scanned (blocking; for the
--- repository only, its submodules are asked right after, in the background),
--- then again, in the background, a moment after a change in the project or its
--- git directory (index, HEAD).
+-- git runs in the background, never blocking the editor: when a directory is
+-- first listed (until it answers, the directory is listed by
+-- config.ignore_files and not indexed yet; then listed again and indexed, its
+-- submodules asked about right after), and again a moment after a change in
+-- the project or its git directory (index, HEAD).
 --
 -- While the treeview is focused, the status bar shows the selected entry's
 -- repository: branch, commits ahead of/behind its upstream (as of the last
@@ -115,27 +116,9 @@ local function parse_status(out, prefix)
   return ignored, untracked, summary, changes
 end
 
--- Blocking: the first scan of a directory needs the answer.  Not through a shell
--- (io.popen), whose quoting and redirections differ between systems.
-local function read_command(args)
-  local ok, proc = pcall(process.start, args, { stderr = process.REDIRECT_DISCARD })
-  if not ok then return end
-  local out = {}
-  local deadline = system.get_time() + 30
-  while true do
-    local s = proc:read_stdout(65536)
-    if not s then break end
-    if s == "" then
-      if system.get_time() > deadline then proc:kill() return end
-      proc:wait(2) -- nothing yet: for the process to end, or a moment
-    else
-      table.insert(out, s)
-    end
-  end
-  return proc:wait(1000) == 0 and table.concat(out) or nil
-end
-
--- In a core thread: waits for the output without blocking the editor
+-- In a core thread: waits for the output without blocking the editor. Not
+-- through a shell (io.popen), whose quoting and redirections differ between
+-- systems.
 local function run_command(args)
   local ok, proc = pcall(process.start, args, { stderr = process.REDIRECT_DISCARD })
   if not ok then return end
@@ -180,21 +163,20 @@ local function native_path(path)
   return (path:gsub("/", "\\"))
 end
 
--- Asks git about the directory with run (read_command or run_command): sets
--- the repo's ignored, untracked, summary and changes. git status doesn't look
--- into submodules, so each is asked too (unless `skip_submodules`: one run
--- each, too slow to block on), and what it says about its files is added to
--- the sets (the summary stays the directory's repository's). Returns whether
--- the sets of ignored paths changed.
-local function query(repo, dir_name, run, skip_submodules)
-  local status = run(status_args(dir_name))
+-- Asks git about the directory (in a core thread): sets the repo's ignored,
+-- untracked, summary and changes. git status doesn't look into submodules, so
+-- each is asked too (unless `skip_submodules`: one run each, slow to wait for),
+-- and what it says about its files is added to the sets (the summary stays the
+-- directory's repository's). Returns whether the sets of ignored paths changed.
+local function query(repo, dir_name, skip_submodules)
+  local status = run_command(status_args(dir_name))
   if not status then return false end
   local ignored, untracked, summary, changes = parse_status(status, repo.prefix)
-  local subs = not skip_submodules and run(submodules_args(dir_name)) or ""
+  local subs = not skip_submodules and run_command(submodules_args(dir_name)) or ""
   for path, git_dir in subs:gmatch("([^\0]*)\0([^\0]*)\0") do
     git_dir = native_path(git_dir)
     if path:sub(1, 3) ~= "../" then
-      local sub_status = run(status_args(dir_name .. PATHSEP .. path))
+      local sub_status = run_command(status_args(dir_name .. PATHSEP .. path))
       if sub_status then
         local base = (PATHSEP ~= "/" and path:gsub("/", PATHSEP) or path) .. PATHSEP
         local sub_ignored, sub_untracked, _, sub_changes = parse_status(sub_status, "")
@@ -220,28 +202,56 @@ local function set_stale()
   core.wake("gitfiles")
 end
 
+-- project directory names git is being asked about (not in repos yet)
+local pending = {}
+
+-- Asks git whether the directory is in a repository, and about the repository
+-- (not its submodules: those come with the next update), then lists and
+-- indexes the directory again, now with what git ignores.
+local function resolve(dir_name)
+  local repo = false
+  core.try(function()
+    local out = run_command({ config.plugins.gitfiles.git, "-C", dir_name, "rev-parse", "--show-prefix", "--absolute-git-dir" })
+    local prefix, git_dir = (out or ""):match("^([^\n]*)\n([^\n]+)\n")
+    if git_dir then
+      local r = { git_dir = git_dir, prefix = prefix }
+      query(r, dir_name, true)
+      if r.ignored then
+        repo = r
+        -- the index and HEAD change with add, rm, commit, checkout...
+        git_watch:watch(git_dir)
+      end
+    end
+  end)
+  repos[dir_name] = repo
+  pending[dir_name] = nil
+  local topdir = core.project_dir_by_name(dir_name)
+  if topdir then core.rescan_project_directory(topdir) end
+  if repo then set_stale() end
+end
+
+-- The directory's repository, false if it isn't in one, nil until git has
+-- answered (asked in the background, the first time)
 local function get_repo(dir_name)
   local repo = repos[dir_name]
-  if repo ~= nil then return repo end
-  repo = false
-  local out = read_command({ config.plugins.gitfiles.git, "-C", dir_name, "rev-parse", "--show-prefix", "--absolute-git-dir" })
-  local prefix, git_dir = (out or ""):match("^([^\n]*)\n([^\n]+)\n")
-  if git_dir then
-    local r = { git_dir = git_dir, prefix = prefix }
-    query(r, dir_name, read_command, true)
-    if r.ignored then
-      repo = r
-      -- the index and HEAD change with add, rm, commit, checkout...
-      git_watch:watch(git_dir)
-      -- the submodules, in the background
-      set_stale()
-    end
+  if repo == nil and not pending[dir_name] then
+    pending[dir_name] = true
+    core.add_thread(resolve, nil, dir_name)
   end
-  repos[dir_name] = repo
   return repo
 end
 
 
+-- A directory waiting for git isn't indexed (by config.ignore_files: most of a
+-- build directory, say, then again without it): resolve() indexes it
+local scan_project_directory = core.scan_project_directory
+function core.scan_project_directory(topdir)
+  if get_repo(topdir.name) == nil then return end
+  return scan_project_directory(topdir)
+end
+
+
+-- Until git has answered: config.ignore_files, as outside a repository
 local project_file_filter = dirwatch.project_file_filter
 function dirwatch.project_file_filter(dir, info, ignore_compiled)
   local repo = get_repo(dir.name)
@@ -266,7 +276,7 @@ local function update()
   local rescan = false
   for dir_name, repo in pairs(repos) do
     if repo and is_project_dir(dir_name) then
-      rescan = query(repo, dir_name, run_command) or rescan
+      rescan = query(repo, dir_name) or rescan
       core.redraw = true
     end
   end
