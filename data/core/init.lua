@@ -47,7 +47,7 @@ local MAX_RECENT_FILES = 50
 function core.add_recent_file(abs_filename)
   local recents = core.recent_files
   for i = 1, #recents do
-    if recents[i] == abs_filename then
+    if common.path_equal(recents[i], abs_filename) then
       table.remove(recents, i)
       break
     end
@@ -183,11 +183,11 @@ end
 function core.get_closed_recent_files()
   local open = {}
   for _, view in ipairs(core.root_view.root_node:get_children()) do
-    if view.doc and view.doc.abs_filename then open[view.doc.abs_filename] = true end
+    if view.doc and view.doc.abs_filename then open[common.path_key(view.doc.abs_filename)] = true end
   end
   local files = {}
   for _, path in ipairs(core.recent_files) do
-    if not open[path] and system.get_file_info(path) then table.insert(files, path) end
+    if not open[common.path_key(path)] and system.get_file_info(path) then table.insert(files, path) end
   end
   return files
 end
@@ -199,7 +199,7 @@ local function update_recents_project(action, dir_path_abs)
   local recents = core.recent_projects
   local n = #recents
   for i = 1, n do
-    if dirname == recents[i] then
+    if common.path_equal(dirname, recents[i]) then
       table.remove(recents, i)
       break
     end
@@ -880,7 +880,7 @@ local function add_config_files_hooks()
   function Doc:save(filename, abs_filename)
     local module_filename = system.absolute_path(".lite_project.lua")
     doc_save(self, filename, abs_filename)
-    if self.abs_filename == user_filename or self.abs_filename == module_filename then
+    if common.path_equal(self.abs_filename, user_filename) or common.path_equal(self.abs_filename, module_filename) then
       reload_customizations()
       core.rescan_project_directories()
       core.configure_borderless_window()
@@ -934,8 +934,16 @@ function core.init()
     elseif session.window_mode == "maximized" then
       system.set_window_mode("maximized")
     end
-    core.recent_projects = session.recents or {}
-    core.recent_files = session.recent_files or {}
+    -- without paths that differ only in case (saved by versions that kept both)
+    local function unique_paths(paths)
+      local seen, res = {}, {}
+      for _, path in ipairs(paths or {}) do
+        if not seen[common.path_key(path)] then seen[common.path_key(path)] = true; table.insert(res, path) end
+      end
+      return res
+    end
+    core.recent_projects = unique_paths(session.recents)
+    core.recent_files = unique_paths(session.recent_files)
     core.previous_find = session.previous_find or {}
     core.previous_replace = session.previous_replace or {}
   end
@@ -1605,7 +1613,7 @@ function core.open_doc(filename)
     filename = core.normalize_to_project_dir(filename)
     abs_filename = core.project_absolute_path(filename)
     for _, doc in ipairs(core.docs) do
-      if doc.abs_filename and abs_filename == doc.abs_filename then
+      if doc.abs_filename and common.path_equal(abs_filename, doc.abs_filename) then
         return doc
       end
     end

@@ -212,7 +212,7 @@ command.add(nil, {
       local dirname, filename = view.doc.abs_filename:match("(.*)[/\\](.+)$")
       if dirname then
         dirname = core.normalize_to_project_dir(dirname)
-        text = dirname == core.project_dir and "" or common.home_encode(dirname) .. PATHSEP
+        text = common.path_equal(dirname, core.project_dir) and "" or common.home_encode(dirname) .. PATHSEP
       end
     end
     core.command_view:enter("Open File", {

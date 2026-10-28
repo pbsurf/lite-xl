@@ -420,7 +420,7 @@ function TreeView:get_parent(item)
   local parent_path = common.dirname(item.abs_filename)
   if not parent_path then return end
   for it, _, y in self:each_item() do
-    if it.abs_filename == parent_path then
+    if common.path_equal(it.abs_filename, parent_path) then
       return it, y
     end
   end
@@ -563,7 +563,7 @@ function TreeView:reveal(abs_filename)
   end
   self:get_cached(dir, dir.item, dir.name).expanded = true
   for item, _, y in self:each_item() do
-    if item.abs_filename == abs_filename then
+    if common.path_equal(item.abs_filename, abs_filename) then
       self.selected_item = item
       local lh = self:get_item_height()
       y = y - self.position.y
@@ -681,7 +681,7 @@ local function is_project_folder(path)
 end
 
 local function is_primary_project_folder(path)
-  return core.project_dir == path
+  return common.path_equal(core.project_dir, path)
 end
 
 
@@ -882,7 +882,7 @@ command.add(
         local res, err = os.rename(old_abs_filename, abs_filename)
         if res then -- successfully renamed
           for _, doc in ipairs(core.docs) do
-            if doc.abs_filename and old_abs_filename == doc.abs_filename then
+            if doc.abs_filename and common.path_equal(old_abs_filename, doc.abs_filename) then
               doc:set_filename(filename, abs_filename) -- make doc point to the new filename
               doc:reset_syntax()
               break -- only first needed

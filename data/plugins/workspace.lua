@@ -19,7 +19,7 @@ local function workspace_files_for(project_dir)
     local files = system.list_dir(workspace_dir) or {}
     local n = #basename
     for _, file in ipairs(files) do
-      if file:sub(1, n) == basename then
+      if common.path_equal(file:sub(1, n), basename) then
         local id = tonumber(file:sub(n + 1):match("^-(%d+)$"))
         if id then
           coroutine.yield(workspace_dir .. PATHSEP .. file, id)
@@ -31,16 +31,24 @@ end
 
 
 local function consume_workspace_file(project_dir)
+  -- the newest of those for the project: there can be more than one, saved when
+  -- paths differing in case on Windows were different projects
+  local newest, newest_filename, newest_modified
   for filename, id in workspace_files_for(project_dir) do
     local load_f = loadfile(filename)
     local workspace = load_f and load_f()
-    if workspace and workspace.path == project_dir then
-      -- kept as a backup, not loaded by itself (it might be what crashes): if
-      -- the editor dies before saving anew, renaming it back restores this
-      os.remove(filename .. ".bak")
-      os.rename(filename, filename .. ".bak")
-      return workspace
+    local info = system.get_file_info(filename)
+    if workspace and info and common.path_equal(workspace.path, project_dir)
+    and (not newest or info.modified > newest_modified) then
+      newest, newest_filename, newest_modified = workspace, filename, info.modified
     end
+  end
+  if newest then
+    -- kept as a backup, not loaded by itself (it might be what crashes): if
+    -- the editor dies before saving anew, renaming it back restores this
+    os.remove(newest_filename .. ".bak")
+    os.rename(newest_filename, newest_filename .. ".bak")
+    return newest
   end
 end
 

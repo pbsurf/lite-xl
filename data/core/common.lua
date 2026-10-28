@@ -718,12 +718,30 @@ function common.is_absolute_path(path)
 end
 
 
+---A path for comparing with others: lowercased on Windows, where paths ignore case
+---(only ASCII letters' though).
+---@param path string
+---@return string
+function common.path_key(path)
+  return PLATFORM == "Windows" and path:lower() or path
+end
+
+
+---Checks whether two paths are spelled the same, ignoring case on Windows.
+---@param a string|nil
+---@param b string|nil
+---@return boolean
+function common.path_equal(a, b)
+  return a == b or (a ~= nil and b ~= nil and common.path_key(a) == common.path_key(b))
+end
+
+
 ---Checks whether a path belongs to a parent directory.
 ---@param filename string The path to check.
 ---@param path string The parent path.
 ---@return boolean
 function common.path_belongs_to(filename, path)
-  return string.find(filename, path .. PATHSEP, 1, true) == 1
+  return string.find(common.path_key(filename), common.path_key(path) .. PATHSEP, 1, true) == 1
 end
 
 
@@ -734,7 +752,7 @@ end
 function common.relative_path(ref_dir, dir)
   local drive_pattern = "^(%a):\\"
   local drive, ref_drive = dir:match(drive_pattern), ref_dir:match(drive_pattern)
-  if drive and ref_drive and drive ~= ref_drive then
+  if drive and ref_drive and drive:upper() ~= ref_drive:upper() then
     -- Windows, different drives, system.absolute_path fails for C:\..\D:\
     return dir
   end
@@ -742,7 +760,7 @@ function common.relative_path(ref_dir, dir)
   local dir_ls = split_on_slash(dir)
   local i = 1
   while i <= #ref_ls do
-    if dir_ls[i] ~= ref_ls[i] then
+    if not common.path_equal(dir_ls[i], ref_ls[i]) then
       break
     end
     i = i + 1
