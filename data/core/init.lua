@@ -436,7 +436,7 @@ function core.scan_project_directory(topdir)
   -- changed: absolute paths of the directories changed during the scan
   local scan = { files = {}, n_files = 0, changed = {} }
   topdir.scan = scan
-  local t0
+  local t0, task
   -- false once the scan is stopped: "limit" or "cancelled" in scan.stopped
   local function scan_dir(path)
     topdir.watch:watch(path == "" and topdir.name or topdir.name .. PATHSEP .. path)
@@ -450,6 +450,7 @@ function core.scan_project_directory(topdir)
       if info.type == "file" then scan.n_files = scan.n_files + 1 end
       if system.get_time() - t0 > 0.5 / config.fps then
         core.redraw = true
+        task:update(common.format_count(scan.n_files) .. (scan.n_files == 1 and " file" or " files"))
         coroutine.yield(0)
         if topdir.scan ~= scan or not is_project_directory(topdir) then
           scan.stopped = "cancelled"
@@ -462,7 +463,7 @@ function core.scan_project_directory(topdir)
     return true
   end
 
-  core.add_thread(function()
+  local function run()
     t0 = system.get_time()
     scan_dir("")
     if scan.stopped == "cancelled" then return end
@@ -506,6 +507,12 @@ function core.scan_project_directory(topdir)
     topdir.is_dirty = true
     topdir.files_change_id = (topdir.files_change_id or 0) + 1
     core.redraw = true
+  end
+
+  core.add_thread(function()
+    task = core.add_task("Indexing " .. common.basename(topdir.name))
+    core.try(run)
+    task:done()
   end)
 end
 
@@ -1633,6 +1640,61 @@ end
 function core.unwatch_readable(source)
   system.unwatch_readable(source)
   core.wake("readable:" .. source)
+end
+
+
+---@class core.task
+---@field label string what's being done, e.g. "Indexing maps"
+---@field progress? string how far it is, e.g. "1,200 files"
+---@field start number system.get_time() when it was added
+local Task = {}
+Task.__index = Task
+
+---Sets (or clears, with nil) how far the task is.
+---@param progress? string
+function Task:update(progress)
+  if self.progress ~= progress then
+    self.progress = progress
+    core.redraw = true
+  end
+end
+
+---Ends the task: it's no longer shown.
+function Task:done()
+  for i, task in ipairs(core.tasks) do
+    if task == self then
+      table.remove(core.tasks, i)
+      core.redraw = true
+      return
+    end
+  end
+end
+
+---Background work running, oldest first (see core.add_task): the status bar
+---shows those running for core.task_delay seconds or more.
+---@type core.task[]
+core.tasks = {}
+
+---How long a task runs before it's shown, so that quick ones don't flicker.
+core.task_delay = 0.5
+
+---Adds a task: background work to show on the status bar while it runs, so
+---that what isn't finished (an index, a status) isn't taken for complete. End
+---it with task:done(), however the work ends (an error included).
+---@param label string
+---@param progress? string
+---@return core.task
+function core.add_task(label, progress)
+  local task = setmetatable({ label = label, progress = progress, start = system.get_time() }, Task)
+  table.insert(core.tasks, task)
+  -- a redraw when it's due to show
+  core.add_thread(function()
+    coroutine.yield(core.task_delay)
+    for _, t in ipairs(core.tasks) do
+      if t == task then core.redraw = true end
+    end
+  end)
+  return task
 end
 
 

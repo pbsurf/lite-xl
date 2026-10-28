@@ -168,13 +168,19 @@ end
 -- each is asked too (unless `skip_submodules`: one run each, slow to wait for),
 -- and what it says about its files is added to the sets (the summary stays the
 -- directory's repository's). Returns whether the sets of ignored paths changed.
-local function query(repo, dir_name, skip_submodules)
+-- With `task` (core.add_task), its progress counts the submodules asked.
+local function query(repo, dir_name, skip_submodules, task)
   local status = run_command(status_args(dir_name))
   if not status then return false end
   local ignored, untracked, summary, changes = parse_status(status, repo.prefix)
   local subs = not skip_submodules and run_command(submodules_args(dir_name)) or ""
+  local n_subs, done = select(2, subs:gsub("[^\0]*\0[^\0]*\0", "")), 0
   for path, git_dir in subs:gmatch("([^\0]*)\0([^\0]*)\0") do
     git_dir = native_path(git_dir)
+    if task then
+      task:update(string.format("%d/%d submodules", done, n_subs))
+      done = done + 1
+    end
     if path:sub(1, 3) ~= "../" then
       local sub_status = run_command(status_args(dir_name .. PATHSEP .. path))
       if sub_status then
@@ -210,6 +216,7 @@ local pending = {}
 -- indexes the directory again, now with what git ignores.
 local function resolve(dir_name)
   local repo = false
+  local task = core.add_task("Asking git about " .. common.basename(dir_name))
   core.try(function()
     local out = run_command({ config.plugins.gitfiles.git, "-C", dir_name, "rev-parse", "--show-prefix", "--absolute-git-dir" })
     local prefix, git_dir = (out or ""):match("^([^\n]*)\n([^\n]+)\n")
@@ -223,6 +230,7 @@ local function resolve(dir_name)
       end
     end
   end)
+  task:done()
   repos[dir_name] = repo
   pending[dir_name] = nil
   local topdir = core.project_dir_by_name(dir_name)
@@ -276,7 +284,10 @@ local function update()
   local rescan = false
   for dir_name, repo in pairs(repos) do
     if repo and is_project_dir(dir_name) then
-      rescan = query(repo, dir_name) or rescan
+      local task = core.add_task("Updating git status of " .. common.basename(dir_name))
+      local ok, changed = core.try(query, repo, dir_name, false, task)
+      task:done()
+      rescan = (ok and changed) or rescan
       core.redraw = true
     end
   end

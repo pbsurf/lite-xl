@@ -221,6 +221,7 @@ function StatusView:new()
   self:register_log_item()
   self:register_docview_items()
   self:register_command_items()
+  self:register_tasks_item()
   self:register_panel_item()
 end
 
@@ -370,6 +371,49 @@ function StatusView:register_command_items()
       return docs .. "; project too large to index (see \"Core: Index Project\"): files are "
         .. "counted in expanded folders only, and the file finder falls back to Open File"
     end
+  })
+end
+
+
+-- the tasks (core.add_task) running long enough to show, oldest first
+local function shown_tasks()
+  local now, shown = system.get_time(), {}
+  for _, task in ipairs(core.tasks) do
+    if now - task.start >= core.task_delay then table.insert(shown, task) end
+  end
+  return shown
+end
+
+local function task_text(task)
+  return task.progress and task.label .. ": " .. task.progress or task.label
+end
+
+---Background work (core.add_task), on the right while some runs: the oldest
+---task (staying put while newer ones come and go), "+N" for the others, all of
+---them in the tooltip.
+function StatusView:register_tasks_item()
+  if self:get_item("core:tasks") then return end
+  self:add_item({
+    name = "core:tasks",
+    alignment = StatusView.Item.RIGHT,
+    predicate = function() return #shown_tasks() > 0 end,
+    get_item = function()
+      local tasks = shown_tasks()
+      if #tasks == 0 then return {} end
+      local t = { style.dim, task_text(tasks[1]) .. "…" }
+      if #tasks > 1 then
+        table.insert(t, style.text)
+        table.insert(t, " +" .. (#tasks - 1))
+      end
+      return t
+    end,
+    tooltip = function()
+      local lines, now = {}, system.get_time()
+      for _, task in ipairs(shown_tasks()) do
+        table.insert(lines, string.format("%s (%ds)", task_text(task), math.floor(now - task.start)))
+      end
+      return table.concat(lines, "\n")
+    end,
   })
 end
 
