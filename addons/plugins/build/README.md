@@ -16,7 +16,7 @@ Targets are the basis of the build plugin. Different build systems can co-exist 
 
 Builds, cleans and runs happen in a terminal, a tab in the bottom panel (f6 shows or hides it; its title is the build's status). Each command a backend runs gets a pty of its own in it, after the output of the commands before, so colors, progress lines and ctrl+c work as in a shell, and a program run reads the keyboard. A dim line shows each command; a line at the end says how the build went.
 
-Lines in gcc's and clang's format, `file:line:column: type: message`, are found as they're written, with paths relative to the command's directory, or to the one make or ninja says it's entering. Clicking one opens its file there; f4 and shift+f4 go to the next and previous error or warning of the last build, and the status bar shows how many there were (or that it failed). Clicking that, or Show Problems in the build menu (`build:show-problems`), opens the Problems panel: the last build's errors, warnings and notes, filled in as it runs. Selecting one there (arrow keys, a click) shows its file and marks it in the terminal; Enter or a double click goes there, as in project search's results.
+Lines in gcc's and clang's format, `file:line:column: type: message`, or MSVC's, `file(line,column): type code: message`, are found as they're written, with paths relative to the command's directory, or to the one make or ninja says it's entering. Clicking one opens its file there; f4 and shift+f4 go to the next and previous error or warning of the last build, and the status bar shows how many there were (or that it failed). Clicking that, or Show Problems in the build menu (`build:show-problems`), opens the Problems panel: the last build's errors, warnings and notes, filled in as it runs. Selecting one there (arrow keys, a click) shows its file and marks it in the terminal; Enter or a double click goes there, as in project search's results.
 
 ### Backends
 
@@ -25,7 +25,7 @@ Backends **should** supply the following methods:
 * `build(target, callback)`: Builds the specified target, then calls `callback(status)` with the exit status (0 for success).
 * `clean(target, callback)`: Cleans the specified target, then calls `callback(status)`.
 
-These run in a thread. A command runs with `build.run_command(cmd, on_done)`: `cmd` is a list, the program then its arguments, with optional `cwd` (default: the project's directory) and `env` (variables added); `on_done(status)` is called once it exits, and can run the next one. A backend's build usually ends with `build.run_command(cmd, callback)`.
+These run in a thread. A command runs with `build.run_command(cmd, on_done)`: `cmd` is a list, the program then its arguments, with optional `cwd` (default: the project's directory) and `env` (variables added); `on_done(status)` is called once it exits, and can run the next one. A backend's build usually ends with `build.run_command(cmd, callback)`. `build.shell_command(line)` is the command running a command line with the shell (`$SHELL -c`, or `cmd /c` on Windows), and `build.shell_quote(word)` quotes a word for it.
 
 Backends **can** supply the following methods:
 
@@ -40,7 +40,7 @@ The `make` backend engages with `Makefile`s. If a `Makefile` exists, by default,
 
 #### shell
 
-The `shell` backend engages with a file called `build.sh`. If a `build.sh` file exists, by default the backend will infer a `debug` target, which will call the `build.sh` file with `-g`, and a `release` target, which will call the `build.sh` file with no arguments.
+The `shell` backend engages with a file called `build.sh` (on Windows also `build.bat` or `build.cmd`, run by `cmd`, which come first). If one exists, by default the backend will infer a `debug` target, which will call it with `-g`, and a `release` target, which will call it with no arguments.
 
 #### meson
 
@@ -48,7 +48,7 @@ The `meson` backend engages with a `meson.build` file. If a `meson.build` file e
 
 #### vscode
 
-The `vscode` backend reads VS Code's `.vscode/launch.json` and `.vscode/tasks.json` (comments and trailing commas allowed, with the `linux`/`osx`/`windows` overrides). Each launch configuration with `"request": "launch"` is a target: building runs its `preLaunchTask` (after the tasks in its `dependsOn`, in sequence), and running starts its `program` with its `args`, in its `cwd`, with its `environment` (or `env`). For the native debugger types (`cppdbg`, `gdb`, `lldb`), the debugger plugin debugs that program the same way, after the configuration's `setupCommands`; other types with a `command` (`node-terminal`) or a `program` are only run. Each task is a target too, build only: `shell` tasks run their command line with `$SHELL -c` (or `options.shell`), `process` and `cppbuild` tasks run their command directly, in `options.cwd` with `options.env`. Errors are found as gcc's (`$gcc`).
+The `vscode` backend reads VS Code's `.vscode/launch.json` and `.vscode/tasks.json` (comments and trailing commas allowed, with the `linux`/`osx`/`windows` overrides). Each launch configuration with `"request": "launch"` is a target: building runs its `preLaunchTask` (after the tasks in its `dependsOn`, in sequence), and running starts its `program` with its `args`, in its `cwd`, with its `environment` (or `env`). For the native debugger types (`cppdbg`, `gdb`, `lldb`), the debugger plugin debugs that program the same way, after the configuration's `setupCommands`; other types with a `command` (`node-terminal`) or a `program` are only run. Each task is a target too, build only: `shell` tasks run their command line with `$SHELL -c` (`cmd /c` on Windows, or `options.shell`), `process` and `cppbuild` tasks run their command directly, in `options.cwd` with `options.env`. Errors are found as gcc's or MSVC's (`$gcc`, `$msCompile`).
 
 Variables: `${workspaceFolder}`, `${workspaceFolderBasename}`, `${file}`, `${relativeFile}`, `${fileBasename}`, `${fileBasenameNoExtension}`, `${fileDirname}`, `${fileExtname}`, `${lineNumber}`, `${selectedText}`, `${cwd}`, `${userHome}`, `${pathSeparator}` and `${env:NAME}`. Not supported: other variables, other problem matchers, background tasks, `presentation`, parallel `dependsOrder`, compound and attach configurations, `stopAtEntry`.
 

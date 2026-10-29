@@ -4,13 +4,13 @@
 -- types: cppdbg, gdb, lldb), then one per task, build only.
 --
 -- Supported: JSON with comments and trailing commas; the "linux"/"osx"/
--- "windows" overrides; tasks of type shell (a command line, run by $SHELL -c
--- or options.shell) and process/cppbuild (run directly), with options.cwd and
--- options.env (over tasks.json's top-level options), dependsOn (run in
--- sequence); launch configurations' program, args, cwd, environment (or env)
+-- "windows" overrides; tasks of type shell (a command line, run by $SHELL -c,
+-- cmd /c on Windows, or options.shell) and process/cppbuild (run directly),
+-- with options.cwd and options.env (over tasks.json's top-level options),
+-- dependsOn (run in sequence); launch configurations' program, args, cwd, environment (or env)
 -- and setupCommands, or a command (node-terminal), run in the build terminal.
--- Errors are found by build's gcc-style parser (as "$gcc"), with paths
--- relative to the task's cwd. Variables: ${workspaceFolder}, ${workspaceFolderBasename},
+-- Errors are found by build's parser of gcc's and MSVC's formats (as "$gcc"
+-- and "$msCompile"), with paths relative to the task's cwd. Variables: ${workspaceFolder}, ${workspaceFolderBasename},
 -- ${file}, ${relativeFile}, ${fileBasename}, ${fileBasenameNoExtension},
 -- ${fileDirname}, ${fileExtname}, ${lineNumber}, ${selectedText}, ${cwd},
 -- ${userHome}, ${pathSeparator}, ${env:NAME}.
@@ -123,7 +123,7 @@ function vscode.substitute(value)
     if name == "workspaceFolder" or name == "workspaceRoot" then return root end
     if name == "workspaceFolderBasename" then return common.basename(root) end
     if name == "cwd" then return root end
-    if name == "userHome" then return os.getenv("HOME") or "" end
+    if name == "userHome" then return os.getenv("HOME") or os.getenv("USERPROFILE") or "" end
     if name == "pathSeparator" or name == "/" then return PATHSEP end
     local file_vars = {
       file = true, relativeFile = true, fileBasename = true, fileBasenameNoExtension = true,
@@ -148,10 +148,7 @@ function vscode.substitute(value)
   end))
 end
 
-local function shell_quote(s)
-  if s:match("^[%w%-%._/=:,@+]+$") then return s end
-  return "'" .. s:gsub("'", "'\\''") .. "'"
-end
+local shell_quote = build.shell_quote
 
 local function absolute(path)
   return common.normalize_path(common.is_absolute_path(path) and path or core.root_project().path .. PATHSEP .. path)
@@ -187,9 +184,7 @@ local function task_command(task, defaults)
       table.insert(line, type(arg) == "table" and shell_quote(tostring(arg.value)) or shell_quote(tostring(arg)))
     end
     local shell = options.shell or {}
-    cmd = { shell.executable or os.getenv("SHELL") or "/bin/sh" }
-    for _, arg in ipairs(shell.args or { "-c" }) do table.insert(cmd, arg) end
-    table.insert(cmd, table.concat(line, " "))
+    cmd = build.shell_command(table.concat(line, " "), shell.executable, shell.args)
   else
     cmd = { command }
     for _, arg in ipairs(args) do

@@ -154,17 +154,29 @@ local function jump_to_file(file, line, col)
 end
 
 
----A compiler's message in a line of output, in gcc's and clang's format:
----`file:line:[column:] [type:] message`; nil if it isn't one. The type is
----"error" (a fatal error too), "warning" or "info" (a note, or a location with
----no type, as in "In file included from"). The file isn't checked here.
+---A compiler's message in a line of output, in gcc's and clang's format,
+---`file:line:[column:] [type:] message`, or MSVC's, `file(line[,column]):
+---type [code]: message`; nil if it isn't one. The type is "error" (a fatal
+---error too), "warning" or "info" (a note, or a location with no type, as in
+---"In file included from"). The file isn't checked here.
 ---@param line string
 ---@return { type: string, file: string, line: integer, col: integer, message: string }?
 function build.parse_compile_line(line)
   local text = line:gsub("^In file included from ", "")
-  local file, line_number, column, rest = text:match("^%s*([^:%s][^:]*):(%d+):(%d*):? ?(.*)")
-  if not file then return nil end
-  local kind, message = rest:match("^(%a[%a ]*):%s+(.*)")
+  -- the colon of a drive (C:\) isn't a separator
+  local drive, path_text = text:match("^%s*(%a:)([\\/].*)")
+  local file, line_number, column, rest = (path_text or text):match("^%s*([^:%s][^:]*):(%d+):(%d*):? ?(.*)")
+  if not file then
+    file, line_number, column, rest = text:match("^%s*(%S.-)%((%d+),?(%d*)[^)]*%)%s*:%s*(.*)")
+    if not file then return nil end
+    -- MSBuild adds the project's path, cut where it wraps the line at the
+    -- terminal's width
+    rest = rest:gsub("%s+%[%a:[\\/][^%]]*%]?%s*$", "")
+  elseif drive then
+    file = drive .. file
+  end
+  local kind, code, message = rest:match("^(%a[%a ]-)%s*(%u*%d*):%s+(.*)")
+  if code and code ~= "" then message = code .. ": " .. message end
   if kind == "error" or kind == "fatal error" then
     kind = "error"
   elseif kind == "note" then
@@ -179,16 +191,53 @@ function build.parse_compile_line(line)
 end
 
 
-local function shell_quote(s)
+---A word as typed in the shell build.shell_command runs: quoted for sh, or
+---on Windows for cmd and the program's own splitting of its command line
+---(backslashes are literal except before a quote).
+function build.shell_quote(s)
+  if PLATFORM == "Windows" then
+    if s ~= "" and not s:find('[%s"&|<>^(),;=%%!]') then return s end
+    s = s:gsub('(\\*)"', function(backslashes) return backslashes .. backslashes .. '\\"' end)
+    return '"' .. s:gsub("(\\+)$", "%1%1") .. '"'
+  end
   if s:match("^[%w%-%._/=:,@+]+$") then return s end
   return "'" .. s:gsub("'", "'\\''") .. "'"
 end
+local shell_quote = build.shell_quote
 
----A command as it would be typed in a shell.
+---A command as it would be typed in a shell. On Windows a program with
+---spaces that isn't a file is a command line already (as for libterminal).
 function build.command_line(cmd)
   local words = {}
-  for _, arg in ipairs(cmd) do table.insert(words, shell_quote(tostring(arg))) end
+  for i, arg in ipairs(cmd) do
+    arg = tostring(arg)
+    if i == 1 and PLATFORM == "Windows" and arg:find("%s") and not system.get_file_info(arg) then
+      table.insert(words, arg)
+    else
+      table.insert(words, shell_quote(arg))
+    end
+  end
   return table.concat(words, " ")
+end
+
+---The command running `line` with a shell: `shell` (default: $SHELL, else sh;
+---on Windows %COMSPEC%, cmd) with `args` before it (default: -c; cmd's /d /c).
+function build.shell_command(line, shell, args)
+  if PLATFORM == "Windows" then
+    shell = shell or os.getenv("COMSPEC") or "cmd.exe"
+    local name = shell:match("[^\\/]*$"):lower()
+    if name == "cmd" or name == "cmd.exe" then
+      -- cmd takes the rest of its command line as is, not split into
+      -- arguments, so that's given as a command line (/s: the line is what's
+      -- between the first and last quote)
+      return { '"' .. shell .. '" /s ' .. table.concat(args or { "/d", "/c" }, " ") .. ' "' .. line .. '"' }
+    end
+  else
+    shell = shell or os.getenv("SHELL") or "sh"
+  end
+  local cmd = { shell, table.unpack(args or { "-c" }) }
+  table.insert(cmd, line)
+  return cmd
 end
 
 
@@ -379,12 +428,12 @@ function build.get_run_command(target, program, arguments, shell_line)
   target = target or build.targets[build.state.target]
   local cmd
   if shell_line then
-    cmd = { os.getenv("SHELL") or "sh", "-c", program }
+    cmd = build.shell_command(program)
   else
     program = core.root_project():absolute_path(program)
     arguments = arguments or config.target_binary_arguments or {}
     if type(arguments) == "string" then
-      cmd = { os.getenv("SHELL") or "sh", "-c", shell_quote(program) .. " " .. arguments }
+      cmd = build.shell_command(shell_quote(program) .. " " .. arguments)
     else
       cmd = { program, table.unpack(arguments) }
     end
@@ -778,7 +827,7 @@ function BuildView:run(cmd, on_done)
   self:write(sgr_color(style.dim) .. "$ " .. line .. "\x1b[0m\r\n")
   local args = {}
   for i = 2, #cmd do args[i - 1] = tostring(cmd[i]) end
-  local ok, err = pcall(terminal.spawn, terminal, self.options.term, cmd[1], args, env)
+  local ok, err = pcall(terminal.spawn, terminal, self.options.term, cmd[1], args, TerminalView.native_environment(env))
   if not ok then
     self:write(sgr_color(build.error_color) .. err .. "\x1b[0m\r\n")
     on_done(-1)
@@ -792,8 +841,10 @@ function BuildView:run(cmd, on_done)
       if read then core.redraw = true end
       local source = terminal:watch_source()
       -- done once the output has ended, or the program exited and there's no more
-      -- (a program it started in the background can keep the pty open)
-      if not source or (not read and terminal:exited()) then break end
+      -- (a program it started in the background can keep the pty open); on
+      -- Windows only once it has ended, which it does on exiting, after output
+      -- the pseudoconsole still had
+      if not source or (not read and PLATFORM ~= "Windows" and terminal:exited()) then break end
       if read then
         coroutine.yield(1 / config.fps)
       else
