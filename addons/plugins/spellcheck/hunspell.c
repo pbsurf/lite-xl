@@ -6,7 +6,12 @@
 //   h:suggest("teh")    --> { "the", "tea", ... }
 //   h:add("lite")       -- accepted from now on (this instance only, not saved)
 
+#include <stdio.h>
+#include <string.h>
 #include <hunspell.h>
+#ifdef _WIN32
+  #include <windows.h>
+#endif
 
 #define LITE_XL_PLUGIN_ENTRYPOINT
 #include <lite_xl_plugin_api.h>
@@ -14,6 +19,32 @@
 #define HUNSPELL_MT "hunspell"
 
 typedef struct { Hunhandle* h; } hunspell_t;
+
+// Whether a file can be read. Pushes the path as hunspell takes it: on Windows an
+// absolute one gets the long path prefix (\\?\, backslashes only), with which hunspell
+// opens it as UTF-8, as the editor's paths are, rather than in the ANSI code page.
+static int push_path(lua_State* L, const char* path) {
+#ifdef _WIN32
+  int absolute = ((path[0] && path[1] == ':') || (path[0] == '\\' && path[1] == '\\'))
+    && strncmp(path, "\\\\?\\", 4) != 0;
+  luaL_Buffer b;
+  luaL_buffinit(L, &b);
+  if (absolute)
+    luaL_addstring(&b, path[1] == ':' ? "\\\\?\\" : "\\\\?\\UNC");
+  for (const char* c = absolute && path[1] != ':' ? path + 1 : path; *c; ++c)
+    luaL_addchar(&b, absolute && *c == '/' ? '\\' : *c);
+  luaL_pushresult(&b);
+  wchar_t wide[4096];
+  if (!MultiByteToWideChar(CP_UTF8, 0, path, -1, wide, sizeof(wide) / sizeof(wide[0])))
+    return 0;
+  FILE* fp = _wfopen(wide, L"r");
+#else
+  lua_pushstring(L, path);
+  FILE* fp = fopen(path, "r");
+#endif
+  if (fp) fclose(fp);
+  return fp != NULL;
+}
 
 static Hunhandle* check(lua_State* L) {
   hunspell_t* self = luaL_checkudata(L, 1, HUNSPELL_MT);
@@ -28,16 +59,14 @@ static int f_new(lua_State* L) {
   const char* dic = luaL_checkstring(L, 2);
   const char* paths[] = { aff, dic };
   for (int i = 0; i < 2; i++) {
-    FILE* fp = fopen(paths[i], "r");
-    if (!fp) {
+    if (!push_path(L, paths[i])) {
       lua_pushnil(L);
       lua_pushfstring(L, "cannot read %s", paths[i]);
       return 2;
     }
-    fclose(fp);
   }
   hunspell_t* self = lua_newuserdata(L, sizeof(hunspell_t));
-  self->h = Hunspell_create(aff, dic);
+  self->h = Hunspell_create(lua_tostring(L, -3), lua_tostring(L, -2));
   luaL_setmetatable(L, HUNSPELL_MT);
   return 1;
 }

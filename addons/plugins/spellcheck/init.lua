@@ -15,9 +15,15 @@ local StatusView = require "core.statusview"
 local ContextMenu = require "core.contextmenu"
 local shapes = require "libraries.shapes"
 
+-- the dictionary used unless configured: en_US in the user dir's dictionaries/ (where
+-- lite-xl's InstallAddons.cmake puts it), else the system's (Linux)
+local user_en_US = USERDIR .. PATHSEP .. "dictionaries" .. PATHSEP .. "en_US"
+local default_dictionary = system.get_file_info(user_en_US .. ".dic") and user_en_US
+  or "/usr/share/hunspell/en_US"
+
 config.plugins.spellcheck = common.merge({
   -- hunspell dictionary: path of its .aff and .dic files, without the extension
-  dictionary = "/usr/share/hunspell/en_US",
+  dictionary = default_dictionary,
   -- words accepted besides the dictionary's, one per line; "Add to Dictionary"
   -- appends to it
   user_dictionary = USERDIR .. PATHSEP .. "spellcheck_words.txt",
@@ -33,7 +39,7 @@ config.plugins.spellcheck = common.merge({
       description = "Path of the hunspell .aff and .dic files, without the extension.",
       path = "dictionary",
       type = "string",
-      default = "/usr/share/hunspell/en_US"
+      default = default_dictionary
     },
     {
       label = "Minimum Length",
@@ -67,7 +73,7 @@ local function get_checker()
   if checker or load_error then return checker end
   local ok, hunspell = pcall(require, "plugins.spellcheck.hunspell")
   if not ok then
-    load_error = "native module missing (built by lite-xl's meson build): " .. hunspell
+    load_error = "native module missing (built by lite-xl's meson or CMake build): " .. hunspell
   else
     local dict = config.plugins.spellcheck.dictionary
     checker, load_error = hunspell.new(dict .. ".aff", dict .. ".dic")

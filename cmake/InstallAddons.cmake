@@ -10,7 +10,9 @@
 #   cmake -DSRC=<lite-xl checkout> -DUSERDIR=<user dir> [-DBUILD=<build dir>] [-DCOPY=ON] \
 #         [-DADDONS="id;id;..."] -P InstallAddons.cmake
 #
-# On Windows, clangd is installed into <user dir>/tools/clangd too (-DCLANGD=OFF: not).
+# On Windows, clangd is installed into <user dir>/tools/clangd too (-DCLANGD=OFF: not), and
+# with spellcheck, hunspell's en_US dictionary into <user dir>/dictionaries (-DDICTIONARY=OFF:
+# not), where the plugin looks first.
 #
 # Keep ADDONS' default in step with the --symlink list in the user dir's addons.sh.
 
@@ -48,6 +50,9 @@ set(UPSTREAM
 set(upstream_ids json bracketmatch language_make font_symbols_nerdfont_mono_regular)
 # installed on request, or as a dependency of an add-on of ours
 set(UPSTREAM_DEFAULT json bracketmatch language_make)
+
+# the native modules of ours, built into <build>/addons/plugins/<add-on>: <add-on>|<module>
+set(NATIVE "terminal|libterminal" "spellcheck|hunspell")
 
 # ---- our add-ons, from the manifest ------------------------------------------------------
 file(READ "${SRC}/manifest.json" manifest)
@@ -95,6 +100,44 @@ foreach(id ${ADDONS})
   endforeach()
 endforeach()
 
+# Downloads <url> to <dest>, checked against <sha> (SHA256), unless it's there already
+function(download dest url sha)
+  if(EXISTS "${dest}")
+    file(SHA256 "${dest}" have)
+  else()
+    set(have)
+  endif()
+  if(NOT have STREQUAL sha)
+    get_filename_component(dir "${dest}" DIRECTORY)
+    file(MAKE_DIRECTORY "${dir}")
+    file(DOWNLOAD "${url}" "${dest}" EXPECTED_HASH SHA256=${sha} STATUS st)
+    list(GET st 0 code)
+    if(NOT code EQUAL 0)
+      file(REMOVE "${dest}")
+      message(FATAL_ERROR "downloading ${url}: ${st}")
+    endif()
+  endif()
+endfunction()
+
+# Sets <var> to the files of add-on <id>'s native module in BUILD (none if it has none),
+# with a warning if it has one that isn't built
+function(find_native id var)
+  set(found)
+  foreach(entry ${NATIVE})
+    string(REPLACE "|" ";" f "${entry}")
+    list(GET f 0 nid)
+    list(GET f 1 module)
+    if(nid STREQUAL id)
+      file(GLOB found "${BUILD}/addons/plugins/${id}/${module}.*-*.*")
+      list(FILTER found EXCLUDE REGEX "\\.(pdb|ilk|exp|lib)$")
+      if(NOT found)
+        message(WARNING "${id}: no ${module} in ${BUILD}/addons/plugins/${id}; build it (a default target of the CMake build)")
+      endif()
+    endif()
+  endforeach()
+  set(${var} "${found}" PARENT_SCOPE)
+endfunction()
+
 foreach(id ${wanted})
   if(id IN_LIST ours)
     if(NOT path_${id} MATCHES "^addons/(plugins|libraries|colors)/")
@@ -113,26 +156,20 @@ foreach(id ${wanted})
         file(REMOVE_RECURSE "${dest}")
         message(STATUS "removed the copy of ${id} (${kind}/${name}): used from ${SRC}/addons")
       endif()
-      if(BUILD AND id STREQUAL "terminal")
-        file(GLOB modules "${BUILD}/addons/plugins/terminal/libterminal.*-*.*")
-        if(NOT modules)
-          message(WARNING "terminal: no libterminal in ${BUILD}/addons/plugins/terminal; build the libterminal target")
-        endif()
+      if(BUILD)
+        find_native(${id} modules)
       endif()
       continue()
     endif()
     file(REMOVE_RECURSE "${dest}")   # also drops files an update removed, or a hard link
     file(COPY "${from}" DESTINATION "${USERDIR}/${kind}")
     message(STATUS "installed ${id} (${kind}/${name})")
-    # the add-on's native module, built into <build>/addons/plugins/terminal, goes into its directory
-    if(BUILD AND id STREQUAL "terminal")
-      file(GLOB modules "${BUILD}/addons/plugins/terminal/libterminal.*-*.*")
-      list(FILTER modules EXCLUDE REGEX "\\.(pdb|ilk|exp|lib)$")
+    # the add-on's native module, built into <build>/addons/plugins/<add-on>, goes into its directory
+    if(BUILD)
+      find_native(${id} modules)
       if(modules)
         file(COPY ${modules} DESTINATION "${dest}")
         message(STATUS "  with its native module")
-      else()
-        message(WARNING "terminal: no libterminal in ${BUILD}/addons/plugins/terminal; build the libterminal target")
       endif()
     endif()
   elseif(id IN_LIST upstream_ids)
@@ -145,28 +182,34 @@ foreach(id ${wanted})
       list(GET f 1 rel)
       list(GET f 2 url)
       list(GET f 3 sha)
-      set(dest "${USERDIR}/${rel}")
-      if(EXISTS "${dest}")
-        file(SHA256 "${dest}" have)
-      else()
-        set(have)
-      endif()
-      if(NOT have STREQUAL sha)
-        get_filename_component(dir "${dest}" DIRECTORY)
-        file(MAKE_DIRECTORY "${dir}")
-        file(DOWNLOAD "${url}" "${dest}" EXPECTED_HASH SHA256=${sha} STATUS st)
-        list(GET st 0 code)
-        if(NOT code EQUAL 0)
-          file(REMOVE "${dest}")
-          message(FATAL_ERROR "downloading ${url}: ${st}")
-        endif()
-      endif()
+      download("${USERDIR}/${rel}" "${url}" ${sha})
       message(STATUS "installed ${id} (${rel})")
     endforeach()
   else()
     message(FATAL_ERROR "unknown add-on: ${id}")
   endif()
 endforeach()
+
+# ---- spellcheck's dictionary: en_US into <USERDIR>/dictionaries (Windows) ------------------
+# SCOWL's (2020.12.07, as Debian's hunspell-en-us) from LibreOffice's dictionaries, with its
+# README (the license).  Linux has the system's, /usr/share/hunspell.  -DDICTIONARY=OFF skips it.
+set(dict_url https://raw.githubusercontent.com/LibreOffice/dictionaries/4fa94195b8136364dd40bf2b0366a0fe32058899/en)
+set(DICT_FILES
+  "en_US.aff|c7a8c4d08c29d237880844b1623099f59092602f189be38ce3912e457ff38bc1"
+  "en_US.dic|f0b1a234bd178bdd01875b2a392a9647f888b8fe879f79c52aae62c2759b3647"
+  "README_en_US.txt|168b4c01cb841f766a72f310b065c04d09cff46376c37a81d799593ce751c371")
+if(NOT DEFINED DICTIONARY)
+  set(DICTIONARY ${CMAKE_HOST_WIN32})
+endif()
+if(DICTIONARY AND "spellcheck" IN_LIST wanted)
+  foreach(entry ${DICT_FILES})
+    string(REPLACE "|" ";" f "${entry}")
+    list(GET f 0 name)
+    list(GET f 1 sha)
+    download("${USERDIR}/dictionaries/${name}" "${dict_url}/${name}" ${sha})
+  endforeach()
+  message(STATUS "installed the en_US dictionary (dictionaries/en_US)")
+endif()
 
 # ---- tools: clangd for the lsp plugin, into <USERDIR>/tools/clangd (Windows) --------------
 # The release lpm's lsp_c would fetch (lite-xl-lsp-servers), and its hash; init.lua uses it

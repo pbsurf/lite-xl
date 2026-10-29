@@ -1,15 +1,16 @@
 # CMake build for Lite XL, an alternative to meson.build (which is still the reference).
 #
-# All dependencies (Lua, PCRE2, FreeType, SDL3) are downloaded as hash-pinned release
-# tarballs with FetchContent and built statically in-tree, so the only tools needed are
-# CMake (3.20+), a C compiler and, on Windows, nothing else: no Python, Git or pkg-config.
+# All dependencies (Lua, PCRE2, FreeType, SDL3; hunspell for spellcheck) are downloaded as
+# hash-pinned release tarballs with FetchContent and built statically in-tree, so the only
+# tools needed are CMake (3.20+), a C and C++ compiler and, on Windows, nothing else: no
+# Python, Git or pkg-config.
 #
 #   cmake -B build -G Ninja -DCMAKE_BUILD_TYPE=Release
 #   cmake --build build
 #   cmake --install build --prefix <dir>
 #
-# Offline: point FETCHCONTENT_SOURCE_DIR_<LUA|PCRE2|FREETYPE|SDL3> at unpacked sources.
-# Not ported: lpm, the add-ons' native modules (addons/), the innosetup script, macOS bundles.
+# Offline: point FETCHCONTENT_SOURCE_DIR_<LUA|PCRE2|FREETYPE|SDL3|HUNSPELL> at unpacked sources.
+# Not ported: lpm, the innosetup script, macOS bundles.
 
 cmake_minimum_required(VERSION 3.20)
 
@@ -279,7 +280,7 @@ configure_file(data/core/start.lua "${CMAKE_CURRENT_BINARY_DIR}/start.lua" @ONLY
 # that <build>/addons is a directory of add-ons for core.add_addon_dir, with the module where
 # package.cpath finds it as <module>.<arch_tuple>.<so|dll|lib> (InstallAddons.cmake copies it
 # into the installed plugin instead, with COPY).  They don't link Lua: lite_xl_plugin_api.h finds it
-# in the executable.  hunspell (spellcheck) is not ported.
+# in the executable.
 #===============================================================================
 if(WIN32)
   set(module_ext dll)
@@ -304,6 +305,46 @@ if(MSVC)
   target_compile_options(libterminal PRIVATE /utf-8)
 elseif(CMAKE_SYSTEM_NAME STREQUAL "Linux")
   target_link_libraries(libterminal PRIVATE util)
+endif()
+
+# spellcheck's hunspell module, with hunspell (C++) fetched and built statically into it.
+# Dictionaries aren't part of it: InstallAddons.cmake downloads en_US into the user dir.
+option(LITE_SPELLCHECK "Build the spellcheck plugin's hunspell module" ON)
+if(LITE_SPELLCHECK)
+  enable_language(CXX)
+  FetchContent_Declare(hunspell
+    URL https://github.com/hunspell/hunspell/releases/download/v1.7.2/hunspell-1.7.2.tar.gz
+    URL_HASH SHA256=11ddfa39afe28c28539fe65fc4f1592d410c1e9b6dd7d8a91ca25d85e9ec65b8
+    SOURCE_SUBDIR no-cmake-build)   # autotools only: populate, built below
+  FetchContent_MakeAvailable(hunspell)
+  set(hunspell_sources)
+  foreach(f affentry affixmgr csutil filemgr hashmgr hunspell hunzip phonet replist suggestmgr)
+    list(APPEND hunspell_sources "${hunspell_SOURCE_DIR}/src/hunspell/${f}.cxx")
+  endforeach()
+  add_library(lite_hunspell STATIC ${hunspell_sources})
+  # (the release has hunvisapi.h made already, which HUNSPELL_STATIC makes export nothing)
+  target_include_directories(lite_hunspell PUBLIC "${hunspell_SOURCE_DIR}/src/hunspell")
+  target_compile_definitions(lite_hunspell PUBLIC HUNSPELL_STATIC)
+  set_target_properties(lite_hunspell PROPERTIES CXX_STANDARD 11)
+  if(MSVC)
+    target_compile_definitions(lite_hunspell PRIVATE _CRT_SECURE_NO_WARNINGS)
+    target_compile_options(lite_hunspell PRIVATE /utf-8 /EHsc /wd4267 /wd4244)
+  endif()
+
+  add_library(hunspell_module MODULE addons/plugins/spellcheck/hunspell.c)
+  set_target_properties(hunspell_module PROPERTIES
+    PREFIX ""
+    OUTPUT_NAME hunspell
+    SUFFIX ".${arch_tuple}.${module_ext}"
+    RUNTIME_OUTPUT_DIRECTORY "${CMAKE_CURRENT_BINARY_DIR}/addons/plugins/spellcheck"
+    LIBRARY_OUTPUT_DIRECTORY "${CMAKE_CURRENT_BINARY_DIR}/addons/plugins/spellcheck")
+  target_include_directories(hunspell_module PRIVATE resources/include)
+  target_link_libraries(hunspell_module PRIVATE lite_hunspell)
+  if(MSVC)
+    target_link_options(hunspell_module PRIVATE /EXPORT:luaopen_lite_xl_hunspell /DEBUG)
+    target_compile_definitions(hunspell_module PRIVATE _CRT_SECURE_NO_WARNINGS)
+    target_compile_options(hunspell_module PRIVATE /utf-8)
+  endif()
 endif()
 
 # Run in place from the build directory: build/data next to the executable (and its PDB)
