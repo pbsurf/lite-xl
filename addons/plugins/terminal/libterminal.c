@@ -7,6 +7,9 @@
   #endif
   #include <windows.h>
   #include <wincon.h>
+  #ifndef PSEUDOCONSOLE_INHERIT_CURSOR
+    #define PSEUDOCONSOLE_INHERIT_CURSOR 0x1
+  #endif
 #else
   #include <unistd.h>
   #include <fcntl.h>
@@ -208,6 +211,7 @@ typedef struct {
     HANDLE nonblocking_buffer_mutex;
     HANDLE output_event;                               // Set while nonblocking_buffer has data, or output ended.
     HANDLE nonblocking_thread;
+    HANDLE exit_thread;                                // Closes hpcon once the child exits.
     int closing;
   #else
     int master;                                        // FD for pty.
@@ -1044,6 +1048,16 @@ static int terminal_output(terminal_t* terminal, const char* str, int len) {
     }
     return 0;
   }
+
+  // The pseudoconsole's output only ends when it's closed, not when the child exits (its
+  // conhost stays): closed then, it writes what's left and ends it, as a pty does on POSIX.
+  // On a thread, as closing waits for that output to be read, which the editor does meanwhile.
+  static DWORD windows_exit_thread_callback(void* data) {
+    terminal_t* terminal = (terminal_t*)data;
+    WaitForSingleObject(terminal->process_information.hProcess, INFINITE);
+    ClosePseudoConsole(terminal->hpcon);
+    return 0;
+  }
 #endif
 
 static int terminal_update(terminal_t* terminal, void (*callback)(char*, int, void*), void* data, int* total_shifts) {
@@ -1121,6 +1135,16 @@ static int terminal_close_pty(terminal_t* terminal) {
     // This has to be first, because if we don't drain the buffer in our nonblocking_thread,
     // this call can hang. (SIGH).
     terminal->closing = 1;
+    if (terminal->exit_thread) {
+      // it closes hpcon once the child has exited: made to now, if it hasn't
+      terminal_reap(terminal);
+      if (!terminal->has_exited)
+        TerminateProcess(terminal->process_information.hProcess, 1);
+      WaitForSingleObject(terminal->exit_thread, 5000);
+      CloseHandle(terminal->exit_thread);
+      terminal->exit_thread = NULL;
+      terminal->hpcon = NULL;
+    }
     if (terminal->hpcon) {
       ClosePseudoConsole(terminal->hpcon);
       terminal->hpcon = NULL;
@@ -1330,7 +1354,9 @@ static int set_error_step(const char* step) { strncpy(error_step, step, sizeof(e
 
 // Starts a child on a new pty (ConPTY on Windows) of `columns` by `lines`.
 // 0 on success.
-static int terminal_spawn(terminal_t* terminal, int columns, int lines, const char* term_env, const char* pathname, const char** argv, const char** environment) {
+// `continues`: the program's output goes on after what's on the screen (spawned after
+// another), which on Windows the pseudoconsole would otherwise repaint from the top.
+static int terminal_spawn(terminal_t* terminal, int columns, int lines, const char* term_env, const char* pathname, const char** argv, const char** environment, int continues) {
   terminal->mode = MODE_PTY;
   terminal->has_exited = 0;
   terminal->exit_code = terminal->exit_signal = -1;
@@ -1344,7 +1370,9 @@ static int terminal_spawn(terminal_t* terminal, int columns, int lines, const ch
     COORD size = { columns, lines };
     if ((!CreatePipe(&in_pipe_pseudo_console_side, &terminal->topty, &no_sec, 0) || !CreatePipe(&terminal->frompty, &out_pipe_pseudo_console_side, &no_sec, 0)) && set_error_step("create pipes"))
       goto error;
-    result = CreatePseudoConsole(size, in_pipe_pseudo_console_side, out_pipe_pseudo_console_side, 0, &terminal->hpcon);
+    // inheriting the cursor, it asks where it is (DSR 6, answered in parsing the output)
+    // and starts there, the rest of the screen kept
+    result = CreatePseudoConsole(size, in_pipe_pseudo_console_side, out_pipe_pseudo_console_side, continues ? PSEUDOCONSOLE_INHERIT_CURSOR : 0, &terminal->hpcon);
     if (FAILED(result) && set_error_step("create pseudoconsole"))
       goto error;
     terminal->nonblocking_buffer_mutex = CreateMutex(NULL, FALSE, NULL);
@@ -1377,10 +1405,17 @@ static int terminal_spawn(terminal_t* terminal, int columns, int lines, const ch
     DeleteProcThreadAttributeList(si_ex.lpAttributeList);
     free(si_ex.lpAttributeList);
     free(commandline);
+    // the pseudoconsole and the child have their own: ours would keep the output open
+    // after they've closed theirs
+    CloseHandle(in_pipe_pseudo_console_side);
+    CloseHandle(out_pipe_pseudo_console_side);
     if (!success && set_error_step("create process"))
       goto error;
     terminal->nonblocking_thread = CreateThread(NULL, 0, windows_nonblocking_thread_callback, terminal, 0, NULL);
     if (!terminal->nonblocking_thread && set_error_step("create thread"))
+      goto error;
+    terminal->exit_thread = CreateThread(NULL, 0, windows_exit_thread_callback, terminal, 0, NULL);
+    if (!terminal->exit_thread && set_error_step("create thread"))
       goto error;
     error:
     if (!terminal->nonblocking_thread) {
@@ -1447,7 +1482,7 @@ static terminal_t* terminal_new(int columns, int lines, int scrollback_limit, co
   }
   terminal->scrollback_limit = scrollback_limit;
   terminal->mode = pathname && strcmp(pathname, "DUMMY") != 0 ? MODE_PTY : MODE_DUMMY;
-  if (terminal->mode == MODE_PTY && terminal_spawn(terminal, columns, lines, term_env, pathname, argv, environment)) {
+  if (terminal->mode == MODE_PTY && terminal_spawn(terminal, columns, lines, term_env, pathname, argv, environment, 0)) {
     free(terminal);
     return NULL;
   }
@@ -1693,7 +1728,7 @@ static int f_terminal_spawn(lua_State* L) {
   char* arguments[256] = {0};
   char* environment[256] = {0};
   lua_tospawnargs(L, 4, path, arguments, environment);
-  int failed = terminal_spawn(terminal, terminal->columns, terminal->lines, term_env, path, (const char**)arguments, (const char**)environment);
+  int failed = terminal_spawn(terminal, terminal->columns, terminal->lines, term_env, path, (const char**)arguments, (const char**)environment, 1);
   free_spawnargs(arguments, environment);
   if (failed) {
     terminal->mode = MODE_DUMMY;
@@ -1812,14 +1847,20 @@ static int f_terminal_size(lua_State* L) {
 // fd, or on Windows an event set by the thread reading it. nil once it ended.
 static int f_terminal_watch_source(lua_State* L) {
   terminal_t* terminal = lua_toterminal(L, 1);
-  if (terminal->mode != MODE_PTY || terminal->output_ended)
+  if (terminal->mode != MODE_PTY)
     return 0;
   #if _WIN32
     if (!terminal->output_event)
       return 0;
+    // ended, but output read before then may not have been taken yet
+    WaitForSingleObject(terminal->nonblocking_buffer_mutex, INFINITE);
+    int ended = terminal->output_ended && terminal->nonblocking_buffer_length == 0;
+    ReleaseMutex(terminal->nonblocking_buffer_mutex);
+    if (ended)
+      return 0;
     lua_pushinteger(L, (lua_Integer)(intptr_t)terminal->output_event);
   #else
-    if (!terminal->master)
+    if (terminal->output_ended || !terminal->master)
       return 0;
     lua_pushinteger(L, terminal->master);
   #endif
