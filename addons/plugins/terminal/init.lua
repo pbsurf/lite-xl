@@ -396,12 +396,11 @@ function TerminalView:new(options)
   -- the directory the shell starts in
   self.cwd = self.options.environment.PWD or nil
   if PLATFORM == "Windows" then
-    local environment = common.merge(terminal_native.getenv(), self.options.environment)
     -- cmd's title (the tab's name) is its path, and cd doesn't change it: its prompt
     -- sets it to the current directory (OSC 0) instead, unless PROMPT is configured
     local program = self.options.shell:lower():match("[^/\\]*$")
     if program == "cmd.exe" and self.options.environment.PROMPT == nil then
-      environment.PROMPT = "$E]0;$P$E\\" .. (environment.PROMPT or "$P$G")
+      self.options.environment.PROMPT = "$E]0;$P$E\\" .. (os.getenv("PROMPT") or "$P$G")
     end
     -- PowerShell's likewise: its prompt function (after $PROFILE, which may replace it)
     -- is wrapped to set it first, unless the arguments run something themselves
@@ -419,13 +418,6 @@ function TerminalView:new(options)
           .. "function global:prompt { $Host.UI.RawUI.WindowTitle = $PWD.Path; & $global:__lite_xl_prompt }")
       end
     end
-    local t = {}
-    for k,v in pairs(environment) do
-      if v ~= false then table.insert(t, k .. "=" .. v) end
-    end
-    -- CreateProcess wants the block sorted by name, ignoring case ("=C:=..." first)
-    table.sort(t, function(a, b) return a:match("^[^=]*"):upper() < b:match("^[^=]*"):upper() end)
-    self.options.environment = table.concat(t, "\0") .. "\0\0"
   end
   self.cursor = "ibeam"
   self.scrollable = true
@@ -456,8 +448,26 @@ function TerminalView:on_output(shifts)
 end
 
 
+---The environment for libterminal from variables to set (false unsets one):
+---the variables themselves, or on Windows the whole environment block, the
+---editor's with them, as CreateProcess takes it.
+function TerminalView.native_environment(variables)
+  if PLATFORM ~= "Windows" then return variables end
+  -- names ignore case: a variable replaces the editor's of any case
+  local entries = {}
+  for k,v in pairs(terminal_native.getenv()) do entries[k:upper()] = { k, v } end
+  for k,v in pairs(variables) do entries[k:upper()] = { k, v } end
+  local t = {}
+  for _, entry in pairs(entries) do
+    if entry[2] ~= false then table.insert(t, entry[1] .. "=" .. entry[2]) end
+  end
+  -- CreateProcess wants the block sorted by name, ignoring case ("=C:=..." first)
+  table.sort(t, function(a, b) return a:match("^[^=]*"):upper() < b:match("^[^=]*"):upper() end)
+  return table.concat(t, "\0") .. "\0\0"
+end
+
 function TerminalView:spawn()
-  self.terminal = terminal_native.new(self.columns, self.lines, self.options.scrollback_limit, self.options.term, self.options.shell, self.options.arguments, self.options.environment, self.options.debug)
+  self.terminal = terminal_native.new(self.columns, self.lines, self.options.scrollback_limit, self.options.term, self.options.shell, self.options.arguments, TerminalView.native_environment(self.options.environment), self.options.debug)
   -- We make this weak so that any other method of closing the view gets caught up in the garbage collection and the coroutine doesn't count as a reference for gc purposes.
   local weak_table = { self = self }
   setmetatable(weak_table, { __mode = "v" })
