@@ -1,4 +1,4 @@
-# CMake build for Lite XL, an alternative to meson.build (which is still the reference).
+# CMake build for Lite XL, the one scripts/run.sh uses; meson.build is upstream's (and CI's).
 #
 # All dependencies (Lua, PCRE2, FreeType, SDL3; hunspell for spellcheck) are downloaded as
 # hash-pinned release tarballs with FetchContent and built statically in-tree, so the only
@@ -10,7 +10,7 @@
 #   cmake --install build --prefix <dir>
 #
 # Offline: point FETCHCONTENT_SOURCE_DIR_<LUA|PCRE2|FREETYPE|SDL3|HUNSPELL> at unpacked sources.
-# Not ported: lpm, the innosetup script, macOS bundles.
+# Not ported: the innosetup script, macOS bundles. lpm is built on Linux and macOS only.
 
 cmake_minimum_required(VERSION 3.20)
 
@@ -344,6 +344,41 @@ if(LITE_SPELLCHECK)
     target_link_options(hunspell_module PRIVATE /EXPORT:luaopen_lite_xl_hunspell /DEBUG)
     target_compile_definitions(hunspell_module PRIVATE _CRT_SECURE_NO_WARNINGS)
     target_compile_options(hunspell_module PRIVATE /utf-8)
+  endif()
+endif()
+
+#===============================================================================
+# lpm, the plugin manager scripts/lpm runs, as in lpm/meson.build: built into <build>/lpm (not
+# installed), against the system's libgit2, libzip, mbedtls, zlib and liblzma (pkg-config).
+# It loads lpm/src/lpm.lua from the source tree when it starts, so edits to it need no
+# rebuild. AUTO: skipped when a dependency is missing; not on Windows, which uses
+# InstallAddons.cmake instead.
+#===============================================================================
+set(LITE_LPM AUTO CACHE STRING "Build lpm: ON, OFF or AUTO (when its dependencies are found)")
+if(NOT WIN32 AND NOT LITE_LPM STREQUAL "OFF")
+  find_package(PkgConfig)
+  set(_lpm_required "")
+  if(LITE_LPM STREQUAL "ON")
+    set(_lpm_required REQUIRED)
+  endif()
+  if(PKG_CONFIG_FOUND)
+    pkg_check_modules(LPM_DEPS ${_lpm_required} IMPORTED_TARGET
+      zlib liblzma libgit2 libzip mbedtls mbedx509 mbedcrypto)
+  elseif(LITE_LPM STREQUAL "ON")
+    message(FATAL_ERROR "lpm needs pkg-config to find its dependencies")
+  endif()
+  if(LPM_DEPS_FOUND)
+    find_package(Threads REQUIRED)
+    add_executable(lpm lpm/src/lpm.c lpm/lib/microtar/src/microtar.c)
+    set_target_properties(lpm PROPERTIES RUNTIME_OUTPUT_DIRECTORY "${CMAKE_CURRENT_BINARY_DIR}/lpm")
+    target_include_directories(lpm PRIVATE lpm/lib/microtar/src)
+    target_link_libraries(lpm PRIVATE lite_lua PkgConfig::LPM_DEPS Threads::Threads)
+    target_compile_definitions(lpm PRIVATE
+      "LPM_LUA_PATH=\"${CMAKE_CURRENT_SOURCE_DIR}/lpm/src/lpm.lua\""
+      "LPM_VERSION=\"1.4.9\""
+      "LPM_DEFAULT_RELEASE=\"\"")
+  else()
+    message(STATUS "lpm: not built (its dependencies weren't found)")
   endif()
 endif()
 

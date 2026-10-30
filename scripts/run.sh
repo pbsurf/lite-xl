@@ -5,12 +5,15 @@
 # -> <prefix>/share/lite-xl), so we assemble a prefix in build/run: a copy of the
 # binary plus symlinks into data/, so edits to Lua files under data/ take effect
 # on restart without rebuilding.  Only core/start.lua comes from the build dir,
-# since meson generates it (version substitution).
+# since the build generates it (version substitution).  The build is CMake's
+# (CMakeLists.txt; meson.build is upstream's, no longer used here), configured
+# on the first run.
 #
 # Usage: scripts/run.sh [lite-xl args...]     e.g. scripts/run.sh ~/projects/foo
 #
 # Environment:
-#   LITE_BUILD    meson build dir (default: build/; e.g. build-prof/ for profiling)
+#   LITE_BUILD    CMake build dir (default: build/; e.g. build-prof/ for profiling)
+#   LITE_BUILD_TYPE  CMAKE_BUILD_TYPE when configuring it (default: RelWithDebInfo)
 #   LITE_USERDIR  user config dir (default: user/ next to this repo)
 #   LITE_CLANGD   clangd for the lsp plugin (default: the Android NDK's, 17.0.2)
 set -e
@@ -20,14 +23,22 @@ build=${LITE_BUILD:-$src/build}
 prefix=$build/run
 datadir=$prefix/share/lite-xl
 
-[ -d "$build" ] || meson setup "$build" "$src"
-ninja -C "$build" >&2
+if [ ! -f "$build/CMakeCache.txt" ]; then
+  if [ -e "$build/build.ninja" ]; then
+    echo "$build is a meson build dir; remove it (or set LITE_BUILD) to build with CMake" >&2
+    exit 1
+  fi
+  # compile_commands.json: clangd finds it in build/
+  cmake -S "$src" -B "$build" -G Ninja -DCMAKE_BUILD_TYPE="${LITE_BUILD_TYPE:-RelWithDebInfo}" \
+    -DCMAKE_EXPORT_COMPILE_COMMANDS=ON >&2
+fi
+cmake --build "$build" >&2
 
 mkdir -p "$prefix/bin" "$datadir/core"
 # copy then rename so this works while another instance is running; only when
 # changed, so running instances keep a binary on disk (perf, gdb need it)
-if ! cmp -s "$build/src/lite-xl" "$prefix/bin/lite-xl"; then
-  cp "$build/src/lite-xl" "$prefix/bin/lite-xl.new"
+if ! cmp -s "$build/lite-xl" "$prefix/bin/lite-xl"; then
+  cp "$build/lite-xl" "$prefix/bin/lite-xl.new"
   mv -f "$prefix/bin/lite-xl.new" "$prefix/bin/lite-xl"
 fi
 
@@ -41,16 +52,14 @@ ln -sfn "$build/start.lua" "$datadir/core/start.lua"
 : "${LITE_CLANGD:=$HOME/android-sdk/ndk/26.3.11579264/toolchains/llvm/prebuilt/linux-x86_64/bin/clangd}"
 export LITE_USERDIR LITE_CLANGD
 
-# Native modules of our add-ons (addons/meson.build) go next to the installed plugin,
-# where package.cpath finds them. lpm's --symlink install makes the plugin dir a
-# real dir of links to the files present at install time, so link the module there
-# rather than into addons/.
-if [ -d "$LITE_USERDIR/plugins/terminal" ]; then
-  ln -sf "$build"/addons/libterminal.*.so "$LITE_USERDIR/plugins/terminal/"
-fi
-if [ -d "$LITE_USERDIR/plugins/spellcheck" ]; then
-  ln -sf "$build"/addons/hunspell.*.so "$LITE_USERDIR/plugins/spellcheck/"
-fi
+# Native modules of our add-ons are built into <build>/addons/plugins/<add-on>, a
+# directory of add-ons the user module adds as EXEDIR/addons (core.add_addon_dir),
+# where package.cpath finds them. Links to them that run.sh used to put into the
+# user dir's installed plugins are removed once they dangle.
+ln -sfn "$build/addons" "$prefix/bin/addons"
+for p in terminal spellcheck; do
+  [ -d "$LITE_USERDIR/plugins/$p" ] && find "$LITE_USERDIR/plugins/$p" -maxdepth 1 -name '*.so' -xtype l -delete
+done
 
 # Headless (SDL_VIDEO_DRIVER=offscreen), SDL backs the window surface with a GPU
 # renderer; on this VMware guest (vmwgfx) every presented frame then leaks a

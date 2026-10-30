@@ -141,14 +141,14 @@ another repository's version, uninstalls removing dependents under `--assume-yes
 * **terminal** (imported from lite-xl-terminal, with our changes): an integrated
   terminal, in the bottom panel (shift+alt+t, alt+t) or a tab (ctrl+shift+\`). ctrl+f
   searches it in search_ui's pane, newest output first (`search_backward`). Its C
-  module is built by our meson build and linked into the user dir by `scripts/run.sh`.
+  module is built by our CMake build, into the build's `addons/`.
 * **spellcheck:** spell checking with hunspell (`/usr/share/hunspell/en_US` by
   default), off until `spell-check:toggle` turns it on for a document. Identifiers
   are checked by their camelCase / snake_case parts; the syntax's keywords, ALL
   CAPS words and URLs or paths are skipped. Right click a marked word for
   suggestions or "Add to Dictionary" (`spellcheck_words.txt` in the user dir).
   "Spell" on the status bar shows whether it's on and toggles it. Its
-  C module is built by our meson build when libhunspell is found.
+  C module is built by our CMake build, with hunspell compiled in.
 * **ephemeral_tabs** (imported, with our changes): a file opened while browsing
   (a click in the tree, go to definition, a search result, ...; callers pass
   `{ preview = true }` to `RootView:open_doc`) replaces the previous preview tab

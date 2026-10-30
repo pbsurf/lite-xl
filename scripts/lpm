@@ -14,9 +14,9 @@
 # user dir, in <userdir>/lpm; the repo cache is shared.
 #
 # Environment:
-#   LITE_BUILD    meson build dir (default: build/), as for run.sh
+#   LITE_BUILD    CMake build dir (default: build/), as for run.sh
 #   LITE_USERDIR  user config dir (default: user/ next to this repo), as for run.sh
-#   LPM           lpm binary (default: our fork's, lpm/ here, built by meson as
+#   LPM           lpm binary (default: our fork's, lpm/ here, built by CMake as
 #                 <build>/lpm/lpm; it loads lpm/src/lpm.lua at start)
 set -e
 
@@ -31,7 +31,7 @@ args=(--userdir="$userdir" --configdir="$userdir/lpm"
       --datadir="$build/run/share/lite-xl" --binary="$build/run/bin/lite-xl")
 
 if [ ! -x "$lpm" ]; then
-  echo "lpm: $lpm not built (meson skips it without its dependencies; see -Dlpm)" >&2
+  echo "lpm: $lpm not built (CMake skips it without its dependencies; see LITE_LPM)" >&2
   exit 1
 fi
 # (whether the settings exist doesn't tell: a run that failed may have written them)
