@@ -613,7 +613,8 @@ end
 local function choose(level)
   local d = stack[level or #stack]
   local item = d and d:get_item_selected()
-  if not item or item.disabled then return end
+  -- a divider does nothing, as in core's context menu: the menu stays open
+  if not item or item == ContextMenu.DIVIDER or item.disabled then return end
   if item.rows then
     local sub = open_submenu(level or #stack)
     if sub then sub:focus_step(1) end
