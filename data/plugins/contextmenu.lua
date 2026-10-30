@@ -61,6 +61,19 @@ function RootView:draw(...)
   menu:draw()
 end
 
+-- Find and Replace with nothing selected search for the word at the caret (where
+-- the right-click put it): it's selected first, as a double-click would, and
+-- they take the selection as the text.
+local seeds_search = { ["find-replace:find"] = true, ["find-replace:replace"] = true }
+
+function menu:on_selected(item)
+  local dv = core.active_view
+  if seeds_search[item.command] and dv:extends(DocView) and not dv.doc:has_any_selection() then
+    command.perform("doc:select-word")
+  end
+  ContextMenu.on_selected(self, item)
+end
+
 command.add("core.docview!", {
   ["context:show"] = function(dv)
     menu:show(dv.position.x, dv.position.y)
