@@ -352,6 +352,9 @@ function RootView:on_mouse_released(button, x, y, ...)
             node:add_view(view, tab_index)
             self.root_node:get_node_for_view(view):set_active_view(view)
           end
+          -- a current view dragged out of the panel is kept there: its kind's next
+          -- view opens in the panel rather than replacing it
+          if not self.root_node:get_node_for_view(view).is_panel then panel.keep(view) end
           self.root_node:update_layout()
           core.redraw = true
         end

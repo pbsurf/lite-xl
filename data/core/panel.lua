@@ -16,7 +16,8 @@ local EmptyView = require "core.emptyview"
 ---Each kind of view (its class) can have a current view, which the kind's next
 ---search or run reuses rather than opening another tab. Its title is italic, as
 ---a preview tab's is; double-clicking its tab keeps it, and the next one then
----gets a tab of its own. The current view stays current wherever it's dragged.
+---gets a tab of its own. Moving it out of the panel (a drag, "Move to Editor")
+---keeps it too, so the next one opens in the panel.
 local panel = {}
 
 ---The panel's height (pixels) when it last went away; nil until then, for a
@@ -219,6 +220,7 @@ function panel.move_to_editor(view)
   local root = core.root_view.root_node
   local node = root:get_node_for_view(view)
   if node then node:remove_view(root, view) end
+  panel.keep(view)
   -- only now: removing the panel's last view replaces its sibling's node
   core.root_view:get_last_used_node():add_view(view)
 end
