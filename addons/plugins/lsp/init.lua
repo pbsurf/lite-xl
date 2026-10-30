@@ -2933,18 +2933,17 @@ if menu_found then
   menu:register(lsp_predicate_symbols, {
     menu.DIVIDER,
     { text = "Show Symbol Info",        command = "lsp:show-symbol-info" },
-    { text = "Show Symbol Info in Tab", command = "lsp:show-symbol-info-in-tab" },
     { text = "Goto Definition",         command = "lsp:goto-definition" },
     { text = "Goto Implementation",     command = "lsp:goto-implementation" },
     { text = "Find References",         command = "lsp:find-references" }
   })
 
-  menu:register(lsp_predicate, {
+  -- the whole document's items only off a symbol, to keep the menu short
+  menu:register(function() return lsp_predicate() and not lsp_predicate_symbols() end, {
     menu.DIVIDER,
     { text = "Document Symbols",       command = "lsp:view-document-symbols" },
     { text = "Document Diagnostics",   command = "lsp:view-document-diagnostics" },
     { text = "Toggle Diagnostics",     command = "lsp:toggle-diagnostics" },
-    { text = "Format Document",        command = "lsp:format-document" },
   })
 
   local menu_show = menu.show
