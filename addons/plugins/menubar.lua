@@ -740,29 +740,46 @@ end
 -- set by any key or click while Alt is down: its release then doesn't toggle
 local alt_used = false
 
+---A click while the menus are shown; true if it was theirs.
+local function menu_click(x, y)
+  local i = title_at(x, y)
+  if i then
+    if state.open == i then close_menu() else menubar.open(i) end
+    return true
+  elseif on_bar(y) then
+    return true
+  elseif state.open or state.popup then
+    local d, level = dropdown_at(x, y)
+    if d then
+      d:on_mouse_moved(x, y)
+      choose(level)
+    else
+      menubar.hide()
+    end
+    return true
+  end
+  menubar.hide()
+end
+
+-- set by a press the menus took: its release is theirs too, not the views'
+-- (a widget's release takes focus from its input, as a chosen Find... gives it)
+local press_taken = false
+
 local root_on_mouse_pressed = RootView.on_mouse_pressed
 function RootView:on_mouse_pressed(button, x, y, clicks)
   alt_used = true
-  if state.active then
-    local i = title_at(x, y)
-    if i then
-      if state.open == i then close_menu() else menubar.open(i) end
-      return true
-    elseif on_bar(y) then
-      return true
-    elseif state.open or state.popup then
-      local d, level = dropdown_at(x, y)
-      if d then
-        d:on_mouse_moved(x, y)
-        choose(level)
-      else
-        menubar.hide()
-      end
-      return true
-    end
-    menubar.hide()
-  end
+  press_taken = state.active and menu_click(x, y) or false
+  if press_taken then return true end
   return root_on_mouse_pressed(self, button, x, y, clicks)
+end
+
+local root_on_mouse_released = RootView.on_mouse_released
+function RootView:on_mouse_released(...)
+  if press_taken then
+    press_taken = false
+    return true
+  end
+  return root_on_mouse_released(self, ...)
 end
 
 local root_on_mouse_wheel = RootView.on_mouse_wheel
