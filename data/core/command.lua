@@ -153,6 +153,28 @@ function command.is_valid(name, ...)
   return command.map[name] and command.map[name].predicate(...)
 end
 
+---Commands whose predicate passes where they'd do nothing (Undo with nothing to
+---undo, Paste with an empty clipboard), each with a function telling whether
+---they'd act now, called with the predicate's results. Menus dim the commands
+---that wouldn't; key bindings and `command.perform` still run them.
+---@type table<string, fun(...: any): boolean?>
+command.enabled = {}
+
+local function check_enabled(name, valid, ...)
+  if not valid then return false end
+  local enabled = command.enabled[name]
+  return not enabled or not not enabled(...)
+end
+
+---Checks whether a command is valid and would act now (see `command.enabled`).
+---@param name core.command.command_name
+---@param ... any
+---@return boolean
+function command.is_enabled(name, ...)
+  local cmd = command.map[name]
+  return cmd ~= nil and check_enabled(name, cmd.predicate(...))
+end
+
 local function perform(name, ...)
   local cmd = command.map[name]
   if not cmd then return false end

@@ -17,6 +17,8 @@ local DIVIDER = {}
 ---@field info string|nil If provided, this text is displayed on the right side of the menu.
 ---Without it, the key binding of `command`, if any, is displayed there.
 ---@field active boolean|nil If true, the text is drawn in the accent color (e.g. the current choice).
+---@field disabled boolean|nil If true, the item is dimmed and can't be chosen; set on
+---show for items whose command wouldn't act (see `command.enabled`).
 ---@field command string|fun()
 
 ---A list of items with the same predicate.
@@ -112,6 +114,9 @@ function ContextMenu:show(x, y)
       items_list.height = items_list.height
       for _, subitems in ipairs(set) do
         if type(subitems.command) ~= "string" or command.is_valid(subitems.command) then
+          if type(subitems.command) == "string" then
+            subitems.disabled = not command.is_enabled(subitems.command)
+          end
           local lw, lh = get_item_size(subitems)
           items_list.height = items_list.height + lh
           table.insert(items_list, subitems)
@@ -192,24 +197,29 @@ function ContextMenu:on_selected(item)
   end
 end
 
-local function change_value(value, change)
-  return value + change
+---Selects the item dir (1 or -1) from the selected one, wrapping around, past
+---dividers and disabled items.
+local function focus_step(self, dir)
+  local n = #(self.items or {})
+  local i = self.selected
+  for _ = 1, n do
+    i = i == -1 and (dir > 0 and 1 or n) or (i - 1 + dir) % n + 1
+    local item = self.items[i]
+    if item ~= DIVIDER and not item.disabled then
+      self.selected = i
+      return
+    end
+  end
 end
 
 ---Selects the the previous item.
 function ContextMenu:focus_previous()
-  self.selected = (self.selected == -1 or self.selected == 1) and #self.items or change_value(self.selected, -1)
-  if self:get_item_selected() == DIVIDER then
-    self.selected = change_value(self.selected, -1)
-  end
+  focus_step(self, -1)
 end
 
 ---Selects the next item.
 function ContextMenu:focus_next()
-  self.selected = (self.selected == -1 or self.selected == #self.items) and 1 or change_value(self.selected, 1)
-  if self:get_item_selected() == DIVIDER then
-    self.selected = change_value(self.selected, 1)
-  end
+  focus_step(self, 1)
 end
 
 ---Gets the currently selected item.
@@ -222,7 +232,7 @@ end
 function ContextMenu:call_selected_item()
     local selected = self:get_item_selected()
     self:hide()
-    if selected then
+    if selected and not selected.disabled then
       self:on_selected(selected)
     end
 end
@@ -255,7 +265,7 @@ function ContextMenu:on_mouse_pressed(button, px, py, clicks)
   if self.show_context_menu then
     if button == "left" then
       local selected = self:get_item_selected()
-      if selected then
+      if selected and not selected.disabled then
         self:on_selected(selected)
       end
     end
@@ -305,11 +315,11 @@ function ContextMenu:draw_context_menu()
     if item == DIVIDER then
       renderer.draw_rect(x, y + divider_padding * SCALE, w, divider_width, style.divider)
     else
-      if i == self.selected then
+      if i == self.selected and not item.disabled then
         renderer.draw_rect(x, y, w, h, style.selection)
       end
 
-      local color = item.active and style.accent or style.text
+      local color = item.disabled and style.dim or item.active and style.accent or style.text
       common.draw_text(style.font, color, item.text, "left", x + style.padding.x, y, w, h)
       if item.info then
         common.draw_text(style.font, style.dim, item.info, "right", x, y, w - style.padding.x, h)

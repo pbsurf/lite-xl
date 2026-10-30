@@ -711,3 +711,19 @@ commands["doc:move-to-next-char"] = function(dv)
 end
 
 command.add("core.docview", commands)
+
+local function can_undo(stack) return stack[stack.idx - 1] ~= nil end
+local function can_copy(dv) return config.copy_whole_line or dv.doc:has_any_selection() end
+local function has_filename(dv) return dv.doc.filename ~= nil end
+
+command.enabled["doc:undo"] = function(dv) return can_undo(dv.doc.undo_stack) end
+command.enabled["doc:redo"] = function(dv) return can_undo(dv.doc.redo_stack) end
+command.enabled["doc:cut"] = can_copy
+command.enabled["doc:copy"] = can_copy
+command.enabled["doc:paste"] = function() return (system.get_clipboard() or "") ~= "" end
+command.enabled["doc:select-none"] = function(dv)
+  return dv.doc:has_any_selection() or #dv.doc.selections > 4
+end
+command.enabled["doc:reload"] = has_filename
+command.enabled["file:rename"] = has_filename
+command.enabled["file:delete"] = has_filename
