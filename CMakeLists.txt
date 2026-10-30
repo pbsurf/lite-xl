@@ -12,7 +12,7 @@
 #   cmake --install build --prefix <dir>
 #
 # Offline: point FETCHCONTENT_SOURCE_DIR_<LUA|PCRE2|FREETYPE|SDL3|HUNSPELL> at unpacked sources.
-# Not ported: the innosetup script, macOS bundles. lpm is built on Linux and macOS only.
+# Not ported: macOS bundles. lpm is built on Linux and macOS only.
 
 cmake_minimum_required(VERSION 3.20)
 
@@ -322,6 +322,14 @@ endif()
 # Start script, generated like meson's configure_file
 #===============================================================================
 configure_file(data/core/start.lua "${CMAKE_CURRENT_BINARY_DIR}/start.lua" @ONLY)
+
+# Inno Setup script for the Windows installer (as scripts/meson.build): it packages the
+# install in <source>/lite-xl; compile it with ISCC.exe (release.yml)
+if(WIN32)
+  set(PROJECT_BUILD_DIR "${CMAKE_CURRENT_BINARY_DIR}")
+  configure_file(scripts/innosetup/innosetup.iss.in
+                 "${CMAKE_CURRENT_BINARY_DIR}/scripts/innosetup.iss" @ONLY)
+endif()
 
 #===============================================================================
 # Native parts of our add-ons, built into <build>/addons/plugins/<plugin> (not installed), so
