@@ -11,7 +11,8 @@
 # once: the data dir is found at runtime (<exe>/data, or ../share/lite-xl from bin/), so
 # the portable and /usr layouts differ only in where it's installed.
 #
-# Usage: scripts/release-linux.sh [--version VERSION] [--no-appimage] [--debug]
+# Usage: scripts/release-linux.sh [--version VERSION] [--no-addons] [--no-appimage] [--debug]
+# (CI's build.yml makes only the plain portable archive: --no-addons --no-appimage)
 set -e
 
 if [ ! -e "src/api/api.h" ]; then
@@ -22,12 +23,14 @@ source scripts/common.sh
 
 version=""
 appimage=true
+variants="false true"   # without and with the 3rd party add-ons
 while [[ $# -gt 0 ]]; do
   case $1 in
     -v|--version) version="-$2"; shift 2 ;;
+    --no-addons) variants=false; shift ;;
     --no-appimage) appimage=false; shift ;;
     --debug) set -x; shift ;;
-    *) echo "usage: $0 [--version VERSION] [--no-appimage] [--debug]" >&2; exit 1 ;;
+    *) echo "usage: $0 [--version VERSION] [--no-addons] [--no-appimage] [--debug]" >&2; exit 1 ;;
   esac
 done
 
@@ -51,8 +54,8 @@ install_to() {
   fi
 }
 
-# portable archives, without and with the 3rd party add-ons
-for addons in false true; do
+# portable archives
+for addons in $variants; do
   name=lite-xl$version
   [[ $addons == true ]] && name+=-addons
   name+=-linux-$arch-portable
@@ -74,7 +77,7 @@ if [ ! -e appimagetool ]; then
   chmod 0755 appimagetool
 fi
 
-for addons in false true; do
+for addons in $variants; do
   name=LiteXL$version
   [[ $addons == true ]] && name+=-addons
   name+=-$arch.AppImage
