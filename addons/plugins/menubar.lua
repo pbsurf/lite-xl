@@ -720,6 +720,9 @@ function RootView:on_mouse_moved(x, y, dx, dy)
     if i and state.open and i ~= state.open then menubar.open(i) end
     state.hovered = i or state.open
     local d, level = dropdown_at(x, y)
+    -- off the deepest dropdown, none of its rows is hovered (the shallower
+    -- ones keep the row their open submenu belongs to)
+    if stack[#stack] and stack[#stack] ~= d then stack[#stack].selected = -1 end
     if d then
       d:on_mouse_moved(x, y)
       local item = d:get_item_selected()
