@@ -286,9 +286,16 @@ command.add(nil, {
     end)
   end,
 
+  -- raises the log's tab if one is open
   ["core:open-log"] = function()
-    local node = core.root_view:get_active_node_default()
-    node:add_view(LogView())
+    local root = core.root_view.root_node
+    for _, view in ipairs(root:get_children()) do
+      if view:is(LogView) then
+        root:get_node_for_view(view):set_active_view(view)
+        return
+      end
+    end
+    core.root_view:get_active_node_default():add_view(LogView())
   end,
 
   ["core:open-user-module"] = function()
