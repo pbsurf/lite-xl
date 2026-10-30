@@ -558,12 +558,24 @@ function Node:get_tab_rect(idx)
 end
 
 
+---A split's divider width: style.divider_size; a split that sets itself apart
+---(the bottom panel's) has its own method, and get_divider_color.
+---@return number
+function Node:get_divider_size()
+  return style.divider_size
+end
+
+---@return renderer.color
+function Node:get_divider_color()
+  return style.divider
+end
+
 function Node:get_divider_rect()
   local x, y = self.position.x, self.position.y
   if self.type == "hsplit" then
-    return x + self.a.size.x, y, style.divider_size, self.size.y
+    return x + self.a.size.x, y, self:get_divider_size(), self.size.y
   elseif self.type == "vsplit" then
-    return x, y + self.a.size.y, self.size.x, style.divider_size
+    return x, y + self.a.size.y, self.size.x, self:get_divider_size()
   end
 end
 
@@ -586,13 +598,13 @@ function Node:get_locked_size()
     local sx, sy
     if self.type == 'hsplit' then
       if x1 and x2 then
-        local dsx = (x1 < 1 or x2 < 1) and 0 or style.divider_size
+        local dsx = (x1 < 1 or x2 < 1) and 0 or self:get_divider_size()
         sx = x1 + x2 + dsx
       end
       sy = y1 or y2
     else
       if y1 and y2 then
-        local dsy = (y1 < 1 or y2 < 1) and 0 or style.divider_size
+        local dsy = (y1 < 1 or y2 < 1) and 0 or self:get_divider_size()
         sy = y1 + y2 + dsy
       end
       sx = x1 or x2
@@ -611,7 +623,7 @@ end
 -- calculating the sizes is the same for hsplits and vsplits, except the x/y
 -- axis are swapped; this function lets us use the same code for both
 local function calc_split_sizes(self, x, y, x1, x2, y1, y2)
-  local ds = ((x1 and x1 < 1) or (x2 and x2 < 1)) and 0 or style.divider_size
+  local ds = ((x1 and x1 < 1) or (x2 and x2 < 1)) and 0 or self:get_divider_size()
   local n = x1 and x1 + ds or (x2 and self.size[x] - x2 or math.floor(self.size[x] * self.divider))
   self.a.position[x] = self.position[x]
   self.a.position[y] = self.position[y]
@@ -806,20 +818,13 @@ function Node:draw_tab(view, is_active, is_hovered, is_close_hovered, x, y, w, h
   core.pop_clip_rect()
 end
 
----The tab bar's background: style.background2; a node that sets itself apart
----(the bottom panel's) has its own method.
----@return renderer.color
-function Node:get_tab_bar_color()
-  return style.background2
-end
-
 function Node:draw_tabs()
   local x, y = self.position.x, self.position.y
   local h = self:get_tab_bar_height()
   local ds = style.divider_size
   local dots_width = style.font:get_width("…")
   core.push_clip_rect(x, y, self.size.x, h)
-  renderer.draw_rect(x, y, self.size.x, h, self:get_tab_bar_color())
+  renderer.draw_rect(x, y, self.size.x, h, style.background2)
   renderer.draw_rect(x, y + h - ds, self.size.x, ds, style.divider)
 
   core.push_clip_rect(x, y, self:get_tab_area_width(), h)
@@ -862,7 +867,7 @@ function Node:draw()
     core.pop_clip_rect()
   else
     local x, y, w, h = self:get_divider_rect()
-    renderer.draw_rect(x, y, w, h, style.divider)
+    renderer.draw_rect(x, y, w, h, self:get_divider_color())
     self:propagate("draw")
   end
 end

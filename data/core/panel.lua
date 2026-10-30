@@ -9,9 +9,9 @@ local EmptyView = require "core.emptyview"
 ---in their titles. It's made when a view is shown in it and goes away with its
 ---last tab, keeping its height for next time. Files don't open in it
 ---(RootView:get_active_node_default), it never becomes the primary node, and
----the workspace doesn't save it. Its tab bar has its own color
----(style.panel_tab_bar, else one a step further from style.background than
----style.background2 is), telling it from an editor split.
+---the workspace doesn't save it. The divider above it is thicker than an
+---editor split's, in a muted accent color (style.panel_divider_size,
+---style.panel_divider), telling the two apart.
 ---
 ---Each kind of view (its class) can have a current view, which the kind's next
 ---search or run reuses rather than opening another tab. Its title is italic, as
@@ -46,9 +46,13 @@ function panel.get_node()
   return find(core.root_view.root_node)
 end
 
--- the node's get_tab_bar_color(), as the color scheme is now
-local function tab_bar_color()
-  return style.panel_tab_bar or common.lerp(style.background, style.background2, 2)
+-- the panel's split's divider, as the color scheme is now
+local function divider_size()
+  return style.panel_divider_size or common.round(3 * SCALE)
+end
+
+local function divider_color()
+  return style.panel_divider or common.lerp(style.background, style.accent, 0.5)
 end
 
 local function on_collapse(node)
@@ -70,10 +74,10 @@ local function create()
   local editor = Node()
   editor:consume(root)
   root:consume(Node("vsplit"))
+  root.get_divider_size, root.get_divider_color = divider_size, divider_color
   local node = Node()
   node.is_panel = true
   node.on_collapse = on_collapse
-  node.get_tab_bar_color = tab_bar_color
   node.fit_tab_width, node.max_tab_width = true, 640
   root.a, root.b = editor, node
   if area_h > 0 then
