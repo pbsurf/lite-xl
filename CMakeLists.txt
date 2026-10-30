@@ -3,7 +3,9 @@
 # All dependencies (Lua, PCRE2, FreeType, SDL3; hunspell for spellcheck) are downloaded as
 # hash-pinned release tarballs with FetchContent and built statically in-tree, so the only
 # tools needed are CMake (3.20+), a C and C++ compiler and, on Windows, nothing else: no
-# Python, Git or pkg-config.
+# Python, Git or pkg-config.  On Linux the system's SDL3, FreeType and PCRE2 are used
+# instead by default (LITE_SYSTEM_SDL, LITE_SYSTEM_FREETYPE, LITE_SYSTEM_PCRE2), as the
+# meson build does.
 #
 #   cmake -B build -G Ninja -DCMAKE_BUILD_TYPE=Release
 #   cmake --build build
@@ -38,6 +40,18 @@ set(CMAKE_POSITION_INDEPENDENT_CODE ON)
 
 option(LITE_PORTABLE "Portable install layout (always on for Windows)" OFF)
 option(LITE_USE_SDL_RENDERER "Use the SDL renderer (always on for macOS)" OFF)
+# Linux: the distribution's libraries (shared) are maintained and patched for the system,
+# SDL's for its desktops; elsewhere there are none to use. Off builds the pinned release
+# statically (e.g. FreeType for perf to see its internals).
+if(CMAKE_SYSTEM_NAME STREQUAL "Linux")
+  set(_system_default ON)
+else()
+  set(_system_default OFF)
+endif()
+option(LITE_SYSTEM_SDL "Link the system's SDL3 rather than building SDL 3.2 statically"
+       ${_system_default})
+option(LITE_SYSTEM_FREETYPE "Link the system's FreeType rather than building it" ${_system_default})
+option(LITE_SYSTEM_PCRE2 "Link the system's PCRE2 rather than building it" ${_system_default})
 set(LITE_DIRMONITOR_BACKEND "" CACHE STRING
     "dirmonitor backend: inotify, fsevents, kqueue, win32, dummy (default: detect)")
 set(LITE_ARCH_TUPLE "" CACHE STRING "custom architecture tuple (default: <cpu>-<system>)")
@@ -130,57 +144,88 @@ if(MSVC)
   target_compile_definitions(lite_lua PRIVATE _CRT_SECURE_NO_WARNINGS)
 endif()
 
-# ---- PCRE2 ------------------------------------------------------------------------
-set(PCRE2_BUILD_PCRE2_8 ON CACHE BOOL "" FORCE)
-set(PCRE2_BUILD_PCRE2_16 OFF CACHE BOOL "" FORCE)
-set(PCRE2_BUILD_PCRE2_32 OFF CACHE BOOL "" FORCE)
-set(PCRE2_BUILD_PCRE2GREP OFF CACHE BOOL "" FORCE)
-set(PCRE2_BUILD_TESTS OFF CACHE BOOL "" FORCE)
-set(PCRE2_SUPPORT_JIT ON CACHE BOOL "" FORCE)
-set(PCRE2_STATIC_RUNTIME OFF CACHE BOOL "" FORCE)
-FetchContent_Declare(pcre2
-  URL https://github.com/PCRE2Project/pcre2/releases/download/pcre2-10.44/pcre2-10.44.tar.bz2
-  URL_HASH SHA256=d34f02e113cf7193a1ebf2770d3ac527088d485d4e047ed10e5d217c6ef5de96
-  ${_exclude})
+# the dependencies fetched and built here, as opposed to the system's
+set(_fetched)
 
-# ---- FreeType, without its optional codecs -------------------------------------------
-foreach(opt ZLIB BZIP2 PNG HARFBUZZ BROTLI)
-  set(FT_DISABLE_${opt} ON CACHE BOOL "" FORCE)
-endforeach()
-set(SKIP_INSTALL_ALL ON CACHE BOOL "" FORCE)
-FetchContent_Declare(freetype
-  URL https://download.savannah.gnu.org/releases/freetype/freetype-2.13.3.tar.xz
-      https://downloads.sourceforge.net/project/freetype/freetype2/2.13.3/freetype-2.13.3.tar.xz
-  URL_HASH SHA256=0550350666d427c74daeb85d5ac7bb353acba5f76956395995311a9c6f063289
-  ${_exclude})
+# ---- PCRE2: the system's (pkg-config), or static -----------------------------------------
+if(LITE_SYSTEM_PCRE2)
+  find_package(PkgConfig REQUIRED)
+  pkg_check_modules(PCRE2 REQUIRED IMPORTED_TARGET libpcre2-8)
+  set(lite_pcre2 PkgConfig::PCRE2)
+  message(STATUS "PCRE2: the system's, ${PCRE2_VERSION}")
+else()
+  set(PCRE2_BUILD_PCRE2_8 ON CACHE BOOL "" FORCE)
+  set(PCRE2_BUILD_PCRE2_16 OFF CACHE BOOL "" FORCE)
+  set(PCRE2_BUILD_PCRE2_32 OFF CACHE BOOL "" FORCE)
+  set(PCRE2_BUILD_PCRE2GREP OFF CACHE BOOL "" FORCE)
+  set(PCRE2_BUILD_TESTS OFF CACHE BOOL "" FORCE)
+  set(PCRE2_SUPPORT_JIT ON CACHE BOOL "" FORCE)
+  set(PCRE2_STATIC_RUNTIME OFF CACHE BOOL "" FORCE)
+  FetchContent_Declare(pcre2
+    URL https://github.com/PCRE2Project/pcre2/releases/download/pcre2-10.44/pcre2-10.44.tar.bz2
+    URL_HASH SHA256=d34f02e113cf7193a1ebf2770d3ac527088d485d4e047ed10e5d217c6ef5de96
+    ${_exclude})
+  list(APPEND _fetched pcre2)
+  set(lite_pcre2 pcre2-8-static)
+endif()
+
+# ---- FreeType: the system's, or static without its optional codecs ----------------------
+if(LITE_SYSTEM_FREETYPE)
+  find_package(Freetype REQUIRED)
+  set(lite_freetype Freetype::Freetype)
+  message(STATUS "FreeType: the system's, ${FREETYPE_VERSION_STRING}")
+else()
+  foreach(opt ZLIB BZIP2 PNG HARFBUZZ BROTLI)
+    set(FT_DISABLE_${opt} ON CACHE BOOL "" FORCE)
+  endforeach()
+  set(SKIP_INSTALL_ALL ON CACHE BOOL "" FORCE)
+  FetchContent_Declare(freetype
+    URL https://download.savannah.gnu.org/releases/freetype/freetype-2.13.3.tar.xz
+        https://downloads.sourceforge.net/project/freetype/freetype2/2.13.3/freetype-2.13.3.tar.xz
+    URL_HASH SHA256=0550350666d427c74daeb85d5ac7bb353acba5f76956395995311a9c6f063289
+    ${_exclude})
+  list(APPEND _fetched freetype)
+  set(lite_freetype freetype)
+endif()
 
 # ---- SDL3, static, with the features as upstream's scripts/build.sh, plus the file dialogs
-# (system.open_file_dialog; Windows: comdlg32, Linux: the portal or zenity at runtime) -----
-set(SDL_STATIC ON CACHE BOOL "" FORCE)
-set(SDL_SHARED OFF CACHE BOOL "" FORCE)
-set(SDL_TESTS OFF CACHE BOOL "" FORCE)
-set(SDL_EXAMPLES OFF CACHE BOOL "" FORCE)
-set(SDL_INSTALL OFF CACHE BOOL "" FORCE)
-foreach(opt AUDIO CAMERA JOYSTICK HAPTIC HIDAPI SENSOR POWER GPU VULKAN)
-  set(SDL_${opt} OFF CACHE BOOL "" FORCE)
-endforeach()
-set(SDL_DIALOG ON CACHE BOOL "" FORCE)
-set(SDL_VENDOR_INFO "lite-xl" CACHE STRING "" FORCE)
-if(UNIX AND NOT APPLE)
-  set(SDL_RPATH OFF CACHE BOOL "" FORCE)
-  set(SDL_PIPEWIRE OFF CACHE BOOL "" FORCE)
-  set(SDL_LIBUDEV OFF CACHE BOOL "" FORCE)
-  set(SDL_X11 ON CACHE BOOL "" FORCE)
-  set(SDL_WAYLAND ON CACHE BOOL "" FORCE)
-  set(SDL_DBUS ON CACHE BOOL "" FORCE)
-  set(SDL_IBUS ON CACHE BOOL "" FORCE)
+# (system.open_file_dialog; Windows: comdlg32, Linux: the portal or zenity at runtime);
+# not with LITE_SYSTEM_SDL -------------------------------------------------------------
+if(NOT LITE_SYSTEM_SDL)
+  set(SDL_STATIC ON CACHE BOOL "" FORCE)
+  set(SDL_SHARED OFF CACHE BOOL "" FORCE)
+  set(SDL_TESTS OFF CACHE BOOL "" FORCE)
+  set(SDL_EXAMPLES OFF CACHE BOOL "" FORCE)
+  set(SDL_INSTALL OFF CACHE BOOL "" FORCE)
+  foreach(opt AUDIO CAMERA JOYSTICK HAPTIC HIDAPI SENSOR POWER GPU VULKAN)
+    set(SDL_${opt} OFF CACHE BOOL "" FORCE)
+  endforeach()
+  set(SDL_DIALOG ON CACHE BOOL "" FORCE)
+  set(SDL_VENDOR_INFO "lite-xl" CACHE STRING "" FORCE)
+  if(UNIX AND NOT APPLE)
+    set(SDL_RPATH OFF CACHE BOOL "" FORCE)
+    set(SDL_PIPEWIRE OFF CACHE BOOL "" FORCE)
+    set(SDL_LIBUDEV OFF CACHE BOOL "" FORCE)
+    set(SDL_X11 ON CACHE BOOL "" FORCE)
+    set(SDL_WAYLAND ON CACHE BOOL "" FORCE)
+    set(SDL_DBUS ON CACHE BOOL "" FORCE)
+    set(SDL_IBUS ON CACHE BOOL "" FORCE)
+  endif()
+  FetchContent_Declare(sdl3
+    URL https://github.com/libsdl-org/SDL/releases/download/release-3.2.14/SDL3-3.2.14.tar.gz
+    URL_HASH SHA256=b7e7dc05011b88c69170fe18935487b2559276955e49113f8c1b6b72c9b79c1f
+    ${_exclude})
+  list(APPEND _fetched sdl3)
+  set(lite_sdl SDL3::SDL3-static)
+else()
+  find_package(SDL3 REQUIRED CONFIG COMPONENTS SDL3-shared)
+  set(lite_sdl SDL3::SDL3-shared)
+  message(STATUS "SDL3: the system's, ${SDL3_VERSION}")
 endif()
-FetchContent_Declare(sdl3
-  URL https://github.com/libsdl-org/SDL/releases/download/release-3.2.14/SDL3-3.2.14.tar.gz
-  URL_HASH SHA256=b7e7dc05011b88c69170fe18935487b2559276955e49113f8c1b6b72c9b79c1f
-  ${_exclude})
 
-FetchContent_MakeAvailable(pcre2 freetype sdl3)
+if(_fetched)
+  FetchContent_MakeAvailable(${_fetched})
+endif()
 set(CMAKE_SKIP_INSTALL_RULES OFF)
 
 #===============================================================================
@@ -244,10 +289,13 @@ endif()
 # The executable
 #===============================================================================
 add_executable(lite-xl WIN32 ${lite_sources})
-target_include_directories(lite-xl PRIVATE src "${pcre2_BINARY_DIR}")
-target_link_libraries(lite-xl PRIVATE lite_lua pcre2-8-static freetype SDL3::SDL3-static)
+target_include_directories(lite-xl PRIVATE src)
+if(NOT LITE_SYSTEM_PCRE2)
+  target_include_directories(lite-xl PRIVATE "${pcre2_BINARY_DIR}")
+  target_compile_definitions(lite-xl PRIVATE PCRE2_STATIC)
+endif()
+target_link_libraries(lite-xl PRIVATE lite_lua ${lite_pcre2} ${lite_freetype} ${lite_sdl})
 target_compile_definitions(lite-xl PRIVATE
-  PCRE2_STATIC
   "LITE_PROJECT_VERSION_STR=\"${LITE_VERSION_STR}\""
   "LITE_ARCH_TUPLE=\"${arch_tuple}\"")
 if(LITE_USE_SDL_RENDERER OR APPLE)
