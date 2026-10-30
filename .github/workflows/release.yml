@@ -91,29 +91,15 @@ jobs:
           bash scripts/install-dependencies.sh --debug
           sudo apt-get install -y ccache
 
-      - name: Build Portable
+      # the CMake build, with SDL, FreeType and PCRE2 built in; in the manylinux build box,
+      # whose old glibc the binary then needs at least
+      - name: Build and Package
         uses: docker://ghcr.io/lite-xl/lite-xl-build-box-manylinux:v4
         with:
           entrypoint: /entrypoint.sh
           args: |
-            bash --version
-            bash scripts/build.sh --debug --forcefallback --portable --release --lto
-
-      - name: Package Portables
-        uses: docker://ghcr.io/lite-xl/lite-xl-build-box-manylinux:v4
-        with:
-          entrypoint: /entrypoint.sh
-          args: |
-            bash scripts/package.sh --version ${INSTALL_REF} --debug --binary --release
-            bash scripts/package.sh --version ${INSTALL_REF} --debug --addons --binary --release
-
-      - name: Build AppImages
-        uses: docker://ghcr.io/lite-xl/lite-xl-build-box-manylinux:v4
-        with:
-          entrypoint: /entrypoint.sh
-          args: |
-            bash scripts/appimage.sh --debug --static --version ${INSTALL_REF} --release
-            bash scripts/appimage.sh --debug --nobuild --addons --version ${INSTALL_REF}
+            cmake --version
+            bash scripts/release-linux.sh --version ${INSTALL_REF} --debug
 
       - name: Upload Artifacts
         uses: actions/upload-artifact@v4
