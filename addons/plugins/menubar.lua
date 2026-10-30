@@ -455,7 +455,7 @@ local function build_rows(specs)
           checked = checked and checked() or nil,
           text = type(spec) == "table" and spec.text or label(name),
           info = binding(name),
-          disabled = not command.is_valid(name),
+          disabled = not command.is_enabled(name),
           command = function() command.perform(name) end,
         })
       end
@@ -637,17 +637,7 @@ end
 
 
 function Dropdown:focus_step(dir)
-  local n = #(self.items or {})
-  if n == 0 then return end
-  local i = self.selected
-  for _ = 1, n do
-    i = i == -1 and (dir > 0 and 1 or n) or (i - 1 + dir) % n + 1
-    local item = self.items[i]
-    if item ~= ContextMenu.DIVIDER and not item.disabled then
-      self.selected = i
-      return
-    end
-  end
+  if dir > 0 then self:focus_next() else self:focus_previous() end
 end
 
 function Dropdown:draw_context_menu()
