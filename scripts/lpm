@@ -34,7 +34,8 @@ if [ ! -x "$lpm" ]; then
   echo "lpm: $lpm not built (meson skips it without its dependencies; see -Dlpm)" >&2
   exit 1
 fi
-if [ ! -e "$userdir/lpm/settings.json" ]; then
+# (whether the settings exist doesn't tell: a run that failed may have written them)
+if ! grep -qsF "\"$src\"" "$userdir/lpm/settings.json"; then
   "$lpm" repo add "$src" "${args[@]}" >&2
 fi
 exec "$lpm" "$@" "${args[@]}"
