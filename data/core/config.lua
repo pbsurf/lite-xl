@@ -55,6 +55,9 @@ config.line_height = 1.2
 config.indent_size = 2
 config.tab_type = "soft"
 config.keep_newline_whitespace = false
+-- Saving adds a newline at the end of a document that doesn't end with one
+-- (an empty document stays empty).
+config.insert_final_newline = true
 config.line_limit = 80
 config.max_project_files = 2000
 config.transitions = true

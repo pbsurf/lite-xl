@@ -65,13 +65,14 @@ function trimwhitespace.trim(doc)
   end
 end
 
----Removes all empty new lines at the end of the document.
+---Removes all empty new lines at the end of the document, but the last: that
+---one is after the file's final newline.
 ---@param doc core.doc
 ---@param raw_remove? boolean Perform the removal not registering to undo stack
 function trimwhitespace.trim_empty_end_lines(doc, raw_remove)
   for _=#doc.lines, 1, -1 do
     local l = #doc.lines
-    if l > 1 and doc.lines[l] == "\n" then
+    if l > 1 and doc.lines[l] == "\n" and doc.lines[l-1] == "\n" then
       local current_line = doc:get_selection()
       if current_line == l then
         doc:set_selection(l-1, math.huge, l-1, math.huge)

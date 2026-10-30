@@ -65,24 +65,30 @@ function Doc:set_filename(filename, abs_filename)
 end
 
 
-function Doc:load(filename)
+-- Every line in `doc.lines` ends with "\n", but the last line's isn't in the
+-- file: a file ending with a newline loads with an empty line after that
+-- newline, where the cursor can go, and one without ends with its last text.
+local function read_lines(filename)
   local fp = assert( io.open(filename, "rb") )
-  self:reset()
-  self.lines = {}
-  local i = 1
-  for line in fp:lines() do
+  local text = fp:read("a")
+  fp:close()
+  local lines, crlf = {}, false
+  for line in (text .. "\n"):gmatch("(.-)\n") do
     if line:byte(-1) == 13 then
       line = line:sub(1, -2)
-      self.crlf = true
+      crlf = true
     end
-    table.insert(self.lines, line .. "\n")
-    self.highlighter.lines[i] = false
-    i = i + 1
+    lines[#lines + 1] = line .. "\n"
   end
-  if #self.lines == 0 then
-    table.insert(self.lines, "\n")
-  end
-  fp:close()
+  return lines, crlf
+end
+
+
+function Doc:load(filename)
+  local lines, crlf = read_lines(filename)
+  self:reset()
+  self.lines, self.crlf = lines, crlf
+  for i = 1, #lines do self.highlighter.lines[i] = false end
   self:reset_syntax()
   self:notify_lines_changed()
 end
@@ -93,17 +99,7 @@ end
 -- two have in common at the start and end are replaced.
 function Doc:reload()
   if not self.filename then return end
-  local fp = assert( io.open(self.filename, "rb") )
-  local lines, crlf = {}, false
-  for line in fp:lines() do
-    if line:byte(-1) == 13 then
-      line = line:sub(1, -2)
-      crlf = true
-    end
-    table.insert(lines, line .. "\n")
-  end
-  fp:close()
-  if #lines == 0 then lines[1] = "\n" end
+  local lines, crlf = read_lines(self.filename)
   self.crlf = crlf
 
   local old = self.lines
@@ -156,8 +152,12 @@ function Doc:save(filename, abs_filename)
   else
     assert(self.filename or abs_filename, "calling save on unnamed doc without absolute path")
   end
+  if config.insert_final_newline and self.lines[#self.lines] ~= "\n" then
+    self:insert(#self.lines, math.huge, "\n")
+  end
   local fp = assert( io.open(filename, "wb") )
-  for _, line in ipairs(self.lines) do
+  for i, line in ipairs(self.lines) do
+    if i == #self.lines then line = line:sub(1, -2) end
     if self.crlf then line = line:gsub("\n", "\r\n") end
     fp:write(line)
   end

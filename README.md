@@ -92,6 +92,10 @@ upstream's `release/v2.1.x`. Additions to the editor:
 * **Block select:** `doc:select-block`, bound to a click (e.g.
   `keymap.add { ["alt+1lclick"] = "doc:select-block" }`), selects a rectangle
   while dragging.
+* **Final newline:** as in VS Code, a file's final newline is followed by an
+  empty last line, where the cursor can go, and files are saved byte for byte.
+  Saving adds a missing final newline unless `config.insert_final_newline` is
+  false.
 * **For plugins:** antialiased vector drawing (`renderer.draw_path`,
   `renderer.draw_glyph`), per-font letter spacing (`font:set_letter_spacing`),
   background marks on lines
