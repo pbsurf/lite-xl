@@ -78,7 +78,8 @@ typedef enum {
 typedef enum {
   EGlyphNone = 0,             // glyph is not loaded
   EGlyphXAdvance = (1 << 0L), // xadvance is loaded
-  EGlyphBitmap = (1 << 1L)    // bitmap is loaded
+  EGlyphBitmap = (1 << 1L),   // bitmap is loaded
+  EGlyphNoBitmap = (1 << 2L)  // bitmap is rendered, and empty (whitespace) or unsupported
 } ERenGlyphFlags;
 
 // metrics for a loaded glyph
@@ -322,6 +323,7 @@ static SDL_Surface *font_load_glyph_bitmap(RenFont *font, unsigned int glyph_id,
   GlyphMetric *metric = font_load_glyph_metric(font, glyph_id, bitmap_idx);
   if (!metric) return NULL;
   if (metric->flags & EGlyphBitmap) return font->glyphs.atlas[metric->format][metric->atlas_idx].surfaces[metric->surface_idx];
+  if (metric->flags & EGlyphNoBitmap) return NULL;
 
   // render the glyph for a bitmap_idx
   unsigned int load_option = font_set_load_options(font), render_option = font_set_render_options(font);
@@ -332,11 +334,14 @@ static SDL_Surface *font_load_glyph_bitmap(RenFont *font, unsigned int glyph_id,
     return NULL;
 
   // if this bitmap is empty, or has a format we don't support, just store the xadvance
+  // (and that there's no bitmap: else each draw of a space renders it again)
   if (!slot->bitmap.width || !slot->bitmap.rows || !slot->bitmap.buffer ||
       (slot->bitmap.pixel_mode != FT_PIXEL_MODE_MONO
         && slot->bitmap.pixel_mode != FT_PIXEL_MODE_GRAY
-        && slot->bitmap.pixel_mode != FT_PIXEL_MODE_LCD))
+        && slot->bitmap.pixel_mode != FT_PIXEL_MODE_LCD)) {
+    metric->flags |= EGlyphNoBitmap;
     return NULL;
+  }
 
   unsigned int glyph_width = slot->bitmap.width / FONT_BITMAP_COUNT(font);
   // FT_PIXEL_MODE_MONO uses 1 bit per pixel packed bitmap
