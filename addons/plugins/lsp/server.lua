@@ -626,60 +626,34 @@ function Server:notify(method, params)
   return sent
 end
 
----Reply to a server request.
+---Reply to a server request. The reply is queued, like the default replies
+---(`on_request`): written now, it could land in the middle of a raw message
+---being sent in chunks (a big file's didOpen), which the server would then
+---drop as unreadable.
 ---@param id integer
 ---@param result table
----@return boolean sent
 function Server:respond(id, result)
-  local message = {
-    jsonrpc = '2.0',
-    id = id,
-    result = result
-  }
-
-  local data = json.encode(message)
-
   if self.verbose then
-    self:log("Responding to '%d':\n%s", id, util.jsonprettify(data))
+    self:log("Queuing response to '%s'", tostring(id))
   end
-
-  local sent, errmsg = self:write_request(data)
-
-  if not sent and self.verbose then
-    self:log("Could not send response with error: %s", errmsg or "unknown")
-  end
-
-  return sent
+  table.insert(self.response_list, { id = id, result = result })
+  core.wake(Server.WAKE_KEY)
 end
 
----Respond to a an unknown server request with a method not found error code.
+---Respond to a an unknown server request with a method not found error code
+---(queued, as `respond`).
 ---@param id integer
 ---@param error_message? string
 ---@param error_code? integer
----@return boolean sent
 function Server:respond_error(id, error_message, error_code)
-  local message = {
-    jsonrpc = '2.0',
+  table.insert(self.response_list, {
     id = id,
     error = {
       code = error_code or Server.error_code.MethodNotFound,
       message = error_message or "method not found"
     }
-  }
-
-  local data = json.encode(message)
-
-  if self.verbose then
-    self:log("Responding error to '%d':\n%s", id, util.jsonprettify(data))
-  end
-
-  local sent, errmsg = self:write_request(data)
-
-  if not sent and self.verbose then
-    self:log("Could not send response with error: %s", errmsg or "unknown")
-  end
-
-  return sent
+  })
+  core.wake(Server.WAKE_KEY)
 end
 
 ---Sends one of the queued notifications.
