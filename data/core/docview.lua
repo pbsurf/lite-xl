@@ -83,10 +83,35 @@ function DocView:try_close(do_close)
 end
 
 
+local function path_parts(path)
+  local parts = {}
+  for part in path:gmatch("[^/\\]+") do table.insert(parts, part) end
+  return parts
+end
+
+---The file's name, or, when another open doc has a file of the same name, the
+---shortest end of its path that no other one shares (e.g. core/init.lua).
 function DocView:get_name()
   local pre = self.doc:is_dirty() and "* " or ""
-  local name = self.doc:get_name()
-  return pre .. name:match("[^/%\\]*$")
+  local path = self.doc.abs_filename or self.doc:get_name()
+  local name = path:match("[^/\\]*$")
+  local parts, n = nil, 1
+  for _, doc in ipairs(core.docs) do
+    local other = doc ~= self.doc and (doc.abs_filename or doc.filename)
+    if other and other ~= path and other:match("[^/\\]*$") == name then
+      parts = parts or path_parts(path)
+      local oparts = path_parts(other)
+      local shared = 0
+      while shared < #parts and shared < #oparts
+          and parts[#parts - shared] == oparts[#oparts - shared] do
+        shared = shared + 1
+      end
+      n = math.max(n, shared + 1)
+    end
+  end
+  if n == 1 then return pre .. name end
+  if n > #parts then return pre .. common.home_encode(path) end
+  return pre .. table.concat(parts, PATHSEP, #parts - n + 1)
 end
 
 
