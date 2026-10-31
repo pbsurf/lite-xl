@@ -6,6 +6,7 @@ local config = require "core.config"
 local keymap = require "core.keymap"
 local style = require "core.style"
 local CommandView = require "core.commandview"
+local StatusView = require "core.statusview"
 
 config.plugins.scale = common.merge({
   -- The method used to apply the scaling: "code", "ui"
@@ -81,10 +82,14 @@ local function get_scale()
   return current_scale
 end
 
-local function res_scale()
-  -- the configured default, as applied at startup; else the autodetected one
+-- the configured default, as applied at startup; else the autodetected one
+local function get_reset_scale()
   local scale = config.plugins.scale.default_scale
-  set_scale(type(scale) == "number" and scale or default_scale)
+  return type(scale) == "number" and scale or default_scale
+end
+
+local function res_scale()
+  set_scale(get_reset_scale())
 end
 
 local function inc_scale()
@@ -187,6 +192,21 @@ if config.plugins.scale.use_mousewheel then
     ["ctrl+wheeldown"] = "scale:decrease"
   }
 end
+
+-- the zoom relative to the default, as a whole percentage
+local function zoom_percent()
+  return math.floor(current_scale / get_reset_scale() * 100 + 0.5)
+end
+
+-- the zoom, shown only while it isn't the default
+core.status_view:add_item({
+  name = "scale:zoom",
+  alignment = StatusView.Item.RIGHT,
+  predicate = function() return zoom_percent() ~= 100 end,
+  get_item = function() return { style.text, zoom_percent() .. "%" } end,
+  tooltip = "Zoom (click to reset)",
+  command = "scale:reset",
+})
 
 return {
   ["set"] = set_scale,
