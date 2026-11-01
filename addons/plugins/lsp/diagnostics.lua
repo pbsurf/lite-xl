@@ -74,7 +74,8 @@ diagnostics.tag = {
 ---A diagnostic item.
 ---@class lsp.diagnostics.item
 ---@field filename string
----@field messages lsp.diagnostics.message[]
+---@field messages lsp.diagnostics.message[] All servers' messages, most severe first.
+---@field servers table<string, lsp.diagnostics.message[]> Messages by server name.
 
 ---@type table<integer, lsp.diagnostics.item>
 diagnostics.list = {}
@@ -162,37 +163,61 @@ function diagnostics.get(filename, severity)
   return nil
 end
 
----Adds a new list of diagnostics associated to a file replacing previous one.
+---@param item lsp.diagnostics.item
+local function merge_messages(item)
+  item.messages = {}
+  for _, server_messages in pairs(item.servers) do
+    for _, message in ipairs(server_messages) do
+      table.insert(item.messages, message)
+    end
+  end
+  table.sort(item.messages, sort_helper)
+end
+
+---Sets a server's diagnostics for a file, replacing that server's previous ones;
+---the file's messages are those of all its servers (e.g. ty's and ruff's for Python).
 ---@param filename string
 ---@param messages lsp.diagnostics.message[]
+---@param server? string Name of the server reporting them.
 ---@return boolean
-function diagnostics.add(filename, messages)
+function diagnostics.add(filename, messages, server)
   local index = diagnostics.get_index(filename)
 
   ---@cast filename +nil
   filename = get_absolute_path(filename)
   if not filename then return false end
 
-  table.sort(messages, sort_helper)
-
   if not index then
     diagnostics.count = diagnostics.count + 1
     table.insert(diagnostics.list, {
-      filename = filename, messages = messages
+      filename = filename, messages = {}, servers = {}
     })
-  else
-    diagnostics.list[index].messages = messages
+    index = #diagnostics.list
   end
+
+  local item = diagnostics.list[index]
+  item.servers[server or ""] = messages
+  merge_messages(item)
 
   return true
 end
 
----Removes all diagnostics associated to a file.
+---Removes a server's diagnostics for a file, or all of the file's if no server
+---is given.
 ---@param filename string
-function diagnostics.clear(filename)
+---@param server? string
+function diagnostics.clear(filename, server)
   local index = diagnostics.get_index(filename)
 
   if index then
+    local item = diagnostics.list[index]
+    if server then
+      item.servers[server] = nil
+      if next(item.servers) then
+        merge_messages(item)
+        return
+      end
+    end
     table.remove(diagnostics.list, index)
     diagnostics.count = diagnostics.count - 1
   end

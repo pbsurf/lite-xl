@@ -969,10 +969,15 @@ function lsp.start_server(filename, project_directory)
             end
 
             if params.diagnostics and #params.diagnostics > 0 then
-              local added = diagnostics.add(filename, params.diagnostics)
+              diagnostics.add(filename, params.diagnostics, server.name)
+            else
+              diagnostics.clear(filename, server.name)
+            end
 
+            -- other servers' diagnostics for the file stay
+            if diagnostics.get_messages_count(filename) > 0 then
               if
-                added and diagnostics.lintplus_found
+                diagnostics.lintplus_found
                 and
                 config.plugins.lsp.show_diagnostics
                 and
@@ -983,7 +988,6 @@ function lsp.start_server(filename, project_directory)
                 diagnostics.lintplus_populate_delayed(filename)
               end
             else
-              diagnostics.clear(filename)
               diagnostics.lintplus_clear_messages(filename)
             end
           end
