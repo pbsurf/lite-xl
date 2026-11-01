@@ -435,7 +435,11 @@ end
 ---Called after output is read (or written with terminal:output), which
 ---scrolled `shifts` lines.
 function TerminalView:on_output(shifts)
-  if not self.focused then self.modified_since_last_focus = true end
+  -- not for the shell redrawing its prompt as the terminal is resized (SIGWINCH): a
+  -- line less while the command view is open (the tab switcher's list, ctrl+p)
+  if not self.focused and system.get_time() - (self.resized_at or -math.huge) > 0.5 then
+    self.modified_since_last_focus = true
+  end
   -- counts output read, so a cached search doc knows it's out of date
   self.output_count = (self.output_count or 0) + 1
   if self.selection then
@@ -520,6 +524,8 @@ function TerminalView:update()
       if not self.terminal then
         self:spawn()
       else
+        local columns, lines = self.terminal:size()
+        if columns ~= self.columns or lines ~= self.lines then self.resized_at = system.get_time() end
         self.terminal:size(self.columns, self.lines)
         self.last_size = { x = self.size.x, y = self.size.y }
       end
