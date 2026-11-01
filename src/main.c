@@ -135,6 +135,13 @@ int main(int argc, char **argv) {
   SDL_SetHint(SDL_HINT_MOUSE_FOCUS_CLICKTHROUGH, "1");
   SDL_SetHint(SDL_HINT_IME_IMPLEMENTED_UI, "1");
   SDL_SetHint(SDL_HINT_RENDER_DRIVER, "software");
+  /* Present the window surface natively (XShm on X11) rather than through a GPU
+  ** renderer. SDL3's default loads the GL driver (Mesa + LLVM) and keeps
+  ** window-sized textures and back buffers: ~150 MB more RSS and GPU memory for a
+  ** large window, for no gain since we draw in software anyway. On some drivers
+  ** (vmwgfx offscreen) it also leaks a GPU buffer per frame. The environment
+  ** variable still overrides this. */
+  SDL_SetHint(SDL_HINT_FRAMEBUFFER_ACCELERATION, "0");
   SDL_SetHint(SDL_HINT_IME_IMPLEMENTED_UI, "composition");
   /* This hint tells SDL to respect borderless window as a normal window.
   ** For example, the window will sit right on top of the taskbar instead

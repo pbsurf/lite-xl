@@ -61,12 +61,4 @@ for p in terminal spellcheck; do
   [ -d "$LITE_USERDIR/plugins/$p" ] && find "$LITE_USERDIR/plugins/$p" -maxdepth 1 -name '*.so' -xtype l -delete
 done
 
-# Headless (SDL_VIDEO_DRIVER=offscreen), SDL backs the window surface with a GPU
-# renderer; on this VMware guest (vmwgfx) every presented frame then leaks a
-# window-sized buffer in the kernel (GiBs after a few hundred frames), invisible in
-# RSS. A plain software surface avoids the GPU entirely.
-if [ "$SDL_VIDEO_DRIVER" = offscreen ]; then
-  export SDL_FRAMEBUFFER_ACCELERATION=${SDL_FRAMEBUFFER_ACCELERATION:-0}
-fi
-
 exec "$prefix/bin/lite-xl" "$@"
