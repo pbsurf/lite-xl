@@ -588,7 +588,7 @@ command.add(nil, {
     end
   end,
   ["line-wrapping:toggle"] = function()
-    if core.active_view and core.active_view.doc and core.active_view.wrapped_settings then
+    if core.active_view and core.active_view.doc and core.active_view.wrapping_enabled then
       command.perform("line-wrapping:disable")
     else
       command.perform("line-wrapping:enable")
@@ -599,5 +599,44 @@ command.add(nil, {
 keymap.add {
   ["f10"] = "line-wrapping:toggle",
 }
+
+-- status bar toggle: a wrap icon (a line running into the right edge and turning
+-- back below as an arrow), bright while wrapping is on
+local StatusView = require "core.statusview"
+local item = core.status_view:add_item({
+  predicate = function() return core.active_view:is(DocView) end,
+  name = "line-wrapping:toggle",
+  alignment = StatusView.Item.RIGHT,
+  priority = -6,
+  command = "line-wrapping:toggle",
+  tooltip = function()
+    local key = keymap.get_binding("line-wrapping:toggle")
+    return string.format("Line wrapping: %s (click%s to toggle)",
+      core.active_view.wrapping_enabled and "on" or "off", key and " or " .. key or "")
+  end,
+})
+item.on_draw = function(x, y, h, hovered, calc_only)
+  local ih = math.floor(style.font:get_height() * 0.6)
+  local iw = math.floor(ih * 1.15)
+  if calc_only then return iw end
+  local color = core.active_view.wrapping_enabled and style.text or style.dim
+  local t = math.max(1, math.floor(1.2 * SCALE + 0.5))
+  local top = math.floor(y + (h - ih) / 2)
+  -- stroke centers on pixel centers for odd widths, so lines stay crisp
+  local function py(f) return math.floor(top + ih * f) + (t % 2) / 2 end
+  local x0, x1 = math.floor(x) + t / 2, math.floor(x) + iw - t / 2
+  local y1, y2, y3 = py(0.1), py(0.45), py(0.8)
+  local r = (y3 - y2) / 2
+  local ax, a = x0 + (x1 - x0) * 0.42, ih * 0.17
+  renderer.draw_path({ "M", x0, y1, "L", x1, y1 }, color, t)
+  renderer.draw_path({
+    "M", x0, y2, "L", x1 - r, y2,
+    "C", x1 + r / 3, y2, x1 + r / 3, y3, x1 - r, y3,
+    "L", ax, y3,
+  }, color, t)
+  renderer.draw_path({ "M", ax + a, y3 - a, "L", ax, y3, "L", ax + a, y3 + a }, color, t)
+  renderer.draw_path({ "M", x0, y3, "L", x0 + (x1 - x0) * 0.2, y3 }, color, t)
+  return iw
+end
 
 return LineWrapping
