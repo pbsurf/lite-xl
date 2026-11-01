@@ -739,6 +739,18 @@ lspconfig.ruff = add_lsp {
   verbose = false
 }
 
+--# Python - ty
+--- __Status__: Works (beta); no formatting (use ruff)
+--- __Site__: https://github.com/astral-sh/ty
+--- __Installation__: `pip install ty` or `uv tool install ty`
+lspconfig.ty = add_lsp {
+  name = "ty",
+  language = "python",
+  file_patterns = { "%.py$", "%.pyi$" },
+  command = { "ty", "server" },
+  verbose = false
+}
+
 ---# R - r_ls
 -- __Status__: Works
 -- __Site__: https://github.com/REditorSupport/languageserver
