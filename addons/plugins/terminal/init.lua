@@ -1142,6 +1142,9 @@ command.add(input_predicate, {
   ["terminal:end-of-medium"] = function(view) view:input("\x19") end,
   ["terminal:file-separator"] = function(view) view:input("\x1C") end,
   ["terminal:group-separator"] = function(view) view:input("\x1D") end,
+  ["terminal:record-separator"] = function(view) view:input("\x1E") end,
+  ["terminal:unit-separator"] = function(view) view:input("\x1F") end,
+  ["terminal:back-tab"] = function(view) view:input("\x1B[Z") end,
 });
 -- ctrl+b, ctrl+p and ctrl+n are sent to full-screen programs (tmux's prefix, vim's
 -- completion, less's paging), but at the shell prompt they're the editor's (tree
@@ -1327,6 +1330,8 @@ local keys = {
   ["mclick"] = "terminal:primary-paste",
   ["wheel"] = "terminal:scroll",
   ["tab"] = "terminal:tab",
+  ["shift+tab"] = "terminal:back-tab",
+  ["insert"] = "terminal:insert",
   ["pageup"] = "terminal:page-up",
   ["pagedown"] = "terminal:page-down",
   ["shift+pageup"] = "terminal:scroll-up",
@@ -1386,7 +1391,11 @@ local keys = {
   ["ctrl+z"] = "terminal:suspend",
   ["ctrl+["] = "terminal:escape",
   ["ctrl+\\"] = "terminal:file-separator",
-  ["ctrl+]"] = "terminal:group-separator"
+  ["ctrl+]"] = "terminal:group-separator",
+  -- ^^ (vim's alternate file) and ^_ (undo in bash and emacs) where xterm sends them
+  ["ctrl+6"] = "terminal:record-separator",
+  ["ctrl+/"] = "terminal:unit-separator",
+  ["ctrl+shift+-"] = "terminal:unit-separator",
 }
 local non_omitted_keys = {}
 for k,v in pairs(keys) do if config.plugins.terminal.omit_escapes == nil or not k:find(config.plugins.terminal.omit_escapes) then non_omitted_keys[k] = v end end
