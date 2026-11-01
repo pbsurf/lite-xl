@@ -1401,6 +1401,28 @@ local non_omitted_keys = {}
 for k,v in pairs(keys) do if config.plugins.terminal.omit_escapes == nil or not k:find(config.plugins.terminal.omit_escapes) then non_omitted_keys[k] = v end end
 keymap.add(non_omitted_keys)
 
+-- alt+<key> sends Esc and the key, as Meta (bash: alt+b/f back/forward a word, alt+d
+-- delete one, alt+. the last argument), unless another command bound to it
+-- applies in a terminal (alt+t, alt+i/j/k/l between splits, alt+p tab list);
+-- editor commands only for documents (the lsp plugin's) don't stop it
+local meta_keys = {}
+for c in ("abcdefghijklmnopqrstuvwxyz.,"):gmatch(".") do
+  local stroke, name = "alt+" .. c, "terminal:meta-" .. c
+  command.add(function(...)
+    local ok, view = input_predicate(...)
+    if not ok then return false end
+    for _, cmd in ipairs(keymap.map[stroke] or {}) do
+      local other = cmd ~= name and type(cmd) == "string" and command.map[cmd]
+      if other and other.predicate() then return false end
+    end
+    return true, view, ...
+  end, {
+    [name] = function(view) view:input("\x1B" .. c) end
+  })
+  meta_keys[stroke] = name
+end
+keymap.add(meta_keys)
+
 if config.plugins.terminal.inversion_key then
   local settings = {}
   local commands = {}

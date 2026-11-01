@@ -142,7 +142,8 @@ another repository's version, uninstalls removing dependents under `--assume-yes
   terminal, in the bottom panel (shift+alt+t, alt+t) or a tab (ctrl+shift+\`). ctrl+f
   searches it in search_ui's pane, newest output first (`search_backward`). At the
   shell prompt ctrl+b, ctrl+p and ctrl+n are the editor's (tree view, find file,
-  new document); full-screen programs (vim, less, tmux) get them. Its C
+  new document); full-screen programs (vim, less, tmux) get them. alt+letter sends
+  Meta unless the editor uses it in a terminal (alt+t, alt+i/j/k/l). Its C
   module is built by our CMake build, into the build's `addons/`.
 * **spellcheck:** spell checking with hunspell (`/usr/share/hunspell/en_US` by
   default), off until `spell-check:toggle` turns it on for a document. Identifiers
