@@ -23,10 +23,14 @@ syntax.add {
     { pattern = "^%s*[0-9]+[%.%)]%s",       type = "number" },
     -- blockquote
     { pattern = "^%s*>+%s",                 type = "string" },
-    -- alternative bold italic formats
-    { pattern = { "%s___", "___" },         type = "markdown_bold_italic" },
-    { pattern = { "%s__", "__" },           type = "markdown_bold" },
-    { pattern = { "%s_[%S]", "_" },         type = "markdown_italic" },
+    -- alternative bold italic formats: as * below, closed on the same line,
+    -- and not by an underscore inside a word (snake_case)
+    { pattern = "%s()___[^%s_].-[^%s\\]___%f[^%w_]", type = { "normal", "markdown_bold_italic" } },
+    { pattern = "%s()___[^%s_]___%f[^%w_]",            type = { "normal", "markdown_bold_italic" } },
+    { pattern = "%s()__[^%s_].-[^%s\\]__%f[^%w_]",   type = { "normal", "markdown_bold" } },
+    { pattern = "%s()__[^%s_]__%f[^%w_]",              type = { "normal", "markdown_bold" } },
+    { pattern = "%s()_[^%s_][^_\n]-[^%s_\\]_%f[^%w_]", type = { "normal", "markdown_italic" } },
+    { pattern = "%s()_[^%s_]_%f[^%w_]",                type = { "normal", "markdown_italic" } },
     -- reference links
     {
       pattern = "^%s*%[%^()["..in_squares_match.."]+()%]: ",
@@ -141,18 +145,24 @@ syntax.add {
     { pattern = { "~~", "~~" },             type = "keyword2" },
     -- highlight
     { pattern = { "==", "==" },             type = "literal" },
-    -- bold and italic
-    { pattern = { "%*%*%*%S", "%*%*%*" },   type = "markdown_bold_italic" },
-    { pattern = { "%*%*%S", "%*%*" },       type = "markdown_bold" },
-    -- handle edge case where asterisk can be at end of line and not close
-    {
-      pattern = { "%f[\\%*]%*[%S]", "%*%f[^%*]" },
-      type = "markdown_italic"
-    },
-    -- alternative bold italic formats
-    { pattern = "^___[%s%p%w]+___" ,        type = "markdown_bold_italic" },
-    { pattern = "^__[%s%p%w]+__" ,          type = "markdown_bold" },
-    { pattern = "^_[%s%p%w]+_" ,            type = "markdown_italic" },
+    -- bold and italic: only with a closing delimiter on the same line, so a
+    -- stray * stays plain rather than emphasizing everything up to the next
+    -- one (as VS Code's grammar; the tokenizer can't look ahead to find whether
+    -- one closes it later in the paragraph). Opened by a delimiter followed by
+    -- a non-space, closed by one preceded by a non-space (CommonMark's flanking).
+    { pattern = "%f[\\%*]%*%*%*[^%s%*].-[^%s\\]%*%*%*%f[^%*]", type = "markdown_bold_italic" },
+    { pattern = "%f[\\%*]%*%*%*[^%s%*]%*%*%*%f[^%*]",            type = "markdown_bold_italic" },
+    { pattern = "%f[\\%*]%*%*[^%s%*].-[^%s\\]%*%*%f[^%*]",     type = "markdown_bold" },
+    { pattern = "%f[\\%*]%*%*[^%s%*]%*%*%f[^%*]",                type = "markdown_bold" },
+    { pattern = "%f[\\%*]%*[^%s%*][^%*\n]-[^%s%*\\]%*%f[^%*]", type = "markdown_italic" },
+    { pattern = "%f[\\%*]%*[^%s%*]%*%f[^%*]",                    type = "markdown_italic" },
+    -- alternative bold italic formats at the start of a line
+    { pattern = "^___[^%s_].-[^%s\\]___%f[^%w_]",  type = "markdown_bold_italic" },
+    { pattern = "^___[^%s_]___%f[^%w_]",             type = "markdown_bold_italic" },
+    { pattern = "^__[^%s_].-[^%s\\]__%f[^%w_]",    type = "markdown_bold" },
+    { pattern = "^__[^%s_]__%f[^%w_]",               type = "markdown_bold" },
+    { pattern = "^_[^%s_][^_\n]-[^%s_\\]_%f[^%w_]", type = "markdown_italic" },
+    { pattern = "^_[^%s_]_%f[^%w_]",                 type = "markdown_italic" },
     -- heading with custom id
     {
       pattern = "^#+%s[%w%s%p]+(){()#[%w%-]+()}",
