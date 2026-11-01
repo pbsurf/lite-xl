@@ -615,6 +615,14 @@ local function get_menu()
   return rows
 end
 
+-- build's items sit just left of the core document items (doc:format onwards),
+-- which are shown all the time, so they don't shift those around as they come and go
+local function status_position()
+  for i, item in ipairs(core.status_view:get_items_list(StatusView.Item.RIGHT)) do
+    if item.name == "doc:format" then return i end
+  end
+end
+
 -- the toolbar's Next Target icon (a bullseye), at the size of the status bar's icons
 local status_icon_font = renderer.font.load(get_plugin_directory() .. PATHSEP .. "build.ttf", style.icon_font:get_size())
 
@@ -622,6 +630,7 @@ core.status_view:add_item({
   predicate = function() return build.state.target and build.targets[build.state.target] and build.targets[build.state.target].backend end,
   name = "build:target",
   alignment = StatusView.Item.RIGHT,
+  position = status_position(),
   get_item = function()
     local target = build.targets[build.state.target]
     if status_icon_font:get_size() ~= style.icon_font:get_size() then
@@ -653,6 +662,7 @@ core.status_view:add_item({
   end,
   name = "build:status",
   alignment = StatusView.Item.RIGHT,
+  position = status_position(),
   get_item = function()
     local item = {}
     local function add(color, text)
