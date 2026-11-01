@@ -8,7 +8,7 @@ style.background2 = { common.color "#f2f2f2" }
 style.background3 = { common.color "#f2f2f2" }
 style.text = { common.color "#404040" }
 style.accent = { common.color "#fc1785" }
-style.dim = { common.color "#b0b0b0" }
+style.dim = { common.color "#999999" }
 style.divider = { common.color "#e8e8e8" }
 -- popups: white with a clear border, so they stand out from the panels (#f2f2f2)
 -- and, by the border, from the editor (#ffffff)
@@ -28,8 +28,8 @@ style.caret = { common.color "#000000" }
 style.selection = { common.color "rgba(48, 140, 198, 0.5)" }  -- Selection
 -- gray, to keep the window's left edge visible when the tree view is hidden
 style.gutter = { common.color "#ebebeb" }
-style.line_number = { common.color "#9f9d9a" }                -- LineNumber
-style.line_number2 = { common.color "#808080" }               -- CurrentLineNumber
+style.line_number = { common.color "#8a8885" }                -- LineNumber (#9f9d9a, darkened)
+style.line_number2 = { common.color "#666666" }               -- CurrentLineNumber (#808080, darkened)
 style.line_highlight = { common.color "#c1ddee" }             -- CurrentLine
 style.selection_match = { common.color "#e0e0e0" }            -- Occurrences (#b4b4b4, lightened)
 style.search_match = { common.color "#ffef0b" }               -- SearchResult
