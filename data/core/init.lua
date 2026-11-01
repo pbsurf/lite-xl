@@ -910,7 +910,8 @@ function core.project_absolute_path(filename)
     local cwd = system.absolute_path(".")
     return cwd .. PATHSEP .. common.normalize_path(filename)
   else
-    return core.project_dir .. PATHSEP .. filename
+    -- normalized: "../file" from the project is the file beside it, not "<project>/../file"
+    return common.normalize_path(core.project_dir .. PATHSEP .. filename)
   end
 end
 
@@ -1710,6 +1711,11 @@ end
 
 function core.normalize_to_project_dir(filename)
   filename = common.normalize_path(filename)
+  -- relative to the project but outside it ("../file"): absolute, as a file
+  -- outside the project opened by its absolute path is
+  if core.project_dir and not common.is_absolute_path(filename) and filename:match("^%.%.") then
+    filename = common.normalize_path(core.project_dir .. PATHSEP .. filename)
+  end
   if common.path_belongs_to(filename, core.project_dir) then
     filename = common.relative_path(core.project_dir, filename)
   end
