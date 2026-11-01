@@ -252,8 +252,8 @@ end
 
 command.add(valid_for_finding, {
   ["find-replace:repeat-find"] = function(dv)
-    if not last_fn then
-      core.error("No find to continue from")
+    if not last_fn then -- nothing searched yet: start a find, as ctrl+f
+      command.perform("find-replace:find")
     else
       local sl1, sc1, sl2, sc2 = dv.doc:get_selection(true)
       local line1, col1, line2, col2 = last_fn(dv.doc, sl2, sc2, last_text, case_sensitive, find_regex, false)
@@ -267,8 +267,8 @@ command.add(valid_for_finding, {
   end,
 
   ["find-replace:previous-find"] = function(dv)
-    if not last_fn then
-      core.error("No find to continue from")
+    if not last_fn then -- nothing searched yet: start a find, as ctrl+f
+      command.perform("find-replace:find")
     else
       local sl1, sc1, sl2, sc2 = dv.doc:get_selection(true)
       local line1, col1, line2, col2 = last_fn(dv.doc, sl1, sc1, last_text, case_sensitive, find_regex, true)
