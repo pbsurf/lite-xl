@@ -22,6 +22,22 @@ local scale_steps = 0.05
 local current_scale = SCALE
 local default_scale = SCALE
 
+-- each font's size at default_scale (weak keys: fonts may be replaced). Sizes are
+-- set from these rather than multiplied by each step's ratio: rounding errors
+-- would accumulate, and the renderer truncates sizes to whole pixels, so a reset
+-- could land on 23.999... px, drawn one pixel smaller
+local base_sizes = setmetatable({}, { __mode = "k" })
+
+local function scale_font(font, scale)
+  local base = base_sizes[font]
+  if not base then
+    -- first seen now: assume its size is for the current scale
+    base = font:get_size() * default_scale / current_scale
+    base_sizes[font] = base
+  end
+  font:set_size(base * scale / default_scale)
+end
+
 local function set_scale(scale)
   scale = common.clamp(scale, 0.2, 6)
 
@@ -40,7 +56,6 @@ local function set_scale(scale)
   end
 
   local s = scale / current_scale
-  current_scale = scale
 
   if config.plugins.scale.mode == "ui" then
     SCALE = scale
@@ -55,15 +70,16 @@ local function set_scale(scale)
     style.tab_width               = style.tab_width               * s
 
     for _, name in ipairs {"font", "big_font", "icon_font", "icon_big_font", "code_font"} do
-      style[name]:set_size(s * style[name]:get_size())
+      scale_font(style[name], scale)
     end
   else
-    style.code_font:set_size(s * style.code_font:get_size())
+    scale_font(style.code_font, scale)
   end
 
-  for name, font in pairs(style.syntax_fonts) do
-    style.syntax_fonts[name]:set_size(s * font:get_size())
+  for _, font in pairs(style.syntax_fonts) do
+    scale_font(font, scale)
   end
+  current_scale = scale
 
   -- restore scroll positions
   for view, n in pairs(v_scrolls) do
