@@ -1127,16 +1127,13 @@ command.add(input_predicate, {
   ["terminal:stop"] = function(view) view:input("\x11") end,
   ["terminal:cancel"] = function(view) view:input("\x18") end,
   ["terminal:start-of-heading"] = function(view) view:input("\x01") end,
-  ["terminal:start-of-text"] = function(view) view:input("\x02") end,
   ["terminal:enquiry"] = function(view) view:input("\x05") end,
   ["terminal:acknowledge"] = function(view) view:input("\x06") end,
   ["terminal:bell"] = function(view) view:input("\x07") end,
   ["terminal:vertical-tab"] = function(view) view:input("\x0B") end,
   ["terminal:redraw"] = function(view) view:input("\x0C") end,
   ["terminal:carriage-feed"] = function(view) view:input("\x0D") end,
-  ["terminal:shift-out"] = function(view) view:input("\x0E") end,
   ["terminal:shift-in"] = function(view) view:input("\x0F") end,
-  ["terminal:data-line-escape"] = function(view) view:input("\x10") end,
   ["terminal:history"] = function(view) view:input("\x12") end,
   ["terminal:transpose"] = function(view) view:input("\x14") end,
   ["terminal:negative-acknowledge"] = function(view) view:input("\x15") end,
@@ -1146,6 +1143,17 @@ command.add(input_predicate, {
   ["terminal:file-separator"] = function(view) view:input("\x1C") end,
   ["terminal:group-separator"] = function(view) view:input("\x1D") end,
 });
+-- ctrl+b, ctrl+p and ctrl+n are sent to full-screen programs (tmux's prefix, vim's
+-- completion, less's paging), but at the shell prompt they're the editor's (tree
+-- view, find file, new document): there the shell's ^B, ^P, ^N are ←, ↑, ↓.
+command.add(function(...)
+  local ok, view = input_predicate(...)
+  return ok and view.terminal:alternate_screen(), view, ...
+end, {
+  ["terminal:start-of-text"] = function(view) view:input("\x02") end,
+  ["terminal:shift-out"] = function(view) view:input("\x0E") end,
+  ["terminal:data-line-escape"] = function(view) view:input("\x10") end,
+})
 if system.get_primary_selection then -- check for master vs. 2.1.7
   command.add(input_predicate, {
     ["terminal:primary-paste"] = function(view)

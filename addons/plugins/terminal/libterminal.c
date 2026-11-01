@@ -1938,6 +1938,13 @@ static int f_terminal_paste_mode(lua_State* L) {
   return 1;
 }
 
+// whether a full-screen program (vim, less, tmux, ...) has switched to the alternate buffer
+static int f_terminal_alternate_screen(lua_State* L) {
+  terminal_t* terminal = lua_toterminal(L, 1);
+  lua_pushboolean(L, terminal->current_view == VIEW_ALTERNATE_BUFFER);
+  return 1;
+}
+
 static int f_terminal_name(lua_State* L) {
   terminal_t* terminal = lua_toterminal(L, 1);
   if (terminal->name[0])
@@ -1998,6 +2005,7 @@ static const luaL_Reg terminal_api[] = {
   { "paste_mode",          f_terminal_paste_mode             },
   { "scrollback",          f_terminal_scrollback             },
   { "name",                f_terminal_name                   },
+  { "alternate_screen",    f_terminal_alternate_screen       },
   { NULL,                  NULL                              }
 };
 
