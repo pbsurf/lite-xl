@@ -8,6 +8,7 @@
 #include "renderer.h"
 
 #include <signal.h>
+#include <locale.h>
 
 #ifdef _WIN32
   #include <windows.h>
@@ -119,6 +120,11 @@ void set_macos_bundle_resources(lua_State *L);
 int main(int argc, char **argv) {
 #ifndef _WIN32
   signal(SIGPIPE, SIG_IGN);
+  // Only the character type, from the environment: Xlib converts the window
+  // title to UTF8_STRING for _NET_WM_NAME only in a UTF-8 locale, so in the C
+  // locale a title with non-ASCII characters never reached the taskbar.
+  // (LC_NUMERIC stays C: Lua's number formatting depends on it.)
+  setlocale(LC_CTYPE, "");
 #endif
 
   SDL_SetAppMetadata("Lite XL", LITE_PROJECT_VERSION_STR, "com.lite_xl.LiteXL");
