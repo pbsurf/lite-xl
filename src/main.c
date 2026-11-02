@@ -127,7 +127,10 @@ int main(int argc, char **argv) {
   setlocale(LC_CTYPE, "");
 #endif
 
-  SDL_SetAppMetadata("Lite XL", LITE_PROJECT_VERSION_STR, "com.lite_xl.LiteXL");
+  // The identifier is X11's WM_CLASS class, which taskbars show as the group
+  // name, and Wayland's app_id: a readable name, matching StartupWMClass in
+  // resources/linux/org.lite_xl.lite_xl.desktop.
+  SDL_SetAppMetadata("Lite XL", LITE_PROJECT_VERSION_STR, "LiteXL");
 
   if (!SDL_Init(SDL_INIT_VIDEO | SDL_INIT_EVENTS)) {
     fprintf(stderr, "Error initializing SDL: %s", SDL_GetError());
