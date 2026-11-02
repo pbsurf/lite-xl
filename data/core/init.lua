@@ -1931,8 +1931,23 @@ local function get_title_filename(view)
 end
 
 
+---The window's title, for the taskbar and alt+tab: kept short, so the file
+---relative to the project (just its name outside it), then the project. The
+---header bar shows the full path.
 function core.compose_window_title(title)
-  return (title == "" or title == nil) and "Lite XL" or title .. " - Lite XL"
+  local parts = {}
+  if title and title ~= "" then
+    local path = common.home_expand(title)
+    if core.project_dir and common.path_belongs_to(path, core.project_dir) then
+      title = path:sub(#core.project_dir + 2)
+    elseif common.is_absolute_path(path) then
+      title = common.basename(path)
+    end
+    table.insert(parts, title)
+  end
+  if core.project_dir then table.insert(parts, common.basename(core.project_dir)) end
+  table.insert(parts, "Lite XL")
+  return table.concat(parts, " - ")
 end
 
 
@@ -1971,8 +1986,13 @@ function core.step()
 
   -- update window title
   local current_title = get_title_filename(core.active_view)
-  if current_title ~= nil and current_title ~= core.window_title then
-    system.set_window_title(core.compose_window_title(current_title))
+  if current_title ~= nil then
+    -- composed each time: it changes with the project too
+    local title = core.compose_window_title(current_title)
+    if title ~= core.window_title_text then
+      system.set_window_title(title)
+      core.window_title_text = title
+    end
     core.window_title = current_title
   end
 
