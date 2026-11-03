@@ -9,8 +9,9 @@
 --   message, stat, patch with colored lines and the old and new line numbers.
 -- * In the commit view, Enter or ctrl+click on a patch line opens the file as
 --   it was at that commit (removed lines: before it), at that line, read-only;
---   uncommitted changes open the working file. On a stat line it goes to the
---   file's patch. alt+pageup/alt+pagedown step to the previous/next commit.
+--   uncommitted changes, or a file that's the same now, open the working
+--   copy. On a stat line it goes to the file's patch. alt+pageup/alt+pagedown
+--   step to the previous/next commit.
 -- * Commit lists refresh by themselves after commits, checkouts and other
 --   changes to branches, tags or uncommitted files, keeping their selection.
 local core = require "core"
@@ -32,6 +33,9 @@ config.plugins.gitkit = common.merge({
   -- file) before the commit lists check for changes, so that a burst of
   -- them checks once
   refresh_delay = 0.3,
+  -- a file opened from a commit is the working copy (editable, with lsp and
+  -- the rest) when it's the same as it was then, rather than a read-only copy
+  open_working_copy = true,
 }, config.plugins.gitkit)
 
 local git = require "plugins.gitkit.git"

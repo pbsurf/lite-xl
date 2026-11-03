@@ -178,8 +178,8 @@ another repository's version, uninstalls removing dependents under `--assume-yes
   view's context menu) list commits in a bottom panel tab, uncommitted changes
   first; stepping through them shows each as `git show` would, with colored
   patch lines, old and new line numbers and the code syntax highlighted. Enter or
-  ctrl+click on a patch line opens the file as it was at that commit, read-only,
-  at that line.
+  ctrl+click on a patch line opens the file at that line as it was at that
+  commit, read-only, or the working copy if it's the same now.
 * **navigate** (imported, rewritten): alt+left / alt+right go back and forward
   through the places the cursor jumped from (another file, or a move that took
   the view away from where it was, other than with the cursor keys),

@@ -1,4 +1,5 @@
 local core = require "core"
+local config = require "core.config"
 local DocView = require "core.docview"
 local git = require "plugins.gitkit.git"
 local ReadDoc = require "plugins.gitkit.readdoc"
@@ -26,37 +27,64 @@ local function show(doc, line, col)
   return dv
 end
 
+-- text with LF line endings, as docs hold it
+local function lf(text)
+  return (text:gsub("\r\n", "\n"))
+end
+
+-- The working copy's text: its open doc's (unsaved edits included), else the
+-- file's; nil if there's neither.
+local function working_text(abs)
+  for _, doc in ipairs(core.docs) do
+    if doc.abs_filename == abs then
+      -- every line ends with "\n", the last one's not in the text
+      return table.concat(doc.lines):sub(1, -2)
+    end
+  end
+  local fp = io.open(abs, "rb")
+  if not fp then return end
+  local text = fp:read("a")
+  fp:close()
+  return lf(text)
+end
+
 ---Opens `path` (as git names it, in the repository at `root`) at `rev` with
----the caret at line, col: the file in the working tree if `rev` is nil, else
----a read-only doc of it as it was then (asked of git in the background).
+---the caret at line, col: the working copy if `rev` is nil or the file was
+---the same then (config.plugins.gitkit.open_working_copy), else a read-only
+---doc of it as it was (asked of git in the background).
 ---@param root string
 ---@param rev? string
 ---@param path string
 ---@param line? integer
 ---@param col? integer
 function revision.open(root, rev, path, line, col)
-  if not rev then
-    local abs = git.absolute_path(root, path)
+  local abs = git.absolute_path(root, path)
+  local function open_working_copy()
     local ok, doc = core.try(core.open_doc, abs)
     if ok and doc then show(doc, line, col) end
-    return
   end
+  if not rev then return open_working_copy() end
   local key = root .. "\0" .. rev .. "\0" .. path
-  if docs[key] then
-    show(docs[key], line, col)
-    return
-  end
   core.add_thread(function()
-    local out, err = git.run(root, { "show", rev .. ":" .. path })
-    if not out then
-      core.error("Can't show %s at %s: %s", path, revision.short(rev), err)
-      return
-    end
     local doc = docs[key]
+    local text = doc and doc.gitkit_text
+    if not text then
+      local out, err = git.run(root, { "show", rev .. ":" .. path })
+      if not out then
+        core.error("Can't show %s at %s: %s", path, revision.short(rev), err)
+        return
+      end
+      text = lf(out)
+    end
+    if config.plugins.gitkit.open_working_copy and working_text(abs) == text then
+      return open_working_copy()
+    end
+    doc = docs[key]
     if not doc then
       doc = ReadDoc(path .. " @ " .. revision.short(rev), path)
       doc.gitkit_revision = { root = root, rev = rev, path = path }
-      doc:set_text(out)
+      doc.gitkit_text = text
+      doc:set_text(text)
       docs[key] = doc
     end
     show(doc, line, col)
