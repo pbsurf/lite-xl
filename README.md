@@ -174,6 +174,12 @@ another repository's version, uninstalls removing dependents under `--assume-yes
   `.git` (ignored files dimmed), per project. With the tree view focused, the
   status bar shows the branch, ahead/behind and counts of changed and untracked
   files; tooltips show a file's git state.
+* **gitkit:** git history. "Git: Log" and "Git: File History" (also in the tree
+  view's context menu) list commits in a bottom panel tab, uncommitted changes
+  first; stepping through them shows each as `git show` would, with colored
+  patch lines, old and new line numbers and the code syntax highlighted. Enter or
+  ctrl+click on a patch line opens the file as it was at that commit, read-only,
+  at that line.
 * **navigate** (imported, rewritten): alt+left / alt+right go back and forward
   through the places the cursor jumped from (another file, or a move that took
   the view away from where it was, other than with the cursor keys),

@@ -145,6 +145,13 @@
       "path": "addons/plugins/openurl.lua"
     },
     {
+      "id": "gitkit",
+      "description": "Git tools: a commit list in the bottom panel (a repository's or a file's history) and a commit view of each, opening files as they were at a line of its patch.",
+      "version": "0.1",
+      "mod_version": "3",
+      "path": "addons/plugins/gitkit"
+    },
+    {
       "id": "gitfiles",
       "description": "In a git repository, the project's files are those git doesn't ignore; untracked files marked in the treeview; Show All Files in its context menu.",
       "version": "0.1",
