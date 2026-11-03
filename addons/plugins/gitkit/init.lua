@@ -11,6 +11,8 @@
 --   it was at that commit (removed lines: before it), at that line, read-only;
 --   uncommitted changes open the working file. On a stat line it goes to the
 --   file's patch. alt+pageup/alt+pagedown step to the previous/next commit.
+-- * Commit lists refresh by themselves after commits, checkouts and other
+--   changes to branches, tags or uncommitted files, keeping their selection.
 local core = require "core"
 local common = require "core.common"
 local config = require "core.config"
@@ -26,6 +28,10 @@ config.plugins.gitkit = common.merge({
   max_commits = 20000,
   -- a commit's patch is cut off after this many bytes
   max_diff_bytes = 4 * 1024 * 1024,
+  -- seconds after a change in the repository (a commit, a checkout, a saved
+  -- file) before the commit lists check for changes, so that a burst of
+  -- them checks once
+  refresh_delay = 0.3,
 }, config.plugins.gitkit)
 
 local git = require "plugins.gitkit.git"

@@ -33,10 +33,12 @@ function CommitView:new()
   self:set_result(diff.parse("", false), { title = "Commit" })
 end
 
----Shows a parsed commit, from the top.
+---Shows a parsed commit, from the top; with `keep_place`, scrolled and with
+---the caret where it was (uncommitted changes shown again as they are now).
 ---@param result gitkit.diff.result
 ---@param meta gitkit.commitview.meta
-function CommitView:set_result(result, meta)
+---@param keep_place? boolean
+function CommitView:set_result(result, meta, keep_place)
   self.result, self.meta, self.infos = result, meta, result.infos
   -- tokens by line, and the tokenizer's states (new side, old) after them
   self.tokens, self.states = {}, {}
@@ -46,9 +48,15 @@ function CommitView:set_result(result, meta)
   end
   self.number_digits = #tostring(max)
   self.doc.name = meta.title
+  local line, col = self.doc:get_selection()
   self.doc:set_text(result.lines)
-  self.scroll.x, self.scroll.to.x = 0, 0
-  self.scroll.y, self.scroll.to.y = 0, 0
+  if keep_place then
+    line = math.min(line, #self.doc.lines)
+    self.doc:set_selection(line, math.min(col, #self.doc.lines[line]))
+  else
+    self.scroll.x, self.scroll.to.x = 0, 0
+    self.scroll.y, self.scroll.to.y = 0, 0
+  end
   core.redraw = true
 end
 

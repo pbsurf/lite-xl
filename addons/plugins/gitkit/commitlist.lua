@@ -30,6 +30,11 @@ CommitList.context = "session"
 ---@field refs? string Branches and tags pointing at it, as git log's %D
 ---@field subject string
 
+-- the key a commit is found by after a refresh
+local function commit_key(commit)
+  return commit and (commit.hash or "uncommitted")
+end
+
 ---@param root string The repository's top directory
 ---@param path? string A file (as git names it) whose history to list
 function CommitList:new(root, path)
@@ -37,31 +42,162 @@ function CommitList:new(root, path)
   self.scrollable = true
   self.selected_idx, self.hovered_idx = 0, 0
   self.generation = 0
+  self.commits = {}
   self:load(root, path)
 end
 
+
+-- Refreshing: open lists watch their repository's git directories (HEAD,
+-- the index, the reflog, refs), and a change in them or in a project
+-- directory in the repository makes a list check its signature (refs, HEAD,
+-- uncommitted files), cheap to ask for; it reloads only if that changed.
+-- gitfiles' git status rewrites the index after each save, say, which
+-- changes nothing listed.
+
+-- open lists, by view
+local lists = setmetatable({}, { __mode = "k" })
+local watch = nil ---@type core.dirwatch?
+local watched = {} -- directory -> true
+
+local function is_open(list)
+  return require("core.panel").contains(list)
+    or core.root_view.root_node:get_node_for_view(list) ~= nil
+end
+
+-- Watches the git directories of open lists, and no others.
+local function sync_watches()
+  local wanted = {}
+  for list in pairs(lists) do
+    if is_open(list) then
+      for _, dir in ipairs(list.git_dirs or {}) do wanted[dir] = true end
+    else
+      lists[list] = nil
+    end
+  end
+  for dir in pairs(watched) do
+    if not wanted[dir] then watch:unwatch(dir) watched[dir] = nil end
+  end
+  for dir in pairs(wanted) do
+    if not watched[dir] then watch:watch(dir) watched[dir] = true end
+  end
+end
+
+local function mark_stale(list)
+  list.stale = true
+  core.wake("gitkit:refresh")
+end
+
+local function start_watching()
+  if watch then return end
+  local dirwatch = require "core.dirwatch"
+  watch = dirwatch.new()
+  -- woken by any dirmonitor's changes; takes those of the git directories
+  core.add_thread(function()
+    while true do
+      watch:check(function(dir)
+        for list in pairs(lists) do
+          for _, d in ipairs(list.git_dirs or {}) do
+            if d == dir then mark_stale(list) end
+          end
+        end
+      end)
+      watch:wait(1)
+    end
+  end)
+  -- checks stale lists a moment after the last change, so a burst of changes
+  -- (a commit writes several files) checks once
+  core.add_thread(function()
+    while true do
+      local any = false
+      for list in pairs(lists) do any = any or list.stale end
+      if not any then core.wait_for("gitkit:refresh") end
+      coroutine.yield(config.plugins.gitkit.refresh_delay)
+      sync_watches()
+      for list in pairs(lists) do
+        if list.stale and not list.loading then
+          list.stale = false
+          core.try(function()
+            if list:get_signature() ~= list.signature then list:refresh() end
+          end)
+        end
+      end
+    end
+  end)
+  -- a changed working tree file may be a new uncommitted change
+  local on_project_directory_change = core.on_project_directory_change
+  function core.on_project_directory_change(topdir, path)
+    for list in pairs(lists) do
+      if common.path_belongs_to(topdir.name, list.root) or topdir.name == list.root
+         or common.path_belongs_to(list.root, topdir.name) then
+        mark_stale(list)
+      end
+    end
+    return on_project_directory_change(topdir, path)
+  end
+end
+
+---What a reload would change, in short: refs, HEAD, and the files with
+---uncommitted changes (of the file whose history is listed). In a core thread.
+---@return string signature, string changed The uncommitted files
+function CommitList:get_signature()
+  local paths = self.path and { "--", self.path } or {}
+  local refs = git.run(self.root, { "for-each-ref", "--format=%(objectname) %(refname) %(HEAD)" }) or ""
+  local head = git.run(self.root, { "rev-parse", "HEAD" }) or ""
+  local changed = git.run(self.root, { "diff", "HEAD", "--name-only", table.unpack(paths) }) or ""
+  return refs .. "\0" .. head .. "\0" .. changed, changed
+end
+
 ---Lists the commits of the repository at `root` (of `path` in it, if given),
----in the background, from the top.
+---in the background. From the top, shown as they come; with `keep`, the
+---commits listed stay until the new ones are all there, the selection staying
+---on the same commit (refresh).
 ---@param root string
 ---@param path? string
-function CommitList:load(root, path)
+---@param keep? boolean
+function CommitList:load(root, path, keep)
+  local new_root = root ~= self.root
   self.root, self.path = root, path
-  self.commits = {}
-  self.selected_idx, self.hovered_idx = 0, 0
-  self.scroll.y, self.scroll.to.y = 0, 0
+  if not keep then
+    self.commits = {}
+    self.selected_idx, self.hovered_idx = 0, 0
+    self.scroll.y, self.scroll.to.y = 0, 0
+  end
+  local commits = keep and {} or self.commits
   self.error = nil
   self.loading = true
   self.generation = self.generation + 1
   local generation = self.generation
   local function current() return self.generation == generation end
   core.add_thread(function()
-    local paths = path and { "--", path } or {}
-    -- uncommitted changes (to tracked files)
-    local changed = git.run(root, { "diff", "HEAD", "--name-only", table.unpack(paths) })
-    if not current() then return end
-    if changed and changed ~= "" then
-      table.insert(self.commits, { subject = "Uncommitted changes" })
+    if new_root or not self.git_dirs then
+      local out = git.run(root, { "rev-parse", "--path-format=absolute",
+                                  "--absolute-git-dir", "--git-common-dir" }) or ""
+      local git_dir, common_dir = out:match("^([^\n]+)\n([^\n]+)")
+      self.git_dirs = {}
+      if git_dir then
+        -- HEAD, index, packed-refs, FETCH_HEAD; HEAD's reflog (every move of
+        -- HEAD); branch and tag tips (one level of them)
+        local dirs = { git_dir, git_dir .. "/logs", common_dir, common_dir .. "/refs/heads",
+                       common_dir .. "/refs/tags", common_dir .. "/refs/remotes" }
+        for _, info in ipairs(system.list_dir(common_dir .. "/refs/remotes") or {}) do
+          table.insert(dirs, common_dir .. "/refs/remotes/" .. info)
+        end
+        for _, d in ipairs(dirs) do
+          if PATHSEP ~= "/" then d = d:gsub("/", PATHSEP) end
+          local info = system.get_file_info(d)
+          if info and info.type == "dir" then table.insert(self.git_dirs, d) end
+        end
+      end
+      lists[self] = true
+      start_watching()
+      sync_watches()
     end
+    local signature, changed = self:get_signature()
+    if not current() then return end
+    if changed ~= "" then
+      table.insert(commits, { subject = "Uncommitted changes" })
+    end
+    local paths = path and { "--", path } or {}
     local args = { "log", "--format=%H%x1f%h%x1f%an%x1f%at%x1f%D%x1f%s%x1e",
                    "-n", tostring(config.plugins.gitkit.max_commits) }
     if path then table.insert(args, "--follow") end
@@ -79,7 +215,7 @@ function CommitList:load(root, path)
           local hash, short, author, time, refs, subject =
             rec:match("^(%x+)\31([^\31]*)\31([^\31]*)\31(%d*)\31([^\31]*)\31(.*)$")
           if hash then
-            table.insert(self.commits, {
+            table.insert(commits, {
               hash = hash, short = short, author = author, time = tonumber(time),
               refs = refs ~= "" and refs or nil, subject = subject,
             })
@@ -87,19 +223,47 @@ function CommitList:load(root, path)
           pos = e + 1
         end
         buffer = buffer:sub(pos)
-        core.redraw = true
+        if not keep then core.redraw = true end
       end,
     })
     if not current() then return end
     self.loading = false
+    self.signature = signature
+    if keep then self:replace_commits(commits) end
     if err and #self.commits == 0 then self.error = err end
     core.redraw = true
   end)
 end
 
----Lists them again, from the top.
+-- Shows a refresh's commits: the selection on the same commit (none if it's
+-- gone), which stays where it was in view unless the list was at the top.
+-- Uncommitted changes shown are shown again, as they are now.
+function CommitList:replace_commits(commits)
+  local old_idx = self.selected_idx
+  local key = commit_key(self.commits[old_idx])
+  self.commits = commits
+  self.hovered_idx = 0
+  self.selected_idx = 0
+  if not key then return end
+  for i, c in ipairs(commits) do
+    if commit_key(c) == key then
+      self.selected_idx = i
+      if self.scroll.to.y > 0 then
+        local dy = (i - old_idx) * self:get_line_height()
+        self.scroll.y, self.scroll.to.y = self.scroll.y + dy, self.scroll.to.y + dy
+      end
+      local cv = self:get_commit_view()
+      if key == "uncommitted" and cv and cv.shown_key == key then
+        self:show_commit(i, { refresh = true })
+      end
+      return
+    end
+  end
+end
+
+---Lists them again, keeping the selection.
 function CommitList:refresh()
-  self:load(self.root, self.path)
+  self:load(self.root, self.path, true)
 end
 
 
@@ -177,12 +341,16 @@ local function place_commit_view(self)
 end
 
 ---Shows commit `idx` in the commit view (git asked in the background).
+---`opts.refresh`: it's shown already, to be updated, without showing the view
+---or moving in it.
 ---@param idx integer
-function CommitList:show_commit(idx)
+---@param opts? { refresh?: boolean }
+function CommitList:show_commit(idx, opts)
   local commit = self.commits[idx]
   if not commit then return end
-  local cv = place_commit_view(self)
-  cv.shown_idx = idx
+  local refresh = opts and opts.refresh
+  local cv = refresh and self:get_commit_view() or place_commit_view(self)
+  cv.shown_key = commit_key(commit)
   cv.generation = (cv.generation or 0) + 1
   local generation = cv.generation
   local root, path = self.root, self.path
@@ -212,8 +380,8 @@ function CommitList:show_commit(idx)
     cv:set_result(result, {
       root = root, rev = commit.hash, parent = commit.hash and commit.hash .. "^" or "HEAD",
       title = title,
-    })
-    if path then cv:scroll_to_file(path) end
+    }, refresh)
+    if path and not refresh then cv:scroll_to_file(path) end
   end)
 end
 
@@ -231,7 +399,7 @@ function CommitList:open_selected()
   local idx = self:get_selected_index()
   if not idx then return end
   local cv = self:get_commit_view()
-  if not cv or cv.shown_idx ~= idx then self:show_commit(idx) end
+  if not cv or cv.shown_key ~= commit_key(self.commits[idx]) then self:show_commit(idx) end
   cv = self:get_commit_view()
   if cv then core.set_active_view(cv) end
 end
