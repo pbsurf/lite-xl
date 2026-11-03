@@ -10,14 +10,18 @@ local diff = {}
 ---@field new_path? string nil if the file was deleted
 ---@field line integer The view's line showing its name
 ---@field binary? boolean
+---@field copied? boolean Copied from old_path (else renamed, if the paths differ)
+---@field added integer Its patch's added lines
+---@field removed integer Removed lines
 
 ---@class gitkit.diff.hunk
 ---@field first integer The view's line of its first patch line
 ---@field last integer Of its last
 
 ---@class gitkit.diff.info
----@field kind "commit"|"header"|"message"|"stat"|"summary"|"file"|"meta"|"hunk"|"add"|"del"|"ctx"|"nonl"|"blank"|"note"
----@field file? gitkit.diff.file The file a "file", "meta", "hunk" or patch line belongs to
+---@field kind "commit"|"header"|"message"|"stat"|"summary"|"pad"|"file"|"meta"|"hunk"|"add"|"del"|"ctx"|"nonl"|"blank"|"note"
+---@field file? gitkit.diff.file The file a "pad" (the empty line above its
+---title), "file", "meta", "hunk" or patch line belongs to
 ---@field hunk? gitkit.diff.hunk A patch line's hunk
 ---@field old? integer A line's number in the old file ("del", "ctx"; a "hunk"'s first)
 ---@field new? integer In the new file ("add", "ctx"; a "hunk"'s first)
@@ -49,16 +53,27 @@ local function patch_path(s, prefix)
   return s
 end
 
----The title line shown for a file.
+-- between a renamed (or copied) file's old and new path in its title
+diff.RENAME_ARROW = " → "
+
+---The title line shown for a file: its path, both if renamed or copied.
 ---@param file gitkit.diff.file
 ---@return string
 function diff.file_title(file)
-  if not file.new_path then return file.old_path .. " (deleted)" end
-  if not file.old_path then return file.new_path .. " (new)" end
-  if file.old_path ~= file.new_path then
-    return file.old_path .. " → " .. file.new_path
+  if file.old_path and file.new_path and file.old_path ~= file.new_path then
+    return file.old_path .. diff.RENAME_ARROW .. file.new_path
   end
-  return file.new_path
+  return file.new_path or file.old_path
+end
+
+---How the file changed: "new", "deleted", "renamed", "copied", or nil if
+---only its content (or mode) did.
+---@param file gitkit.diff.file
+---@return string?
+function diff.file_status(file)
+  if not file.old_path then return "new" end
+  if not file.new_path then return "deleted" end
+  if file.old_path ~= file.new_path then return file.copied and "copied" or "renamed" end
 end
 
 ---Parses git's output. `has_header`: it starts with a commit's header and
@@ -119,10 +134,15 @@ function diff.parse(text, has_header, truncated)
       elseif raw:match("^diff %-%-git ") then
         finish_file()
         local a, b = split_git_paths(raw:sub(12))
-        file = { old_path = a, new_path = b }
+        file = { old_path = a, new_path = b, added = 0, removed = 0 }
         table.insert(files, file)
         in_hunk, hunk = false, nil
-        if #lines > 0 and infos[#infos].kind ~= "blank" then add("", { kind = "blank" }) end
+        -- the empty line above the title, drawn as part of it
+        if #lines > 0 and infos[#infos].kind == "blank" then
+          infos[#infos] = { kind = "pad", file = file }
+        else
+          add("", { kind = "pad", file = file })
+        end
         file.line = #lines + 1
         add(diff.file_title(file), { kind = "file", file = file })
       elseif in_hunk and raw:match("^[ +%-\\]") or (in_hunk and raw == "") then
@@ -130,9 +150,11 @@ function diff.parse(text, has_header, truncated)
         local info = { file = file, hunk = hunk }
         if c == "+" then
           info.kind, info.new = "add", new
+          file.added = file.added + 1
           new = new + 1
         elseif c == "-" then
           info.kind, info.old = "del", old
+          file.removed = file.removed + 1
           old = old + 1
         elseif c == "\\" then
           info.kind = "nonl"
@@ -165,8 +187,15 @@ function diff.parse(text, has_header, truncated)
           if to then file.new_path = to end
           if raw:match("^new file mode") then file.old_path = nil end
           if raw:match("^deleted file mode") then file.new_path = nil end
+          if raw:match("^copy from ") then file.copied = true end
           if raw:match("^Binary files") then file.binary = true end
-          add(raw, { kind = "meta", file = file })
+          -- what the title and its tags say already isn't shown: renames,
+          -- copies, their similarity, binary files, and a new or deleted
+          -- file's usual mode
+          local said = from or to or file.binary
+            or raw:match("^similarity index") or raw:match("^dissimilarity index")
+            or raw:match("^new file mode 100644$") or raw:match("^deleted file mode 100644$")
+          if not said then add(raw, { kind = "meta", file = file }) end
         end
       else
         add(raw, { kind = "header" })

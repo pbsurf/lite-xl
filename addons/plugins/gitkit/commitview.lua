@@ -75,15 +75,34 @@ end
 
 
 -- Colors: a theme can set style.gitkit_added, style.gitkit_removed (line
--- backgrounds) and style.gitkit_file (a file's title line's)
+-- backgrounds), style.gitkit_file (a file's header's: its title line and the
+-- empty one above) and style.gitkit_file_border (the line atop the header)
 local function line_bg(kind)
   if kind == "add" then
     return style.gitkit_added or common.lerp(style.background, style.good, 0.2)
   elseif kind == "del" then
     return style.gitkit_removed or common.lerp(style.background, style.error, 0.2)
-  elseif kind == "file" then
+  elseif kind == "file" or kind == "pad" then
     return style.gitkit_file or common.lerp(style.background, style.text, 0.1)
   end
+end
+
+-- a status color (style.good, ...) as text: toward the text color, which
+-- light themes' pale ones need on their background
+local function text_color(color)
+  return common.lerp(color, style.text, 0.35)
+end
+
+local function is_header(kind) return kind == "file" or kind == "pad" end
+
+local bold_fonts = setmetatable({}, { __mode = "k" })
+
+-- a bold copy of a font (synthesized, same advances), made once per font
+local function bold_font(font)
+  if not bold_fonts[font] then
+    bold_fonts[font] = font:copy(font:get_size(), { bold = true })
+  end
+  return bold_fonts[font]
 end
 
 
@@ -101,8 +120,11 @@ function CommitView:draw_line_gutter(line, x, y, width)
   local info = self.infos[line]
   if not info then return lh end
   local bg = line_bg(info.kind)
-  if bg and info.kind ~= "file" then
-    renderer.draw_rect(x, y, self:get_gutter_width() - self:get_gutter_gap(), lh, bg)
+  if bg then
+    -- headers across the gap too, joining the text area's band
+    local w = self:get_gutter_width() - (is_header(info.kind) and 0 or self:get_gutter_gap())
+    renderer.draw_rect(x, y, w, lh, bg)
+    if info.kind == "pad" then self:draw_header_border(x, y, w) end
   end
   local color = style.line_number
   for _, line1, _, line2 in self.doc:get_selections(true) do
@@ -118,6 +140,9 @@ function CommitView:draw_line_gutter(line, x, y, width)
   if info.kind ~= "hunk" then
     if info.old then common.draw_text(font, color, info.old, "right", x, y, nw, lh) end
     if info.new then common.draw_text(font, color, info.new, "right", x + nw + sw, y, nw, lh) end
+  end
+  if info.kind == "file" then
+    self:draw_file_icon(info.file, x + nw * 2 + sw * 3 + font:get_width("+"), y, lh)
   end
   local mark = info.kind == "add" and "+" or info.kind == "del" and "-"
   if mark then
@@ -136,12 +161,68 @@ function CommitView:draw_line_highlight(x, y)
   end
 end
 
+-- A rule atop a file's header, from x across the view.
+function CommitView:draw_header_border(x, y, w)
+  local color = style.gitkit_file_border or common.lerp(style.background, style.text, 0.35)
+  renderer.draw_rect(x, y, w, math.max(1, math.floor(SCALE + 0.5)), color)
+end
+
+-- The file's icon (the treeview's, or an icon plugin's), right-aligned at x.
+function CommitView:draw_file_icon(file, x, y, h)
+  local TreeView = package.loaded["plugins.treeview"]
+  if not (TreeView and TreeView.get_item_icon) then return end
+  local name = common.basename(file.new_path or file.old_path)
+  local icon, font, color = TreeView:get_item_icon({ type = "file", name = name }, false, false)
+  if icon and font then
+    common.draw_text(font, color or style.text, icon, "right", x - font:get_width(icon), y,
+      font:get_width(icon), h)
+  end
+end
+
+-- After a file's title: how it changed, as a tag, and its added and removed
+-- lines, at the view's right edge.
+function CommitView:draw_file_extras(file, line, x, y)
+  local lh = self:get_line_height()
+  local font = self:get_font()
+  local px = style.padding.x
+  local tx = x + self:get_col_x_offset(line, #self.doc.lines[line]) + px
+  local tags = {}
+  local status = diff.file_status(file)
+  if status then table.insert(tags, status) end
+  if file.binary then table.insert(tags, "binary") end
+  for _, tag in ipairs(tags) do
+    local color = (tag == "new" and style.good) or (tag == "deleted" and style.error)
+      or (tag == "binary" and style.text) or style.accent
+    local tfont = style.font
+    local tw, th = tfont:get_width(tag), tfont:get_height()
+    local pad = math.floor(px / 2)
+    local bh = math.min(lh, th + 2 * math.floor(SCALE))
+    renderer.draw_rect(tx, y + (lh - bh) / 2, tw + pad * 2, bh, { color[1], color[2], color[3], 50 })
+    common.draw_text(tfont, text_color(color), tag, "center", tx, y, tw + pad * 2, lh)
+    tx = tx + tw + pad * 2 + pad
+  end
+  -- right to left: removed, then added (each only if any)
+  local right = self.position.x + self.size.x - px - style.scrollbar_size
+  for _, count in ipairs({ { file.removed, "−", style.error }, { file.added, "+", style.good } }) do
+    if count[1] > 0 then
+      local text = count[2] .. count[1]
+      local w = font:get_width(text)
+      common.draw_text(font, text_color(count[3]), text, "left", right - w, y, w, lh)
+      right = right - w - px / 2
+    end
+  end
+end
+
 function CommitView:draw_line_body(line, x, y)
-  local bg = line_bg((self.infos[line] or {}).kind)
+  local info = self.infos[line] or {}
+  local bg = line_bg(info.kind)
   if bg then
     renderer.draw_rect(self.position.x, y, self.size.x, self:get_line_height(), bg)
+    if info.kind == "pad" then self:draw_header_border(self.position.x, y, self.size.x) end
   end
-  return CommitView.super.draw_line_body(self, line, x, y)
+  local lh = CommitView.super.draw_line_body(self, line, x, y)
+  if info.kind == "file" then self:draw_file_extras(info.file, line, x, y) end
+  return lh
 end
 
 
@@ -223,7 +304,28 @@ function CommitView:get_line_tokens(line)
       table.insert(tokens, rest)
     end
   elseif kind == "file" then
-    tokens = { "s:keyword", text }
+    -- directories dim, names bold; a rename's old name too, less so
+    tokens = {}
+    local function add_path(path, name_color)
+      local dir, name = path:match("^(.*/)([^/]*)$")
+      if dir then
+        table.insert(tokens, "dim")
+        table.insert(tokens, dir)
+      end
+      table.insert(tokens, name_color)
+      table.insert(tokens, name or path)
+    end
+    local file = info.file
+    local title = text:gsub("\n$", "")
+    if title == diff.file_title(file) and title:find(diff.RENAME_ARROW, 1, true)
+       and file.old_path and file.new_path then
+      add_path(file.old_path, "text")
+      table.insert(tokens, "dim")
+      table.insert(tokens, diff.RENAME_ARROW)
+      add_path(file.new_path, "bold")
+    else
+      add_path(title, "bold")
+    end
   elseif kind == "hunk" then
     local range, rest = text:match("^(@@.-@@)(.*)$")
     tokens = range and { "dim", range, "s:function", rest } or { "dim", text }
@@ -243,7 +345,12 @@ function CommitView:draw_line_text(line, x, y)
   local right = self.position.x + self.size.x
   for i = 1, #tokens, 2 do
     local text = tokens[i + 1]:gsub("\n$", "")
-    tx = renderer.draw_text(font, text, tx, ty, token_color(tokens[i]))
+    local name = tokens[i]
+    if name == "bold" then
+      tx = renderer.draw_text(bold_font(font), text, tx, ty, style.text)
+    else
+      tx = renderer.draw_text(font, text, tx, ty, token_color(name))
+    end
     if tx > right then break end
   end
   local hx, hy = self:get_ctrl_hover()
