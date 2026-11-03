@@ -7,9 +7,11 @@ local Doc = require "core.doc"
 ---@class config.plugins.trimwhitespace
 ---@field enabled boolean
 ---@field trim_empty_end_lines boolean
+---@field trim_caret_line boolean
 config.plugins.trimwhitespace = common.merge({
   enabled = false,
   trim_empty_end_lines = false,
+  trim_caret_line = false,
   config_spec = {
     name = "Trim Whitespace",
     {
@@ -23,6 +25,13 @@ config.plugins.trimwhitespace = common.merge({
       label = "Trim Empty End Lines",
       description = "Remove any empty new lines at the end of documents.",
       path = "trim_empty_end_lines",
+      type = "toggle",
+      default = false
+    },
+    {
+      label = "Trim Caret Line",
+      description = "Also trim the line with the caret, moving the caret back if it was in the trimmed whitespace.",
+      path = "trim_caret_line",
       type = "toggle",
       default = false
     }
@@ -44,8 +53,8 @@ function trimwhitespace.enable(doc)
   doc.disable_trim_whitespace = nil
 end
 
----Perform whitespace trimming in all lines of a document except the
----line where the caret is currently positioned.
+---Perform whitespace trimming in all lines of a document; on the line where
+---the caret is, only right of the caret unless `trim_caret_line` is set.
 ---@param doc core.doc
 function trimwhitespace.trim(doc)
   local cline, ccol = doc:get_selection()
@@ -54,7 +63,8 @@ function trimwhitespace.trim(doc)
     local new_text = old_text:gsub("%s*$", "")
 
     -- don't remove whitespace which would cause the caret to reposition
-    if cline == i and ccol > #new_text then
+    if cline == i and ccol > #new_text
+      and not config.plugins.trimwhitespace.trim_caret_line then
       new_text = old_text:sub(1, ccol - 1)
     end
 
