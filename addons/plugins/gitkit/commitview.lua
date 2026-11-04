@@ -539,6 +539,8 @@ end
 
 ---@class gitkit.commitview.target
 ---@field view_line? integer A line of this view to go to (a stat line's file)
+---@field submodule? string A submodule (as git names it) whose commit `commit` to show
+---@field commit? string
 ---@field rev? string The revision to open the file at; nil: the working tree's
 ---@field path? string The file, as git names it
 ---@field line? integer
@@ -558,6 +560,13 @@ function CommitView:get_target(line, col)
   end
   local file = info.file
   if not file or file.binary or kind == "nonl" then return end
+  if file.submodule then
+    -- its commit then, on a patch line ("Subproject commit <hash>[-dirty]")
+    local hash = (kind == "add" or kind == "del" or kind == "ctx")
+      and self.doc.lines[line]:match("^Subproject commit (%x+)")
+    if not hash then return end
+    return { submodule = kind == "del" and file.old_path or file.new_path, commit = hash }
+  end
   local new_side, n = file.new_path ~= nil, 1
   if kind == "del" then
     new_side, n = false, info.old
@@ -586,7 +595,27 @@ function CommitView:open_target(target)
     self.scroll.to.y = math.max(0, (target.view_line - 1) * lh)
     return
   end
+  if target.submodule then return self:show_submodule_commit(target.submodule, target.commit) end
   revision.open(self.meta.root, target.rev, target.path, target.line, target.col)
+end
+
+---Shows commit `hash` of the submodule at `path` (as git names it): in this
+---view if it's the current one, else (kept) in the current one, focused.
+---@param path string
+---@param hash string
+function CommitView:show_submodule_commit(path, hash)
+  local root = git.absolute_path(self.meta.root, path)
+  -- not checked out: git would run in the repository around it
+  if not system.get_file_info(root .. PATHSEP .. ".git") then
+    core.warn("Submodule %s isn't checked out", path)
+    return
+  end
+  local cv = self
+  if not cv.reusable then
+    cv = CommitView.place(self.list)
+    core.set_active_view(cv)
+  end
+  cv:show_diff(root, { rev = hash, title = revision.short(hash) })
 end
 
 ---Scrolls to the patch of the file at `path` (either side), if it's in the commit.

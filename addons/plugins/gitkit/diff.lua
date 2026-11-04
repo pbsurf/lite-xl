@@ -10,6 +10,7 @@ local diff = {}
 ---@field new_path? string nil if the file was deleted
 ---@field line integer The view's line showing its name
 ---@field binary? boolean
+---@field submodule? boolean A submodule: its patch lines are "Subproject commit <hash>"
 ---@field copied? boolean Copied from old_path (else renamed, if the paths differ)
 ---@field added integer Its patch's added lines
 ---@field removed integer Removed lines
@@ -179,7 +180,8 @@ function diff.parse(text, has_header, truncated)
         elseif raw:match("^%+%+%+ ") then
           file.new_path = patch_path(raw:sub(5), "b/")
         elseif raw:match("^index ") then
-          -- nothing in it the title doesn't say
+          -- nothing in it the title doesn't say, but a submodule's mode
+          if raw:match(" 160000$") then file.submodule = true end
         else
           local from = raw:match("^rename from (.*)$") or raw:match("^copy from (.*)$")
           local to = raw:match("^rename to (.*)$") or raw:match("^copy to (.*)$")
@@ -189,6 +191,10 @@ function diff.parse(text, has_header, truncated)
           if raw:match("^deleted file mode") then file.new_path = nil end
           if raw:match("^copy from ") then file.copied = true end
           if raw:match("^Binary files") then file.binary = true end
+          -- an added or deleted submodule (no mode on its index line)
+          if raw:match("^new file mode 160000$") or raw:match("^deleted file mode 160000$") then
+            file.submodule = true
+          end
           -- what the title and its tags say already isn't shown: renames,
           -- copies, their similarity, binary files, and a new or deleted
           -- file's usual mode

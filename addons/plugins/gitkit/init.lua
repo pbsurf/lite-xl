@@ -10,7 +10,8 @@
 -- * In the commit view, Enter or ctrl+click on a patch line opens the file as
 --   it was at that commit (removed lines: before it), at that line, read-only;
 --   uncommitted changes, or a file that's the same now, open the working
---   copy. On a stat line it goes to the file's patch. alt+pageup/alt+pagedown
+--   copy. On a stat line it goes to the file's patch; on a submodule's
+--   "Subproject commit" line it shows that commit of the submodule. alt+pageup/alt+pagedown
 --   step to the previous/next commit.
 -- * Commits and comparisons all show in one commit view, the current one
 --   (italic title, as reused tabs have; core.reusable). Double-clicking its
