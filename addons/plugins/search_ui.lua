@@ -15,6 +15,7 @@ local search = require "core.doc.search"
 local projectsearch = require "plugins.projectsearch"
 local CommandView = require "core.commandview"
 local DocView = require "core.docview"
+local Node = require "core.node"
 local Widget = require "libraries.widget"
 local Button = require "libraries.widget.button"
 local CheckBox = require "libraries.widget.checkbox"
@@ -358,6 +359,8 @@ local function row_shown()
 end
 
 local update_size
+-- the leaf node the pane is under (below)
+local host_node
 
 -- shows or hides the chevron and the replace row (in file scope)
 local function show_replace_controls()
@@ -508,7 +511,10 @@ local function find(reverse, typing)
   end
 
   local last = core.last_active_view
-  if last and (last:is(DocView) or last.get_search_doc) then
+  -- (one the pane is under, as for a view focused while it's shown)
+  if last and (last:is(DocView) or last.get_search_doc)
+    and core.root_view.root_node:get_node_for_view(last) == host_node()
+  then
     set_target(last)
   end
 
@@ -653,35 +659,80 @@ local function step_history(box, dir)
 end
 
 local inside_node = false
-local current_node = nil
 local current_position = ""
 
-local function add_to_node()
-  if not inside_node or current_position ~= config.plugins.search_ui.position then
-    if
-      current_position ~= ""
-      and
-      current_position ~= config.plugins.search_ui.position
-    then
-      widget:hide()
-      current_node:remove_view(core.root_view.root_node, widget)
-      core.root_view.root_node:update_layout()
-      widget:set_size(0, 0)
-      widget.init_size = true
-    end
-    local node = core.root_view:get_primary_node()
+-- The pane goes under the node of the view it searches (a split of the editor
+-- area, the bottom panel), its own node split from that one.
+
+---The pane's node. Looked up, not kept: nodes that merge (Node:remove_view)
+---move into their parent's table.
+---@return core.node?
+local function pane_node()
+  return inside_node and core.root_view.root_node:get_node_for_view(widget) or nil
+end
+
+---The leaf node the pane is under, nil if it's not in one (that node was split).
+---@return core.node?
+function host_node()
+  local node = pane_node()
+  local parent = node and node:get_parent_node(core.root_view.root_node)
+  if not parent then return nil end
+  local other = parent.a == node and parent.b or parent.a
+  return other.type == "leaf" and other or nil
+end
+
+---The node the pane goes under to search a view: the view's, else the primary one.
+---@return core.node
+local function target_node(view)
+  local node = view and core.root_view.root_node:get_node_for_view(view)
+  if node and not node:get_view_idx(widget) then return node end
+  return core.root_view:get_primary_node()
+end
+
+-- takes the pane out of its node, to be added again
+local function remove_from_node()
+  widget:hide()
+  local node = pane_node()
+  if node then node:remove_view(core.root_view.root_node, widget) end
+  core.root_view.root_node:update_layout()
+  widget:set_size(0, 0)
+  widget.init_size = true
+  inside_node, current_position = false, ""
+end
+
+---Whether the pane is in place: where it goes to search `av` if given.
+local function placed_for(av)
+  return inside_node and current_position == config.plugins.search_ui.position
+    and (av == nil or host_node() == target_node(av))
+end
+
+---Adds the pane under the view it will search (`av`, else the one it searches),
+---moved there if it's elsewhere.
+local function add_to_node(av)
+  if not placed_for(av) then
+    -- taking the pane out and splitting a node move the focus: it's given back,
+    -- as the view searched is the one focused before the pane's box (find)
+    local active = core.active_view
+    if inside_node then remove_from_node() end
+    local node = target_node(av or doc_view)
     if config.plugins.search_ui.position == "right" then
-      current_node = node:split("right", widget, {x=true}, true)
+      node:split("right", widget, {x=true}, true)
       current_position = "right"
     elseif config.plugins.search_ui.position == "top" then
-      current_node = node:split("up", widget, {y=true}, false)
+      node:split("up", widget, {y=true}, false)
       current_position = "top"
     else
-      current_node = node:split("down", widget, {y=true}, false)
+      node:split("down", widget, {y=true}, false)
       current_position = "bottom"
     end
     widget:show()
+    -- sized by its new node before it next updates: show_animated takes a zero
+    -- width for hidden and would restore its zero prev_size
+    core.root_view.root_node:update_layout()
     inside_node = true
+    if active ~= core.active_view and core.root_view.root_node:get_node_for_view(active) then
+      core.set_active_view(active)
+    end
   end
 end
 
@@ -703,7 +754,7 @@ local function show_find(av, toggle)
     return
   end
 
-  if inside_node and current_position == config.plugins.search_ui.position then
+  if placed_for(av) then
     if toggle then
       widget:toggle_visible(true, false, true)
     else
@@ -716,7 +767,7 @@ local function show_find(av, toggle)
       end
     end
   else
-    add_to_node()
+    add_to_node(av)
   end
 
   if widget:is_visible() then
@@ -1148,10 +1199,33 @@ function core.set_active_view(...)
       or
       view.get_search_doc
     )
+    and
+    -- only a view the pane is under: one elsewhere is searched with the pane
+    -- moved there (show_find). Last: a node being split (making its new node
+    -- focuses an EmptyView) isn't a whole tree yet.
+    core.root_view.root_node:get_node_for_view(view) == host_node()
   then
     set_target(view)
     Results:clear()
   end
+end
+
+-- The last tab leaving the node the pane is under (a split, the bottom panel;
+-- closed, hidden, moved out): the pane goes first, so the node goes as it
+-- would without it (next to the fixed-size pane, it would stay empty, or the
+-- pane would take its place). Not the primary node, which stays.
+local node_remove_view = Node.remove_view
+function Node:remove_view(root, view)
+  if view ~= widget and #self.views == 1 and self.views[1] == view
+    and not self.is_primary_node and self == host_node()
+  then
+    remove_from_node()
+    -- its node merged into its parent's table
+    local node = root:get_node_for_view(view)
+    if node then node_remove_view(node, root, view) end
+    return
+  end
+  node_remove_view(self, root, view)
 end
 
 --------------------------------------------------------------------------------
