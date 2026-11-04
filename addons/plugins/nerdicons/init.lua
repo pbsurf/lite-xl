@@ -249,13 +249,38 @@ function TreeView:get_item_chevron_width(item)
   return TreeView_get_item_chevron_width(self, item)
 end
 
--- Terminal views (terminal plugin, if loaded): a terminal icon
+-- Other plugins' views, by the module of their class (if loaded): an icon and its
+-- color (nil: the text's)
+local view_icons = {
+  ["plugins.terminal.view"] = { nil, "oct-terminal" },
+  ["plugins.gitkit.commitview"] = { known_filenames_icons[".gitignore"][1], "dev-git" },
+  ["plugins.gitkit.commitlist"] = { known_filenames_icons[".gitignore"][1], "dev-git" },
+}
+
+local function view_icon(view, hovered)
+  local mt = getmetatable(view)
+  for module, icon in pairs(view_icons) do
+    if mt == package.loaded[module] then
+      return map[icon[2]], icon_font,
+        hovered and style.accent or icon[1] and readable(icon[1]) or style.text
+    end
+  end
+end
+
+-- (DocView's, the file's icon, is its own: subclasses of it are checked there)
 local View_get_icon = View.get_icon
 function View:get_icon(hovered)
-  if getmetatable(self) == package.loaded["plugins.terminal.view"] then
-    return map["oct-terminal"], icon_font, hovered and style.accent or style.text
-  end
+  local icon, font, color = view_icon(self, hovered)
+  if icon then return icon, font, color end
   return View_get_icon(self, hovered)
+end
+
+local DocView = require "core.docview"
+local DocView_get_icon = DocView.get_icon
+function DocView:get_icon(hovered)
+  local icon, font, color = view_icon(self, hovered)
+  if icon then return icon, font, color end
+  return DocView_get_icon(self, hovered)
 end
 
 -- Override function to draw icons in tabs titles if setting is enabled
