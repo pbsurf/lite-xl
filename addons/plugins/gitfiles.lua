@@ -17,10 +17,10 @@
 -- fetch), and how many files are changed or untracked in the project directory.
 -- The treeview's and tabs' tooltips show an entry's or file's git state.
 --
--- Submodules' folders, and project directories at the top of a repository,
--- have a git badge on their icon (style.git_badge, a muted git orange by
--- default); a submodule's tooltip says what it has checked out (branch, else
--- commit) and its origin's URL.
+-- Folders at the top of a repository (submodules, other repositories nested in
+-- the project, project directories) have a git badge on their icon
+-- (style.git_badge, a muted git orange by default); a submodule's tooltip says
+-- what it has checked out (branch, else commit) and its origin's URL.
 
 local core = require "core"
 local common = require "core.common"
@@ -55,6 +55,11 @@ local DEFAULT_BADGE = { common.color "#b8735a" }
 --   submodules (initialized ones in the directory, nested ones too, by path:
 --   { branch (nil if detached), commit (short hash), url (origin's, if any) }) }
 local repos = {}
+
+-- by a folder's absolute path: whether it has a .git (a directory, or a
+-- worktree's or submodule's file), so is a repository's top; cleared on any
+-- change in the project
+local has_git = {}
 
 -- projects (core.project_dir) showing all files
 local show_all = storage.load("gitfiles", "show_all")
@@ -319,6 +324,9 @@ end
 local on_project_directory_change = core.on_project_directory_change
 function core.on_project_directory_change(topdir, path)
   if repos[topdir.name] then set_stale() end
+  -- a .git made or removed: badges drawn again
+  has_git = {}
+  core.redraw = true
   return on_project_directory_change(topdir, path)
 end
 
@@ -386,14 +394,21 @@ local function submodule_of(item)
   return repo and repo.submodules and repo.submodules[item.filename]
 end
 
--- whether an entry gets a git badge: a submodule, or a project directory at the
--- top of its repository
+-- whether an entry gets a git badge: a project directory at the top of its
+-- repository, a submodule, or another folder at a repository's top (one
+-- nested in the project's, or in a project that isn't in one)
 local function has_badge(item)
   if item.depth == 0 then
     local repo = repos[item.dir_name]
     return repo and repo.prefix == ""
   end
-  return submodule_of(item) and true or false
+  if item.type ~= "dir" then return false end
+  if submodule_of(item) then return true end
+  local path = item.abs_filename
+  if has_git[path] == nil then
+    has_git[path] = system.get_file_info(path .. PATHSEP .. ".git") ~= nil
+  end
+  return has_git[path]
 end
 
 -- The color of an entry's row, as TreeView:draw_item_background draws it
