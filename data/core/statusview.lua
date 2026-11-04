@@ -388,14 +388,16 @@ local function task_text(task)
   return task.progress and task.label .. ": " .. task.progress or task.label
 end
 
----Background work (core.add_task), on the right while some runs: the oldest
----task (staying put while newer ones come and go), "+N" for the others, all of
----them in the tooltip.
+---Background work (core.add_task), while some runs: the oldest task (staying
+---put while newer ones come and go), "+N" for the others, all of them in the
+---tooltip. Last on the left (after the cursor position, or the treeview's
+---selection), where it moves no other item as it comes and goes.
 function StatusView:register_tasks_item()
   if self:get_item("core:tasks") then return end
   self:add_item({
     name = "core:tasks",
-    alignment = StatusView.Item.RIGHT,
+    alignment = StatusView.Item.LEFT,
+    last = true,
     predicate = function() return #shown_tasks() > 0 end,
     get_item = function()
       local tasks = shown_tasks()
