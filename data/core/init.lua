@@ -1013,6 +1013,7 @@ function core.init()
   cur_node = cur_node.b
   cur_node = cur_node:split("down", core.command_view, {y = true})
   cur_node = cur_node:split("down", core.status_view, {y = true})
+  core.command_view:set_node(core.root_view.root_node:get_node_for_view(core.command_view))
 
   -- Load defaiult commands first so plugins can override them
   command.add_defaults()

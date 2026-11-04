@@ -80,6 +80,7 @@ function CommandView:new()
   self.state = default_state
   self.font = "font"
   self.size.y = 0
+  self.overlay_height = 0
   self.label = ""
   ---@type core.commandview.mode?
   self.mode = nil
@@ -393,12 +394,39 @@ function CommandView:update()
   local dest = (self.suggestion_idx - self.suggestions_offset + 1) * self:get_suggestion_line_height()
   self:move_towards("selection_offset", dest, nil, "commandview")
 
-  -- update size based on whether this is the active_view
-  local dest = 0
-  if self == core.active_view then
-    dest = style.font:get_height() + style.padding.y * 2
+  -- shown while active, over the views above it (see set_node)
+  local h = self == core.active_view and style.font:get_height() + style.padding.y * 2 or 0
+  if h ~= self.overlay_height then
+    self.overlay_height = h
+    core.root_view.root_node:update_layout()
   end
-  self:move_towards(self.size, "y", dest, nil, "commandview")
+end
+
+
+---Makes the view's node (a leaf of its own, locked in y) an overlay: the input
+---line is drawn over the bottom of the views above it rather than given room,
+---so that nothing moves when it shows. The node is laid out 0 high, and the
+---view placed upwards from there.
+---@param node core.node
+function CommandView:set_node(node)
+  local view = self
+  function node:get_locked_size() return nil, 0 end
+  function node:update_layout()
+    getmetatable(self).update_layout(self)
+    local h = view.overlay_height or 0
+    view.position.y = view.position.y - h
+    view.size.y = h
+  end
+end
+
+
+---Whether the input line (drawn over the views above it) overlaps the point.
+---@param x number
+---@param y number
+---@return boolean
+function CommandView:input_overlaps_point(x, y)
+  return self.size.y > 0 and x >= self.position.x and x < self.position.x + self.size.x
+    and y >= self.position.y and y < self.position.y + self.size.y
 end
 
 
@@ -496,6 +524,16 @@ local function draw_suggestions_box(self)
   local h = math.ceil(self.suggestions_height)
   local rx, ry, rw, rh = self.position.x, self.position.y - h - dh, self.size.x, h
 
+  -- the input line's top edge, over what's behind it, and without suggestions
+  -- above it, their shadow (see below) on the line's
+  if not self.state.show_suggestions or #self.suggestions == 0 then
+    core.push_clip_rect(rx, 0, rw, self.position.y - dh)
+    common.draw_popup_shadow(rx, self.position.y - 3 * SCALE, rw, self.size.y)
+    core.pop_clip_rect()
+  end
+  renderer.draw_rect(rx, self.position.y - dh, rw, dh, style.divider)
+  if not self.state.show_suggestions then return end
+
   if #self.suggestions > 0 then
     -- docked on the command view: the shadow shows only above, on what's behind,
     -- without the usual downward offset (which would hide most of it)
@@ -539,10 +577,9 @@ end
 
 
 function CommandView:draw()
+  if self.size.y <= 0 then return end
   CommandView.super.draw(self)
-  if self.state.show_suggestions then
-    core.root_view:defer_draw(draw_suggestions_box, self)
-  end
+  core.root_view:defer_draw(draw_suggestions_box, self)
 end
 
 return CommandView

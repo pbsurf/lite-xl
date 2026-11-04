@@ -262,6 +262,10 @@ function RootView:on_mouse_pressed(button, x, y, clicks)
     core.command_view:on_suggestions_mouse_pressed(button, x, y)
     return true
   end
+  -- and its input line too
+  if core.command_view:input_overlaps_point(x, y) then
+    return core.command_view:on_mouse_pressed(button, x, y, clicks)
+  end
   local div = self.root_node:get_divider_overlapping_point(x, y)
   local node = self.root_node:get_child_overlapping_point(x, y)
   if div and (node and not node.active_view:scrollbar_overlaps_point(x, y)) then
@@ -424,11 +428,18 @@ function RootView:on_mouse_moved(x, y, dx, dy)
   -- avoid sending on_mouse_moved events when dragging tabs
   if dn then return end
 
-  -- hovering a suggestion selects it, and the views under the box don't see the mouse
+  -- hovering a suggestion selects it, and the views under the box (or the
+  -- input line) don't see the mouse
   local cv = core.command_view
-  if cv:suggestions_overlap_point(x, y) then
-    cv.suggestion_idx = cv:get_suggestion_at(x, y) or cv.suggestion_idx
-    core.request_cursor("arrow")
+  local over_suggestions = cv:suggestions_overlap_point(x, y)
+  if over_suggestions or cv:input_overlaps_point(x, y) then
+    if over_suggestions then
+      cv.suggestion_idx = cv:get_suggestion_at(x, y) or cv.suggestion_idx
+      core.request_cursor("arrow")
+    else
+      cv:on_mouse_moved(x, y, dx, dy)
+      core.request_cursor(cv.cursor)
+    end
     if self.overlapping_node then
       self.overlapping_node:on_mouse_left()
       self.overlapping_node = nil
@@ -575,6 +586,7 @@ function RootView:on_mouse_wheel(dy, dx)
     core.command_view:scroll_suggestions(dy)
     return true
   end
+  if core.command_view:input_overlaps_point(x, y) then return true end
   local node = self.root_node:get_child_overlapping_point(x, y)
   -- over a tab bar: one notch scrolls one tab if its tabs scroll, else nothing
   if node:tab_bar_overlaps_point(x, y) then
