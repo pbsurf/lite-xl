@@ -12,6 +12,10 @@
 --   uncommitted changes, or a file that's the same now, open the working
 --   copy. On a stat line it goes to the file's patch. alt+pageup/alt+pagedown
 --   step to the previous/next commit.
+-- * Commits and comparisons all show in one commit view, the current one
+--   (italic title, as the panel's reused tabs have; core.panel). Double-
+--   clicking its tab keeps it: the next opens in a tab of its own, and
+--   comparisons asked for in a kept one show in that new tab.
 -- * Commit lists refresh by themselves after commits, checkouts and other
 --   changes to branches, tags or uncommitted files, keeping their selection.
 -- * Comparisons: a commit with the working tree (the whole of it, or a file),
@@ -209,13 +213,23 @@ local function caret_file()
   if file then return file, view end
 end
 
+-- A comparison asked for in a commit view: shown in it if it's the current
+-- one, else (kept) in the current one, focused
+local function show_from_view(view, root, spec)
+  if not view.reusable then
+    view = CommitView.place(view.list)
+    core.set_active_view(view)
+  end
+  view:show_diff(root, spec)
+end
+
 command.add(function()
   local c = current_commit()
   return c ~= nil, c
 end, {
   ["gitkit:compare-with-working-tree"] = function(c)
     local spec = gitkit.working_tree_spec(c.hash)
-    if c.view then return c.view:show_diff(c.root, spec) end
+    if c.view then return show_from_view(c.view, c.root, spec) end
     c.list:show_comparison(spec)
   end,
   ["gitkit:copy-short-hash"] = function(c)
@@ -237,7 +251,7 @@ command.add(function()
 end, {
   ["gitkit:compare-file-with-working-tree"] = function(c, paths)
     local spec = gitkit.working_tree_spec(c.hash, paths)
-    if c.view then return c.view:show_diff(c.root, spec) end
+    if c.view then return show_from_view(c.view, c.root, spec) end
     c.list:show_comparison(spec)
   end,
 })

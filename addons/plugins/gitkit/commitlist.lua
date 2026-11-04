@@ -2,6 +2,7 @@ local core = require "core"
 local common = require "core.common"
 local config = require "core.config"
 local style = require "core.style"
+local panel = require "core.panel"
 local View = require "core.view"
 local ResultsList = require "core.resultslist"
 local git = require "plugins.gitkit.git"
@@ -267,8 +268,7 @@ function CommitList:replace_commits(commits)
   end
   -- uncommitted changes, or another comparison with the working tree, may
   -- have changed
-  local cv = self:get_commit_view()
-  if cv and cv:shows_working_tree() then cv:reload() end
+  CommitView.reload_working_tree(self.root)
 end
 
 ---Lists them again, keeping the selection.
@@ -325,29 +325,11 @@ function CommitList:get_page_size()
   return math.max(1, math.floor(self.size.y / self:get_line_height()) - 1)
 end
 
----The commit view showing this list's commits, if it's open.
+---The commit view showing this list's commits (the current one), if it's open.
 ---@return gitkit.commitview?
 function CommitList:get_commit_view()
-  local cv = self.commit_view
-  if cv and core.root_view.root_node:get_node_for_view(cv) then return cv end
-end
-
--- Shows the commit view, made if needed, in the editor node used last; the
--- focus stays where it is.
-local function place_commit_view(self)
-  local cv = self:get_commit_view()
-  local av = core.active_view
-  if cv then
-    local node = core.root_view.root_node:get_node_for_view(cv)
-    node:set_active_view(cv)
-  else
-    cv = CommitView()
-    cv.list = self
-    self.commit_view = cv
-    core.root_view:get_last_used_node():add_view(cv)
-  end
-  core.set_active_view(av)
-  return cv
+  local cv = panel.current(CommitView)
+  if cv and cv.list == self then return cv end
 end
 
 ---Shows commit `idx` in the commit view (git asked in the background).
@@ -359,7 +341,7 @@ function CommitList:show_commit(idx, opts)
   local commit = self.commits[idx]
   if not commit then return end
   local refresh = opts and opts.refresh
-  local cv = refresh and self:get_commit_view() or place_commit_view(self)
+  local cv = refresh and self:get_commit_view() or CommitView.place(self)
   if not cv then return end
   local spec = commit.hash and { rev = commit.hash, title = "Commit " .. revision.short(commit.hash) }
     or { from = "HEAD", title = "Uncommitted" }
@@ -372,7 +354,7 @@ end
 ---@param spec gitkit.diffspec
 ---@param scroll_to? string
 function CommitList:show_comparison(spec, scroll_to)
-  place_commit_view(self):show_diff(self.root, spec, { scroll_to = scroll_to or self.path })
+  CommitView.place(self):show_diff(self.root, spec, { scroll_to = scroll_to or self.path })
 end
 
 -- core.resultslist's, with commits for files

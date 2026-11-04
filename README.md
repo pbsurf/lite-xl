@@ -183,7 +183,8 @@ another repository's version, uninstalls removing dependents under `--assume-yes
   ctrl+click on a patch line opens the file at that line as it was at that
   commit, read-only, or the working copy if it's the same now. Right-clicking a
   commit compares it with the working tree (or just the file) or with the
-  selected commit; the commit view's menu does the same for its commit.
+  selected commit; the commit view's menu does the same for its commit. The
+  commit view is reused like a preview tab; double-click its tab to keep it.
 * **navigate** (imported, rewritten): alt+left / alt+right go back and forward
   through the places the cursor jumped from (another file, or a move that took
   the view away from where it was, other than with the cursor keys),

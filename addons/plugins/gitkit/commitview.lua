@@ -4,6 +4,7 @@ local config = require "core.config"
 local style = require "core.style"
 local syntax = require "core.syntax"
 local tokenizer = require "core.tokenizer"
+local panel = require "core.panel"
 local DocView = require "core.docview"
 local ReadDoc = require "plugins.gitkit.readdoc"
 local git = require "plugins.gitkit.git"
@@ -48,9 +49,48 @@ function CommitView:get_search_doc()
   return self.doc
 end
 
+-- every commit view made, to refresh those comparing with the working tree
+local all_views = setmetatable({}, { __mode = "k" })
+
 function CommitView:new()
   CommitView.super.new(self, ReadDoc("Commit"))
   self:set_result(diff.parse("", false), { title = "Commit" })
+  all_views[self] = true
+end
+
+---The current commit view (core.panel's: the one commits and comparisons are
+---shown in, until its tab is double-clicked to keep it), made if needed in the
+---editor node used last, in front of its node, now showing `list`'s commits
+---(nil for none). The focus stays where it is.
+---@param list? gitkit.commitlist
+---@return gitkit.commitview
+function CommitView.place(list)
+  local cv = panel.current(CommitView)
+  local av = core.active_view
+  if cv then
+    local node = core.root_view.root_node:get_node_for_view(cv)
+    if node then node:set_active_view(cv) end
+  else
+    cv = CommitView()
+    core.root_view:get_last_used_node():add_view(cv)
+    panel.set_current(cv)
+  end
+  cv.list = list
+  core.set_active_view(av)
+  return cv
+end
+
+---Shows again, as they are now, the open commit views that compare a revision
+---of the repository at `root` with its working tree (or show uncommitted
+---changes), keeping their place.
+---@param root string
+function CommitView.reload_working_tree(root)
+  for cv in pairs(all_views) do
+    if cv.meta.root == root and cv:shows_working_tree()
+      and core.root_view.root_node:get_node_for_view(cv) then
+      cv:reload()
+    end
+  end
 end
 
 ---Shows a parsed commit, from the top; with `keep_place`, scrolled and with
