@@ -732,6 +732,16 @@ function Widget:swap_active_child(child)
     return
   end
 
+  -- focus went elsewhere since the active child got it (a click in another
+  -- view, which a widget in a node isn't told of; its node moved): the child
+  -- isn't active any more, and focus isn't taken back to prev_view
+  if self.child_active
+    and core.active_view ~= (self.child_active.input_text and self.child_active.textview or self.child_active)
+  then
+    self.child_active:deactivate()
+    self.child_active, self.prev_view = nil, nil
+  end
+
   if child and child == self.child_active then return end
 
   local active_child = self.child_active
