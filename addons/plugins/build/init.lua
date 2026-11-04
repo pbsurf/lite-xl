@@ -550,7 +550,7 @@ end
 build.menu_actions = {
   { text = "Build", command = "build:build" },
   { text = "Clean", command = "build:clean" },
-  { text = "Run", command = "build:run-or-term-or-kill", when = function() return not build.is_running() end },
+  { text = "Build and Run", command = "build:build-and-run" },
   { text = "Stop", command = "build:terminate" },
   { text = "Show Problems", command = "build:show-problems" },
   { text = "Next Error", command = "build:next-error" },
@@ -1328,8 +1328,8 @@ end, {
 
 local tried_term = false
 
--- builds compile what's on disk, so save the files being edited first
-local function save_docs()
+---Saves the modified docs that have files: builds compile what's on disk.
+function build.save_docs()
   for i,v in ipairs(core.docs) do
     if v:is_dirty() and v.filename and v.abs_filename then
       v:save()
@@ -1341,7 +1341,7 @@ command.add(function(root_view, arguments)
   return not build.is_running() and build.can_build(build.targets[build.state.target]), arguments
 end, {
   ["build:build"] = function()
-    save_docs()
+    build.save_docs()
     if #build.targets > 0 then
       build.build()
     end
@@ -1352,7 +1352,7 @@ command.add(function(root_view, arguments)
   return not build.is_running() and build.can_build(build.targets[build.state.target]) and build.can_run(build.targets[build.state.target]), arguments
 end, {
   ["build:build-and-run"] = function(arguments)
-    save_docs()
+    build.save_docs()
     if #build.targets > 0 then
       build.build(function(status)
         if status == 0 then
@@ -1367,7 +1367,7 @@ command.add(function(root_view, arguments)
   return not build.is_running() and build.can_build(build.targets[build.state.target]) and build.can_clean(build.targets[build.state.target]), arguments
 end, {
   ["build:clean-and-build"] = function()
-    save_docs()
+    build.save_docs()
     build.clean(function(status)
       if (status or 0) == 0 and #build.targets > 0 then
         build.build()

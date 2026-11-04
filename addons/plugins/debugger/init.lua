@@ -878,10 +878,23 @@ if has_build then
   -- overwrite the build plugins' "play" toolbar button to activate the debugger, if this is a debug build.
   build.build_bar_view.toolbar_commands[2] = { symbol = '"', command = "debugger:start-or-continue"}
   build.build_bar_view.toolbar_commands[4] = { symbol = '$', command = "debugger:terminate"}
-  -- and add it to the target menu's actions, after Run
+  command.add(function()
+    local target = build.targets[build.state.target]
+    return config.target_binary and model.state == "inactive" and not build.is_running()
+      and build.can_build(target)
+  end, {
+    -- debugs what's being edited: saved and built first
+    ["debugger:build-and-start"] = function()
+      build.save_docs()
+      build.build(function(status)
+        if status == 0 then command.perform("debugger:start") end
+      end)
+    end,
+  })
+  -- and add it to the target menu's actions, after Build and Run
   for i, row in ipairs(build.menu_actions) do
-    if row.command == "build:run-or-term-or-kill" then
-      table.insert(build.menu_actions, i + 1, { text = "Debug", command = "debugger:start-or-continue" })
+    if row.command == "build:build-and-run" then
+      table.insert(build.menu_actions, i + 1, { text = "Build and Debug", command = "debugger:build-and-start" })
       table.insert(build.menu_actions, i + 2, { text = "Stop debugging", command = "debugger:terminate" })
       break
     end
