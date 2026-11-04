@@ -553,8 +553,6 @@ build.menu_actions = {
   { text = "Build and Run", command = "build:build-and-run" },
   { text = "Stop", command = "build:terminate" },
   { text = "Show Problems", command = "build:show-problems" },
-  { text = "Next Error", command = "build:next-error" },
-  { text = "Previous Error", command = "build:previous-error" },
   { text = "Show Build Output", command = "build:toggle-output", when = function() return not build.is_output_shown() end },
   { text = "Hide Build Output", command = "build:toggle-output", when = function() return build.is_output_shown() end },
 }
