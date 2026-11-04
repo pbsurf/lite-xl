@@ -654,7 +654,8 @@ core.status_view:add_item({
 })
 
 -- what's under way, or how the last build ended: its counts, else that it
--- failed; a click shows the Problems panel
+-- failed. A click shows the output while a build or clean is under way, the
+-- program's terminal (focused, to type to it) while it runs, else Problems.
 core.status_view:add_item({
   predicate = function()
     local last = build.last
@@ -682,11 +683,21 @@ core.status_view:add_item({
   end,
   tooltip = function()
     local last = build.last
-    if build.current or not last then return "Show Problems" end
+    if build.current then
+      return build.current.kind == "Run" and "Show the program's terminal" or "Show Build Output"
+    end
+    if not last then return "Show Problems" end
     return string.format("Last %s: %s. Show Problems", last.kind:lower(),
       last.status == 0 and "done" or last.status == -1 and "failed" or "exit status " .. last.status)
   end,
-  command = "build:show-problems",
+  command = function(button)
+    if button ~= "left" then return end
+    if build.current then
+      panel.show(build.view, { focus = build.current.kind == "Run" })
+    else
+      build.show_problems()
+    end
+  end,
 })
 
 local type_colors = {
