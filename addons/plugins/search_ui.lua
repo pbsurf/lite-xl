@@ -92,6 +92,14 @@ label:set_position(10, 10)
 local line = Line(widget)
 line:set_position(0, label:get_bottom() + 10)
 
+-- closes the pane: an ×, flat and dim as a tab's close button
+---@type widget.button
+local close = Button(widget, "")
+close:set_icon("C", style.dim, style.text)
+close.border.width = 0
+close.render_background = false
+close:set_tooltip("Close (Escape)")
+
 ---@type widget.button
 local togglereplace = Button(widget, "")
 togglereplace:set_icon("+")
@@ -805,6 +813,7 @@ function findprev:on_click() remember_find() find(true) end
 function findproject:on_click() project_search() end
 function replace:on_click() find_replace() end
 function togglereplace:on_click() set_replace_shown(not replace_shown) end
+function close:on_click() command.perform "search-replace:hide" end
 
 local function chevron_width()
   return math.max(style.icon_font:get_width("+"), style.icon_font:get_width("-"))
@@ -957,6 +966,8 @@ local function update_right_positioning(self)
   label:set_label("Find and Replace")
 
   label:set_position(10, 10)
+  close:set_position(self.size.x - 10 - close:get_width(),
+    label:get_position().y + (label:get_height() - close:get_height()) / 2)
   line:set_position(0, label:get_bottom() + 10)
   local text_x = 10
   if scope:get_selected() == 1 and can_replace() then
@@ -1027,13 +1038,17 @@ local function update_bottom_positioning(self)
   scope:hide()
   statusline:hide()
 
+  -- the options row ends with the close button
+  close:set_position(self.size.x - 10 - close:get_width(),
+    10 + (matchcase:get_height() - close:get_height()) / 2)
+  local options_right = close:get_position().x - 10
   if scope:get_selected() == 1 then
     label:hide()
     status:show()
     status:set_position(10, 10)
-    replaceinselection:set_position(self.size.x - replaceinselection:get_width() - 10, 10)
-    local right = row_shown() and replaceinselection:get_position().x or self.size.x
-    regexcheck:set_position(right - 10 - regexcheck:get_width(), 10)
+    replaceinselection:set_position(options_right - replaceinselection:get_width(), 10)
+    local right = row_shown() and replaceinselection:get_position().x - 10 or options_right
+    regexcheck:set_position(right - regexcheck:get_width(), 10)
     patterncheck:set_position(regexcheck:get_position().x - 10  - patterncheck:get_width(), 10)
     wholeword:set_position(patterncheck:get_position().x - 10 - wholeword:get_width(), 10)
     matchcase:set_position(wholeword:get_position().x - 10 - matchcase:get_width(), 10)
@@ -1044,7 +1059,7 @@ local function update_bottom_positioning(self)
     status:hide()
     label:set_label("Find in Directory")
     label:set_position(10, 10)
-    regexcheck:set_position(self.size.x - regexcheck:get_width() - 10, 10)
+    regexcheck:set_position(options_right - regexcheck:get_width(), 10)
     wholeword:set_position(regexcheck:get_position().x - 10 - wholeword:get_width(), 10)
     matchcase:set_position(wholeword:get_position().x - 10 - matchcase:get_width(), 10)
     line:set_position(0, label:get_bottom() + 10)
