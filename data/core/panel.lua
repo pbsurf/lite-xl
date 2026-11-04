@@ -3,6 +3,7 @@ local common = require "core.common"
 local style = require "core.style"
 local Node = require "core.node"
 local EmptyView = require "core.emptyview"
+local reusable = require "core.reusable"
 
 ---The bottom panel: a split below the editor area holding tool views (search
 ---results, build output, terminals) as ordinary tabs, which show their status
@@ -13,21 +14,16 @@ local EmptyView = require "core.emptyview"
 ---editor split's, in a muted accent color (style.panel_divider_size,
 ---style.panel_divider), telling the two apart.
 ---
----Each kind of view (its class) can have a current view, which the kind's next
----search or run reuses rather than opening another tab. Its title is italic, as
----a preview tab's is; double-clicking its tab keeps it, and the next one then
----gets a tab of its own. Moving it out of the panel (a drag, "Move to Editor")
----keeps it too, so the next one opens in the panel.
+---Each kind of view (its class) can have a current view (core.reusable), which
+---the kind's next search or run reuses rather than opening another tab. Moving
+---it out of the panel (a drag, "Move to Editor") keeps it, so the next one opens
+---in the panel.
 local panel = {}
 
 ---The panel's height (pixels) when it last went away; nil until then, for a
 ---third of the editor area
 ---@type number?
 panel.height = nil
-
----Each kind's current view
----@type table<core.object, core.view>
-local current = {}
 
 ---The views hide() took out, in tab order; `active` the one in front
 ---@type core.view[]
@@ -179,36 +175,6 @@ function panel.toggle()
   end
 end
 
----A kind's current view, if it's still open (in a node, or hidden).
----@param kind core.object A view class
----@return core.view?
-function panel.current(kind)
-  local view = current[kind]
-  if view and (core.root_view.root_node:get_node_for_view(view) or is_hidden(view)) then
-    return view
-  end
-  current[kind] = nil
-end
-
----Makes a view its kind's current view, in place of the one before.
----@param view core.view
-function panel.set_current(view)
-  local kind = getmetatable(view)
-  local old = current[kind]
-  if old and old ~= view then old.reusable = nil end
-  current[kind] = view
-  view.reusable = true
-end
-
----Keeps a current view: the kind's next one gets a tab of its own.
----@param view core.view
-function panel.keep(view)
-  view.reusable = nil
-  for kind, v in pairs(current) do
-    if v == view then current[kind] = nil end
-  end
-end
-
 ---Moves a view from wherever it is into the panel.
 ---@param view core.view
 function panel.move_to_panel(view)
@@ -224,7 +190,7 @@ function panel.move_to_editor(view)
   local root = core.root_view.root_node
   local node = root:get_node_for_view(view)
   if node then node:remove_view(root, view) end
-  panel.keep(view)
+  reusable.keep(view)
   -- only now: removing the panel's last view replaces its sibling's node
   core.root_view:get_last_used_node():add_view(view)
 end

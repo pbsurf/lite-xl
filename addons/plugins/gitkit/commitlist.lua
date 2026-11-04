@@ -2,7 +2,7 @@ local core = require "core"
 local common = require "core.common"
 local config = require "core.config"
 local style = require "core.style"
-local panel = require "core.panel"
+local reusable = require "core.reusable"
 local View = require "core.view"
 local ResultsList = require "core.resultslist"
 local git = require "plugins.gitkit.git"
@@ -328,7 +328,7 @@ end
 ---The commit view showing this list's commits (the current one), if it's open.
 ---@return gitkit.commitview?
 function CommitList:get_commit_view()
-  local cv = panel.current(CommitView)
+  local cv = reusable.current(CommitView)
   if cv and cv.list == self then return cv end
 end
 

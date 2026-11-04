@@ -44,6 +44,10 @@ config.min_tab_width = 120
 -- rather than all style.tab_width wide; they still shrink to fit, widest first
 config.fit_tab_width = false
 config.max_tab_width = 320
+-- A file opened while browsing (the tree view, go to definition, ...) shows in
+-- a preview tab (italic), which the next one replaces until it's kept: by a
+-- double click on its tab or the file in the tree view, an edit, or a drag
+config.preview_tabs = true
 -- Buttons at the right end of the tab bar while its tabs scroll, left to right;
 -- names nothing registered in Node.tab_buttons are skipped (the tab_overflow
 -- add-on registers "scroll_left", "scroll_right" and "menu")

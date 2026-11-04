@@ -4,7 +4,7 @@ local config = require "core.config"
 local style = require "core.style"
 local syntax = require "core.syntax"
 local tokenizer = require "core.tokenizer"
-local panel = require "core.panel"
+local reusable = require "core.reusable"
 local DocView = require "core.docview"
 local ReadDoc = require "plugins.gitkit.readdoc"
 local git = require "plugins.gitkit.git"
@@ -59,14 +59,14 @@ function CommitView:new()
   all_views[self] = true
 end
 
----The current commit view (core.panel's: the one commits and comparisons are
+---The current commit view (core.reusable: the one commits and comparisons are
 ---shown in, until its tab is double-clicked to keep it), made if needed in the
 ---editor node used last, in front of its node, now showing `list`'s commits
 ---(nil for none). The focus stays where it is.
 ---@param list? gitkit.commitlist
 ---@return gitkit.commitview
 function CommitView.place(list)
-  local cv = panel.current(CommitView)
+  local cv = reusable.current(CommitView)
   local av = core.active_view
   if cv then
     local node = core.root_view.root_node:get_node_for_view(cv)
@@ -74,7 +74,7 @@ function CommitView.place(list)
   else
     cv = CommitView()
     core.root_view:get_last_used_node():add_view(cv)
-    panel.set_current(cv)
+    reusable.set_current(cv)
   end
   cv.list = list
   core.set_active_view(av)

@@ -13,9 +13,9 @@
 --   copy. On a stat line it goes to the file's patch. alt+pageup/alt+pagedown
 --   step to the previous/next commit.
 -- * Commits and comparisons all show in one commit view, the current one
---   (italic title, as the panel's reused tabs have; core.panel). Double-
---   clicking its tab keeps it: the next opens in a tab of its own, and
---   comparisons asked for in a kept one show in that new tab.
+--   (italic title, as reused tabs have; core.reusable). Double-clicking its
+--   tab keeps it: the next opens in a tab of its own, and comparisons asked
+--   for in a kept one show in that new tab.
 -- * Commit lists refresh by themselves after commits, checkouts and other
 --   changes to branches, tags or uncommitted files, keeping their selection.
 -- * Comparisons: a commit with the working tree (the whole of it, or a file),
@@ -30,6 +30,7 @@ local config = require "core.config"
 local command = require "core.command"
 local keymap = require "core.keymap"
 local panel = require "core.panel"
+local reusable = require "core.reusable"
 local DocView = require "core.docview"
 local ContextMenu = require "core.contextmenu"
 
@@ -74,12 +75,12 @@ function gitkit.show_log(path, file_history)
       return
     end
     local rel = file_history and git.relative_path(root, path) or nil
-    local view = panel.current(CommitList)
+    local view = reusable.current(CommitList)
     if view then
       view:load(root, rel)
     else
       view = CommitList(root, rel)
-      panel.set_current(view)
+      reusable.set_current(view)
     end
     panel.show(view)
   end)

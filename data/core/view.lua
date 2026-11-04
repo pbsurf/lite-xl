@@ -99,8 +99,8 @@ function View:get_name()
 end
 
 ---The font to draw this view's name in (tab titles, tab lists), derived from
----`font`, the one the caller would use; e.g. an italic copy. Italic for the
----view its kind's next search or run reuses (`reusable`, core.panel).
+---`font`, the one the caller would use; e.g. an italic copy. Italic for a
+---view the next of its kind replaces (`reusable`, core.reusable).
 ---@param font renderer.font
 ---@return renderer.font
 function View:get_name_style(font)
@@ -145,10 +145,10 @@ function View:get_icon_badge()
 end
 
 ---Whether this view is transient, like a preview tab: it isn't restored with the
----workspace.
+---workspace. Reusable views (core.reusable) are.
 ---@return boolean
 function View:is_transient()
-  return false
+  return self.reusable == true
 end
 
 

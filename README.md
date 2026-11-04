@@ -46,6 +46,15 @@ upstream's `release/v2.1.x`. Additions to the editor:
   (`root:toggle-panel`; join lines moves to ctrl+shift+j), or the icon at the
   right end of the status bar, hides it with all its tabs, their programs running
   on, and shows it again.
+* **Preview tabs** (`core.reusable`, from the ephemeral_tabs plugin, which this
+  replaces): a file opened while browsing (a click in the tree, go to definition,
+  a search result, ...; callers pass `{ preview = true }` to `RootView:open_doc`)
+  replaces its split's previous preview tab until it's kept: by an edit, a double
+  click on its tab or on the file in the tree, or dragging the tab. ctrl+p and
+  ctrl+o open normal tabs. Previews show their name in italic and aren't restored
+  with the workspace or listed in File > Open Recent until kept. The bottom
+  panel's reused tabs and gitkit's commit view work the same way.
+  `config.preview_tabs = false` turns file previews off.
 * **Reopen closed tab:** ctrl+shift+t reopens the file whose tab was closed last
   (again for the one before), beside the tab that was next to it, at the cursor
   and scroll it had. Recent files (`core.recent_files`, kept between sessions)
@@ -152,13 +161,6 @@ another repository's version, uninstalls removing dependents under `--assume-yes
   suggestions or "Add to Dictionary" (`spellcheck_words.txt` in the user dir).
   "Spell" on the status bar shows whether it's on and toggles it. Its
   C module is built by our CMake build, with hunspell compiled in.
-* **ephemeral_tabs** (imported, with our changes): a file opened while browsing
-  (a click in the tree, go to definition, a search result, ...; callers pass
-  `{ preview = true }` to `RootView:open_doc`) replaces the previous preview tab
-  until edited or double-clicked; ctrl+p and ctrl+o open normal tabs. Preview tabs
-  show their name in italic (in tabs, the tab menu and the ctrl+tab list) and
-  aren't restored with the workspace or listed in File > Open Recent until they
-  become normal tabs.
 * **openurl:** ctrl+click opens the URL or DOI under the mouse in the browser
   (DOIs via `config.plugins.openurl.doi_url`), or a `[[wiki link]]` to a local file
   (`name`, `name.md`, ... in the file's directory or a parent; `[[name#Heading]]`

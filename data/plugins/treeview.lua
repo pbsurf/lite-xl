@@ -828,6 +828,13 @@ command.add(
     end
   end,
 
+  -- a double click: the file the click before opened (as a preview) is kept
+  ["treeview:select-and-open-kept"] = function()
+    command.perform "treeview:select-and-open"
+    local av = core.active_view
+    if av.doc and av.reusable then require("core.reusable").keep(av) end
+  end,
+
   ["treeview:toggle-expand-all"] = function()
     local item = view.hovered_item
     if item then
@@ -1105,6 +1112,7 @@ keymap.add {
   ["delete"]      = "treeview:delete",
   ["ctrl+return"] = "treeview:new-folder",
   ["lclick"]      = "treeview:select-and-open",
+  ["2lclick"]     = "treeview:select-and-open-kept",
   ["mclick"]      = "treeview:select",
   ["ctrl+lclick"] = "treeview:toggle-expand-all"
 }

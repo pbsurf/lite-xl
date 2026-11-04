@@ -4,6 +4,7 @@ local common = require "core.common"
 local keymap = require "core.keymap"
 local command = require "core.command"
 local panel = require "core.panel"
+local reusable = require "core.reusable"
 local Results = require "core.resultsview"
 
 ---@class plugins.projectsearch.resultsview : core.resultsview
@@ -123,12 +124,12 @@ local function begin_search(path, text, fn, info)
     core.error("Expected non-empty string")
     return
   end
-  local view = panel.current(ResultsView)
+  local view = reusable.current(ResultsView)
   if view then
     view:begin_search(path, text, fn, info)
   else
     view = ResultsView(path, text, fn, info)
-    panel.set_current(view)
+    reusable.set_current(view)
   end
   panel.show(view)
   return view

@@ -8,6 +8,8 @@ local EmptyView = require "core.emptyview"
 local ContextMenu = require "core.contextmenu"
 local tooltip = require "core.tooltip"
 local panel = require "core.panel"
+local reusable = require "core.reusable"
+local config = require "core.config"
 
 ---@class core.rootview : core.view
 ---@field super core.view
@@ -205,19 +207,28 @@ end
 
 ---@param doc core.doc
 ---@param opts? { preview?: boolean } preview: opened while browsing (following a
----link, jumping to a location) rather than chosen by the user; a plugin may show
----it as a preview tab that the next such open replaces (ephemeral_tabs)
+---link, jumping to a location) rather than chosen by the user: shown in a preview
+---tab (core.reusable), which the node's next preview replaces, unless
+---config.preview_tabs is false. Opening the doc otherwise keeps its preview.
 ---@return core.docview
 function RootView:open_doc(doc, opts)
+  local preview = opts and opts.preview and config.preview_tabs
   local node = self:get_active_node_default()
   for i, view in ipairs(node.views) do
     if view.doc == doc then
       node:set_active_view(node.views[i])
+      if not preview then reusable.keep(view) end
       return view
     end
   end
   local view = DocView(doc)
+  local old = preview and reusable.current(node)
+  -- marked before it's added, which makes it active: a preview's file isn't
+  -- recent (core.set_active_view skips transient views) until it's kept
+  if preview then reusable.set_current(view, node) end
   node:add_view(view)
+  -- closed after: the node would go away with its last view
+  if old and node:get_view_idx(old) then node:close_view(self.root_node, old) end
   self.root_node:update_layout()
   view:scroll_to_line(view.doc:get_selection(), true, true)
   return view
@@ -287,8 +298,9 @@ function RootView:on_mouse_pressed(button, x, y, clicks)
     else
       if button == "left" then
         self.dragged_node = { node = node, idx = idx, dragging = false, drag_start_x = x, drag_start_y = y}
-        -- double-click: keeps the view the next search or run would reuse
-        if clicks > 1 and node.views[idx].reusable then panel.keep(node.views[idx]) end
+        -- double-click: keeps a reusable view (a preview, or the view the next
+        -- search would reuse; core.reusable)
+        if clicks > 1 then reusable.keep(node.views[idx]) end
       end
       node:set_active_view(node.views[idx])
       return true
@@ -356,9 +368,9 @@ function RootView:on_mouse_released(button, x, y, ...)
             node:add_view(view, tab_index)
             self.root_node:get_node_for_view(view):set_active_view(view)
           end
-          -- a current view dragged out of the panel is kept there: its kind's next
-          -- view opens in the panel rather than replacing it
-          if not self.root_node:get_node_for_view(view).is_panel then panel.keep(view) end
+          -- a reusable view dragged out of the panel, or within the editor, is
+          -- kept: its kind's next view opens where they do, rather than replacing it
+          if not self.root_node:get_node_for_view(view).is_panel then reusable.keep(view) end
           self.root_node:update_layout()
           core.redraw = true
         end

@@ -737,8 +737,13 @@ function Doc:indent_text(unindent, line1, col1, line2, col2)
   return line1, col1 + #text, line1, col1 + #text
 end
 
--- For plugins to add custom actions of document change
+-- For plugins to add custom actions of document change. An edit in a preview
+-- (core.reusable) keeps it (a reload from disk isn't one).
 function Doc:on_text_change(type)
+  local view = core.active_view
+  if type ~= "reload" and view and view.doc == self and view.reusable then
+    require("core.reusable").keep(view)
+  end
 end
 
 -- For plugins to get notified when a document is closed

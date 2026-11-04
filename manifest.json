@@ -101,13 +101,6 @@
       "dependencies": { "widget": {} }
     },
     {
-      "id": "ephemeral_tabs",
-      "description": "Preview tabs (lite-xl-plugins 6e4aa64), marked by an italic name instead of ~ around it, not restored with the workspace; restored tabs stay regular.",
-      "version": "0.1",
-      "mod_version": "3",
-      "path": "addons/plugins/ephemeral_tabs.lua"
-    },
-    {
       "id": "navigate",
       "description": "Back and forward between document positions (lite-xl-plugins 6e4aa64), rewritten: records jumps (doc changes, moves over jump_threshold lines) on cursor change instead of polling, keeps history across closed files, alt+shift+left/right within the current doc.",
       "version": "0.2",

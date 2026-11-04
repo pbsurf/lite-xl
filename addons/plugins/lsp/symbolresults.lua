@@ -15,6 +15,7 @@ local core = require "core"
 local common = require "core.common"
 local style = require "core.style"
 local panel = require "core.panel"
+local reusable = require "core.reusable"
 local ResultsList = require "core.resultslist"
 local ResultsView = require "core.resultsview"
 local Widget = require "libraries.widget"
@@ -78,10 +79,10 @@ end
 ---@param server string The name of the server searching
 ---@return lsp.symbolresults
 function SymbolResults:open(symbol, server)
-  local view = panel.current(self)
+  local view = reusable.current(self)
   if not view then
     view = self()
-    panel.set_current(view)
+    reusable.set_current(view)
   end
   view:reset(symbol, server)
   panel.show(view)
