@@ -153,10 +153,11 @@
     },
     {
       "id": "gitfiles",
-      "description": "In a git repository, the project's files are those git doesn't ignore; untracked files marked in the treeview; Show All Files in its context menu.",
+      "description": "In a git repository, the project's files are those git doesn't ignore; untracked files marked in the treeview; a git badge on submodules; Show All Files in its context menu.",
       "version": "0.1",
       "mod_version": "3",
-      "path": "addons/plugins/gitfiles.lua"
+      "path": "addons/plugins/gitfiles.lua",
+      "dependencies": { "font_symbols_nerdfont_mono_regular": {} }
     },
     {
       "id": "widget",

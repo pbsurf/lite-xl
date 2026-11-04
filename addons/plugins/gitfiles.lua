@@ -16,6 +16,10 @@
 -- repository: branch, commits ahead of/behind its upstream (as of the last
 -- fetch), and how many files are changed or untracked in the project directory.
 -- The treeview's and tabs' tooltips show an entry's or file's git state.
+--
+-- Submodules' folders have a git badge on their icon (style.git_badge, a muted
+-- git orange by default); their tooltip says what the submodule has checked out
+-- (branch, else commit) and its origin's URL.
 
 local core = require "core"
 local common = require "core.common"
@@ -28,6 +32,7 @@ local ContextMenu = require "core.contextmenu"
 local StatusView = require "core.statusview"
 local RootView = require "core.rootview"
 local TreeView = require "plugins.treeview"
+local nerdfonts_symbols = require "libraries.font_symbols_nerdfont_mono_regular"
 
 config.plugins.gitfiles = common.merge({
   -- the git command: a name looked up in PATH, or a path (on Windows e.g. "git.exe", or
@@ -40,11 +45,14 @@ config.plugins.gitfiles = common.merge({
 }, config.plugins.gitfiles)
 
 local DEFAULT_UNTRACKED = { common.color "#2e9e44" }
+local DEFAULT_BADGE = { common.color "#b8735a" }
 
 -- per project directory name: false if it isn't in a git repository, else
 -- { git_dir, prefix (of the directory in the repository, with a trailing /),
 --   ignored, untracked (sets of paths relative to the directory),
---   changes (status "XY" of other entries, by path), summary (see parse_status) }
+--   changes (status "XY" of other entries, by path), summary (see parse_status),
+--   submodules (initialized ones in the directory, nested ones too, by path:
+--   { branch (nil if detached), commit (short hash), url (origin's, if any) }) }
 local repos = {}
 
 -- projects (core.project_dir) showing all files
@@ -147,10 +155,15 @@ local function same_set(a, b)
 end
 
 -- The directory's submodules (initialized ones, nested ones too) in it, as
--- NUL-terminated pairs of path (relative to the directory) and git directory
+-- NUL-terminated triples: path (relative to the directory); git directory,
+-- branch ("HEAD" if detached) and short commit hash, on lines; origin's URL
+-- (empty without one). The last command's status is printf's: a failing one
+-- would stop foreach.
 local function submodules_args(dir_name)
   return { config.plugins.gitfiles.git, "-C", dir_name, "submodule", "--quiet", "foreach", "--recursive",
-           'printf "%s\\0%s\\0" "$displaypath" "$(git rev-parse --absolute-git-dir)"' }
+           'printf "%s\\0%s\\0%s\\0" "$displaypath"'
+           .. ' "$(git rev-parse --absolute-git-dir --abbrev-ref HEAD --short HEAD)"'
+           .. ' "$(git config --get remote.origin.url)"' }
 end
 
 -- A path git printed, as this system's: on Windows with \ (git for Windows
@@ -174,17 +187,23 @@ local function query(repo, dir_name, skip_submodules, task)
   if not status then return false end
   local ignored, untracked, summary, changes = parse_status(status, repo.prefix)
   local subs = not skip_submodules and run_command(submodules_args(dir_name)) or ""
-  local n_subs, done = select(2, subs:gsub("[^\0]*\0[^\0]*\0", "")), 0
-  for path, git_dir in subs:gmatch("([^\0]*)\0([^\0]*)\0") do
+  local submodules = {}
+  local n_subs, done = select(2, subs:gsub("[^\0]*\0[^\0]*\0[^\0]*\0", "")), 0
+  for path, head, url in subs:gmatch("([^\0]*)\0([^\0]*)\0([^\0]*)\0") do
+    local git_dir, branch, commit = head:match("^([^\n]*)\n?([^\n]*)\n?([^\n]*)")
     git_dir = native_path(git_dir)
     if task then
       task:update(string.format("%d/%d submodules", done, n_subs))
       done = done + 1
     end
     if path:sub(1, 3) ~= "../" then
+      local native = PATHSEP ~= "/" and path:gsub("/", PATHSEP) or path
+      submodules[native] = { branch = branch ~= "" and branch ~= "HEAD" and branch or nil,
+                             commit = commit ~= "" and commit or nil,
+                             url = url ~= "" and url or nil }
       local sub_status = run_command(status_args(dir_name .. PATHSEP .. path))
       if sub_status then
-        local base = (PATHSEP ~= "/" and path:gsub("/", PATHSEP) or path) .. PATHSEP
+        local base = native .. PATHSEP
         local sub_ignored, sub_untracked, _, sub_changes = parse_status(sub_status, "")
         for p in pairs(sub_ignored) do ignored[base .. p] = true end
         for p in pairs(sub_untracked) do untracked[base .. p] = true end
@@ -195,6 +214,7 @@ local function query(repo, dir_name, skip_submodules, task)
   end
   local changed = not repo.ignored or not same_set(ignored, repo.ignored)
   repo.ignored, repo.untracked, repo.summary, repo.changes = ignored, untracked, summary, changes
+  if not skip_submodules then repo.submodules = submodules end
   return changed
 end
 
@@ -359,6 +379,48 @@ function TreeView:get_item_text(item, active, hovered)
 end
 
 
+-- the submodule an entry is, if it is one
+local function submodule_of(item)
+  local repo = item.type == "dir" and item.depth > 0 and repos[item.dir_name]
+  return repo and repo.submodules and repo.submodules[item.filename]
+end
+
+-- The color of an entry's row, as TreeView:draw_item_background draws it
+local function row_background(active, hovered)
+  local hl = style.line_highlight
+  if hovered then
+    local bg, a = style.background2, 160 / 255 * (hl[4] or 255) / 255
+    return { bg[1] + (hl[1] - bg[1]) * a, bg[2] + (hl[2] - bg[2]) * a,
+             bg[3] + (hl[3] - bg[3]) * a, 255 }
+  end
+  return active and hl or style.background2
+end
+
+local BADGE_ICON = nerdfonts_symbols.utf8["dev-git"]
+-- renderer.draw_glyph draws from the outline: the size doesn't matter
+local badge_font = renderer.font.load(nerdfonts_symbols.path, 12)
+
+-- A submodule's folder icon gets a git badge at its lower right corner, ringed
+-- with the row's color to set it apart from the icon
+local draw_item_icon = TreeView.draw_item_icon
+function TreeView:draw_item_icon(item, active, hovered, x, y, w, h)
+  local advance = draw_item_icon(self, item, active, hovered, x, y, w, h)
+  if submodule_of(item) then
+    local icon, font = self:get_item_icon(item, active, hovered)
+    local th = font:get_height()
+    local d = th * 0.5
+    local cx = x + font:get_width(icon) - d * 0.3
+    local cy = common.round(y + (h - th) / 2) + th * 0.72
+    local r = d / 2 + 1.5 * SCALE
+    renderer.draw_path({ "M", cx, cy - r, "L", cx + r, cy, "L", cx, cy + r, "L", cx - r, cy, "Z" },
+      row_background(active, hovered))
+    renderer.draw_glyph(badge_font, BADGE_ICON, cx - d / 2, cy - d / 2, d, d,
+      style.git_badge or DEFAULT_BADGE)
+  end
+  return advance
+end
+
+
 local STATE_NAMES = { M = "modified", A = "added", D = "deleted", R = "renamed",
                       C = "copied", T = "type changed" }
 
@@ -399,8 +461,24 @@ function TreeView:get_item_info(item)
   local info = get_item_info(self, item)
   local repo = repos[item.dir_name]
   local state = repo and git_state(repo, item.depth > 0 and item.filename or "", item.type == "dir")
-  if state then table.insert(info, "git: " .. state) end
+  local sub = submodule_of(item)
+  if sub then
+    local head = sub.branch and "on " .. sub.branch
+      or sub.commit and "at " .. sub.commit .. " (detached)" or "with no commits"
+    table.insert(info, "git submodule " .. head .. (state and ", " .. state or ""))
+  elseif state then
+    table.insert(info, "git: " .. state)
+  end
   return info
+end
+
+-- a submodule's origin, on a line of its own (URLs are long)
+local get_item_tooltip = TreeView.get_item_tooltip
+function TreeView:get_item_tooltip(item)
+  local lines = get_item_tooltip(self, item)
+  local sub = submodule_of(item)
+  if sub and sub.url then table.insert(lines, "origin: " .. common.home_encode(sub.url)) end
+  return lines
 end
 
 local get_tab_tooltip_info = RootView.get_tab_tooltip_info
