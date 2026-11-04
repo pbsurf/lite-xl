@@ -281,15 +281,27 @@ function TreeView:get_item_info(item)
 end
 
 
+---An entry's tooltip, as lines: its path, then its info (`get_item_info`) on
+---one line, if any. Add-ons can add lines of their own (drawn dim, as the info).
+---@return string[]
+function TreeView:get_item_tooltip(item)
+  local lines = { common.home_encode(item.abs_filename) }
+  local info = table.concat(self:get_item_info(item), " · ")
+  if info ~= "" then table.insert(lines, info) end
+  return lines
+end
+
+
 ---Draws an entry's tooltip at the tree view's right edge, beside its row (top ty,
 ---height th), so that it doesn't cover the entries around it.
 function TreeView:draw_tooltip(item, ty, th)
-  local text = common.home_encode(item.abs_filename)
-  local info = table.concat(self:get_item_info(item), " · ")
+  local lines = self:get_item_tooltip(item)
   local font = style.font
   local lh = font:get_height()
-  local w = math.max(font:get_width(text), font:get_width(info)) + style.padding.x * 2
-  local h = lh * (info ~= "" and 2 or 1) + style.padding.y
+  local w = 0
+  for _, line in ipairs(lines) do w = math.max(w, font:get_width(line)) end
+  w = w + style.padding.x * 2
+  local h = lh * #lines + style.padding.y
 
   local root = core.root_view.root_node
   local x = self.position.x + self.size.x - style.padding.x / 2
@@ -298,9 +310,8 @@ function TreeView:draw_tooltip(item, ty, th)
 
   common.draw_popup_box(x, y, w, h)
   local px, py = x + style.padding.x, y + style.padding.y / 2
-  renderer.draw_text(font, text, px, py, style.text)
-  if info ~= "" then
-    renderer.draw_text(font, info, px, py + lh, style.dim)
+  for i, line in ipairs(lines) do
+    renderer.draw_text(font, line, px, py + (i - 1) * lh, i == 1 and style.text or style.dim)
   end
 end
 
