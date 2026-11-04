@@ -210,24 +210,20 @@ function CommitView:get_filename()
   return self.meta.root and common.home_encode(self.meta.root) or self.meta.title
 end
 
--- For the tab's tooltip: a commit's subject, author and date, else what's
--- compared; the files it's limited to; how many files changed.
+-- For the tab's tooltip: a commit's author and date (not its message, which
+-- can be long), else what's compared; the files it's limited to; how many
+-- files changed.
 function CommitView:get_tab_tooltip_info()
   local spec, t = self.meta.spec, {}
   if not spec then return t end
   if spec.rev then
-    local subject, author, date
+    local author, date
     for i, info in ipairs(self.infos) do
+      if info.kind == "message" or info.kind == "blank" then break end
       local line = self.doc.lines[i]:gsub("\n$", "")
-      if info.kind == "header" then
-        author = author or line:match("^Author:%s*(.-)%s*<") or line:match("^Author:%s*(.-)%s*$")
-        date = date or line:match("^Date:%s*(.-)%s*$")
-      elseif info.kind == "message" then
-        subject = line:match("^%s*(.-)%s*$")
-        break
-      end
+      author = author or line:match("^Author:%s*(.-)%s*<") or line:match("^Author:%s*(.-)%s*$")
+      date = date or line:match("^Date:%s*(.-)%s*$")
     end
-    table.insert(t, subject)
     table.insert(t, author)
     table.insert(t, date)
   elseif not spec.to and spec.from == "HEAD" then
