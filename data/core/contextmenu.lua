@@ -180,11 +180,25 @@ function ContextMenu:on_mouse_moved(px, py)
   self.selected = -1
   for i, item, x, y, w, h in self:each_item() do
     if px > x and px <= x + w and py > y and py <= y + h then
-      self.selected = i
+      -- a divider isn't an item to choose: nothing is selected over it
+      if item ~= DIVIDER then self.selected = i end
       break
     end
   end
   return true
+end
+
+---Whether the point is on a divider of the shown menu.
+---@param px number
+---@param py number
+---@return boolean
+function ContextMenu:is_over_divider(px, py)
+  for _, item, x, y, w, h in self:each_item() do
+    if px > x and px <= x + w and py > y and py <= y + h then
+      return item == DIVIDER
+    end
+  end
+  return false
 end
 
 ---Event handler for when the selection is confirmed.
@@ -265,6 +279,8 @@ function ContextMenu:on_mouse_pressed(button, px, py, clicks)
   if self.show_context_menu then
     if button == "left" then
       local selected = self:get_item_selected()
+      -- a click on a divider does nothing: the menu stays open
+      if not selected and self:is_over_divider(px, py) then return true end
       if selected and not selected.disabled then
         self:on_selected(selected)
       end
