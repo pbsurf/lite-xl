@@ -173,8 +173,9 @@ another repository's version, uninstalls removing dependents under `--assume-yes
   view. "Show All Files" in the tree view's context menu shows everything but
   `.git` (ignored files dimmed), per project. With the tree view focused, the
   status bar shows the branch, ahead/behind and counts of changed and untracked
-  files; tooltips show a file's git state. Submodules have a git badge on their
-  folder icon; their tooltip shows the branch (or commit) and origin URL.
+  files; tooltips show a file's git state. Submodules and a project folder at the
+  top of a repository have a git badge on their folder icon; a submodule's
+  tooltip shows its branch (or commit) and origin URL.
 * **gitkit:** git history. "Git: Log" and "Git: File History" (also in the tree
   view's context menu) list commits in a bottom panel tab, uncommitted changes
   first; stepping through them shows each as `git show` would, with colored

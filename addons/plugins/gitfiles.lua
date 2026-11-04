@@ -17,9 +17,10 @@
 -- fetch), and how many files are changed or untracked in the project directory.
 -- The treeview's and tabs' tooltips show an entry's or file's git state.
 --
--- Submodules' folders have a git badge on their icon (style.git_badge, a muted
--- git orange by default); their tooltip says what the submodule has checked out
--- (branch, else commit) and its origin's URL.
+-- Submodules' folders, and project directories at the top of a repository,
+-- have a git badge on their icon (style.git_badge, a muted git orange by
+-- default); a submodule's tooltip says what it has checked out (branch, else
+-- commit) and its origin's URL.
 
 local core = require "core"
 local common = require "core.common"
@@ -385,6 +386,16 @@ local function submodule_of(item)
   return repo and repo.submodules and repo.submodules[item.filename]
 end
 
+-- whether an entry gets a git badge: a submodule, or a project directory at the
+-- top of its repository
+local function has_badge(item)
+  if item.depth == 0 then
+    local repo = repos[item.dir_name]
+    return repo and repo.prefix == ""
+  end
+  return submodule_of(item) and true or false
+end
+
 -- The color of an entry's row, as TreeView:draw_item_background draws it
 local function row_background(active, hovered)
   local hl = style.line_highlight
@@ -400,12 +411,13 @@ local BADGE_ICON = nerdfonts_symbols.utf8["dev-git"]
 -- renderer.draw_glyph draws from the outline: the size doesn't matter
 local badge_font = renderer.font.load(nerdfonts_symbols.path, 12)
 
--- A submodule's folder icon gets a git badge at its lower right corner, ringed
--- with the row's color to set it apart from the icon
+-- A repository's folder icon (a submodule's, or the project's) gets a git badge
+-- at its lower right corner, ringed with the row's color to set it apart from
+-- the icon
 local draw_item_icon = TreeView.draw_item_icon
 function TreeView:draw_item_icon(item, active, hovered, x, y, w, h)
   local advance = draw_item_icon(self, item, active, hovered, x, y, w, h)
-  if submodule_of(item) then
+  if has_badge(item) then
     local icon, font = self:get_item_icon(item, active, hovered)
     local th = font:get_height()
     local d = th * 0.5
