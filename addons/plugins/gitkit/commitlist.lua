@@ -5,7 +5,6 @@ local style = require "core.style"
 local View = require "core.view"
 local ResultsList = require "core.resultslist"
 local git = require "plugins.gitkit.git"
-local diff = require "plugins.gitkit.diff"
 local revision = require "plugins.gitkit.revision"
 local CommitView = require "plugins.gitkit.commitview"
 
@@ -29,6 +28,7 @@ CommitList.context = "session"
 ---@field time? integer
 ---@field refs? string Branches and tags pointing at it, as git log's %D
 ---@field subject string
+---@field path? string In a file's history, the file's name in this commit
 
 -- the key a commit is found by after a refresh
 local function commit_key(commit)
@@ -197,35 +197,46 @@ function CommitList:load(root, path, keep)
     if changed ~= "" then
       table.insert(commits, { subject = "Uncommitted changes" })
     end
-    local paths = path and { "--", path } or {}
-    local args = { "log", "--format=%H%x1f%h%x1f%an%x1f%at%x1f%D%x1f%s%x1e",
+    -- each commit starts with \30; in a file's history, the file's name in
+    -- it follows its fields (--name-only), as --follow tracks renames
+    local args = { "log", "--format=%x1e%H%x1f%h%x1f%an%x1f%at%x1f%D%x1f%s%x1f",
                    "-n", tostring(config.plugins.gitkit.max_commits) }
-    if path then table.insert(args, "--follow") end
-    for _, a in ipairs(paths) do table.insert(args, a) end
+    if path then
+      for _, a in ipairs({ "--follow", "--name-only", "--", path }) do table.insert(args, a) end
+    end
+    local function add(rec)
+      local hash, short, author, time, refs, subject, name =
+        rec:match("^(%x+)\31([^\31]*)\31([^\31]*)\31(%d*)\31([^\31]*)\31([^\31]*)\31%s*(.-)%s*$")
+      if hash then
+        table.insert(commits, {
+          hash = hash, short = short, author = author, time = tonumber(time),
+          refs = refs ~= "" and refs or nil, subject = subject,
+          path = path and (name:match("^[^\n]+") or path) or nil,
+        })
+      end
+    end
     local buffer = ""
     local _, err = git.run(root, args, {
       cancelled = function() return not current() end,
       on_data = function(chunk)
         buffer = buffer .. chunk
+        -- the commits before the last \30 are complete
         local pos = 1
         while true do
-          local e = buffer:find("\30", pos, true)
-          if not e then break end
-          local rec = buffer:sub(pos, e - 1):gsub("^\n", "")
-          local hash, short, author, time, refs, subject =
-            rec:match("^(%x+)\31([^\31]*)\31([^\31]*)\31(%d*)\31([^\31]*)\31(.*)$")
-          if hash then
-            table.insert(commits, {
-              hash = hash, short = short, author = author, time = tonumber(time),
-              refs = refs ~= "" and refs or nil, subject = subject,
-            })
+          local s = buffer:find("\30", pos, true)
+          local e = s and buffer:find("\30", s + 1, true)
+          if not e then
+            pos = s or #buffer + 1
+            break
           end
-          pos = e + 1
+          add(buffer:sub(s + 1, e - 1))
+          pos = e
         end
         buffer = buffer:sub(pos)
         if not keep then core.redraw = true end
       end,
     })
+    if current() and buffer:sub(1, 1) == "\30" then add(buffer:sub(2)) end
     if not current() then return end
     self.loading = false
     self.signature = signature
@@ -244,21 +255,20 @@ function CommitList:replace_commits(commits)
   self.commits = commits
   self.hovered_idx = 0
   self.selected_idx = 0
-  if not key then return end
-  for i, c in ipairs(commits) do
+  for i, c in ipairs(key and commits or {}) do
     if commit_key(c) == key then
       self.selected_idx = i
       if self.scroll.to.y > 0 then
         local dy = (i - old_idx) * self:get_line_height()
         self.scroll.y, self.scroll.to.y = self.scroll.y + dy, self.scroll.to.y + dy
       end
-      local cv = self:get_commit_view()
-      if key == "uncommitted" and cv and cv.shown_key == key then
-        self:show_commit(i, { refresh = true })
-      end
-      return
+      break
     end
   end
+  -- uncommitted changes, or another comparison with the working tree, may
+  -- have changed
+  local cv = self:get_commit_view()
+  if cv and cv:shows_working_tree() then cv:reload() end
 end
 
 ---Lists them again, keeping the selection.
@@ -350,39 +360,19 @@ function CommitList:show_commit(idx, opts)
   if not commit then return end
   local refresh = opts and opts.refresh
   local cv = refresh and self:get_commit_view() or place_commit_view(self)
-  cv.shown_key = commit_key(commit)
-  cv.generation = (cv.generation or 0) + 1
-  local generation = cv.generation
-  local root, path = self.root, self.path
-  cv.loading = true
-  core.add_thread(function()
-    local args
-    local opts = { "--stat=120", "--patch", "--src-prefix=a/", "--dst-prefix=b/", "--no-ext-diff" }
-    if commit.hash then
-      args = { "show", "--format=medium", "--diff-merges=first-parent" }
-    else
-      args = { "diff", "HEAD" }
-    end
-    for _, a in ipairs(opts) do table.insert(args, a) end
-    if commit.hash then table.insert(args, commit.hash) end
-    local out, err, truncated = git.run(root, args, {
-      max_bytes = config.plugins.gitkit.max_diff_bytes,
-      cancelled = function() return cv.generation ~= generation end,
-    })
-    if cv.generation ~= generation then return end
-    cv.loading = false
-    if not out then
-      core.error("git %s: %s", args[1], err)
-      return
-    end
-    local result = diff.parse(out, commit.hash ~= nil, truncated)
-    local title = commit.hash and ("Commit " .. revision.short(commit.hash)) or "Uncommitted"
-    cv:set_result(result, {
-      root = root, rev = commit.hash, parent = commit.hash and commit.hash .. "^" or "HEAD",
-      title = title,
-    }, refresh)
-    if path and not refresh then cv:scroll_to_file(path) end
-  end)
+  if not cv then return end
+  local spec = commit.hash and { rev = commit.hash, title = "Commit " .. revision.short(commit.hash) }
+    or { from = "HEAD", title = "Uncommitted" }
+  spec.key = commit_key(commit)
+  cv:show_diff(self.root, spec, { keep_place = refresh, scroll_to = commit.path or self.path })
+end
+
+---Shows a comparison (see gitkit.commitview.show_diff) in the commit view,
+---made if needed; in a file's history, scrolled to the file's patch.
+---@param spec gitkit.diffspec
+---@param scroll_to? string
+function CommitList:show_comparison(spec, scroll_to)
+  place_commit_view(self):show_diff(self.root, spec, { scroll_to = scroll_to or self.path })
 end
 
 -- core.resultslist's, with commits for files

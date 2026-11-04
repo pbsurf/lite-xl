@@ -1,10 +1,12 @@
 local core = require "core"
 local common = require "core.common"
+local config = require "core.config"
 local style = require "core.style"
 local syntax = require "core.syntax"
 local tokenizer = require "core.tokenizer"
 local DocView = require "core.docview"
 local ReadDoc = require "plugins.gitkit.readdoc"
+local git = require "plugins.gitkit.git"
 local diff = require "plugins.gitkit.diff"
 local revision = require "plugins.gitkit.revision"
 
@@ -24,9 +26,21 @@ CommitView.context = "session"
 
 ---@class gitkit.commitview.meta
 ---@field root string The repository's top directory
----@field rev? string The commit's hash; nil for uncommitted changes
+---@field rev? string The revision its new side is (the commit's hash); nil
+---for the working tree
 ---@field parent? string The revision its old side is ("HEAD" if uncommitted)
 ---@field title string The tab's title
+---@field spec? gitkit.diffspec What it shows
+
+---What a commit view shows: a commit, as `git show` does, or a comparison of
+---two revisions, or of one with the working tree, as `git diff` does.
+---@class gitkit.diffspec
+---@field rev? string A commit, shown with its message
+---@field from? string Else the old side of a comparison
+---@field to? string and its new side; nil for the working tree
+---@field paths? string[] Only these files (as git names them)
+---@field title string The tab's title
+---@field key? string The commit list's key of what's shown, if it's one of its rows
 
 -- Searchable with search_ui (ctrl+f), as a terminal is: core's find takes only
 -- plain DocViews ("core.docview!"), and search_ui other views through this
@@ -64,6 +78,81 @@ function CommitView:set_result(result, meta, keep_place)
     self.scroll.y, self.scroll.to.y = 0, 0
   end
   core.redraw = true
+end
+
+---Shows what `spec` says, of the repository at `root` (git asked in the
+---background). `opts.keep_place`: shown again (refreshed), scrolled and with
+---the caret where it was; `opts.scroll_to`: a file (as git names it) to scroll
+---to the patch of.
+---@param root string
+---@param spec gitkit.diffspec
+---@param opts? { keep_place?: boolean, scroll_to?: string }
+function CommitView:show_diff(root, spec, opts)
+  opts = opts or {}
+  self.shown_key = spec.key
+  self.generation = (self.generation or 0) + 1
+  local generation = self.generation
+  self.loading = true
+  core.add_thread(function()
+    local args
+    if spec.rev then
+      args = { "show", "--format=medium", "--diff-merges=first-parent" }
+    else
+      args = { "diff" }
+    end
+    for _, a in ipairs({ "--stat=120", "--patch", "--src-prefix=a/", "--dst-prefix=b/",
+                         "--no-ext-diff" }) do
+      table.insert(args, a)
+    end
+    table.insert(args, spec.rev or spec.from)
+    if spec.to then table.insert(args, spec.to) end
+    if spec.paths then
+      table.insert(args, "--")
+      for _, p in ipairs(spec.paths) do table.insert(args, p) end
+    end
+    local out, err, truncated = git.run(root, args, {
+      max_bytes = config.plugins.gitkit.max_diff_bytes,
+      cancelled = function() return self.generation ~= generation end,
+    })
+    if self.generation ~= generation then return end
+    self.loading = false
+    if not out then
+      core.error("git %s: %s", args[1], err)
+      return
+    end
+    -- a comparison of the same: said, rather than an empty view
+    if out == "" and not spec.rev then out = "No differences.\n" end
+    self:set_result(diff.parse(out, spec.rev ~= nil, truncated), {
+      root = root, rev = spec.rev or spec.to,
+      parent = spec.rev and spec.rev .. "^" or spec.from,
+      title = spec.title, spec = spec,
+    }, opts.keep_place)
+    if opts.scroll_to and not opts.keep_place then self:scroll_to_file(opts.scroll_to) end
+  end)
+end
+
+---Shows the same again, as it is now (a comparison with the working tree,
+---after changes in it), keeping its place.
+function CommitView:reload()
+  local meta = self.meta
+  if meta.root and meta.spec then self:show_diff(meta.root, meta.spec, { keep_place = true }) end
+end
+
+---Whether its new side is the working tree.
+---@return boolean
+function CommitView:shows_working_tree()
+  local spec = self.meta.spec
+  return spec ~= nil and not spec.rev and not spec.to
+end
+
+---The file whose patch, or stat line, is at `line`, if any.
+---@param line integer
+---@return gitkit.diff.file?
+function CommitView:get_file_at(line)
+  local info = self.infos[line]
+  if not info then return end
+  if info.kind == "stat" then return self.result.files[info.stat] end
+  return info.file
 end
 
 function CommitView:get_name()
