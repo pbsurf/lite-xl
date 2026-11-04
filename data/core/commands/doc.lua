@@ -113,45 +113,56 @@ local function set_cursor(dv, x, y, snap_type)
 end
 
 local function line_comment(comment, line1, col1, line2, col2)
-  local start_comment = (type(comment) == 'table' and comment[1] or comment) .. " "
-  local end_comment = (type(comment) == 'table' and " " .. comment[2])
+  local start_comment = type(comment) == 'table' and comment[1] or comment
+  local end_comment = type(comment) == 'table' and comment[2]
   local uncomment = true
   local start_offset = math.huge
   for line = line1, line2 do
     local text = doc().lines[line]
     local s = text:find("%S")
     if s then
-      local cs, ce = text:find(start_comment, s, true)
-      if cs ~= s then
+      -- commented, with or without a space after the comment start
+      if text:sub(s, s + #start_comment - 1) ~= start_comment then
         uncomment = false
       end
       start_offset = math.min(start_offset, s)
     end
   end
 
+  -- how far the change moves columns after start_offset on line1 and line2
+  local shift = {}
   local end_line = col2 == #doc().lines[line2]
   for line = line1, line2 do
     local text = doc().lines[line]
     local s = text:find("%S")
     if s and uncomment then
-      if end_comment and text:sub(#text - #end_comment, #text - 1) == end_comment then
-        doc():remove(line, #text - #end_comment, line, #text)
-      end
-      local cs, ce = text:find(start_comment, s, true)
-      if ce then
-        doc():remove(line, cs, line, ce + 1)
-      end
-    elseif s then
-      doc():insert(line, start_offset, start_comment)
       if end_comment then
-        doc():insert(line, #doc().lines[line], " " .. comment[2])
+        -- the comment end, and up to one space before it
+        local e = #text - #end_comment
+        if text:sub(e, #text - 1) == end_comment then
+          if text:sub(e - 1, e - 1) == " " then e = e - 1 end
+          doc():remove(line, e, line, #text)
+          if line == line2 then shift.end_comment = #text - e end
+        end
+      end
+      -- the comment start, and up to one space after it
+      local ce = s + #start_comment - 1
+      if text:sub(ce + 1, ce + 1) == " " then ce = ce + 1 end
+      doc():remove(line, s, line, ce + 1)
+      shift[line] = -(ce + 1 - s)
+    elseif s then
+      doc():insert(line, start_offset, start_comment .. " ")
+      shift[line] = #start_comment + 1
+      if end_comment then
+        doc():insert(line, #doc().lines[line], " " .. end_comment)
+        if line == line2 then shift.end_comment = #end_comment + 1 end
       end
     end
   end
-  col1 = col1 + (col1 > start_offset and #start_comment or 0) * (uncomment and -1 or 1)
-  col2 = col2 + (col2 > start_offset and #start_comment or 0) * (uncomment and -1 or 1)
-  if end_comment and end_line then
-    col2 = col2 + #end_comment * (uncomment and -1 or 1)
+  col1 = col1 + (col1 > start_offset and shift[line1] or 0)
+  col2 = col2 + (col2 > start_offset and shift[line2] or 0)
+  if end_line and shift.end_comment then
+    col2 = col2 + shift.end_comment * (uncomment and -1 or 1)
   end
   return line1, col1, line2, col2
 end
