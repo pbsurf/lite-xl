@@ -28,6 +28,12 @@ CommitView.context = "session"
 ---@field parent? string The revision its old side is ("HEAD" if uncommitted)
 ---@field title string The tab's title
 
+-- Searchable with search_ui (ctrl+f), as a terminal is: core's find takes only
+-- plain DocViews ("core.docview!"), and search_ui other views through this
+function CommitView:get_search_doc()
+  return self.doc
+end
+
 function CommitView:new()
   CommitView.super.new(self, ReadDoc("Commit"))
   self:set_result(diff.parse("", false), { title = "Commit" })
