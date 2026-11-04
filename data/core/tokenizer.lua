@@ -11,7 +11,11 @@ local bad_patterns = {}
 local ascii
 local find, sub, len, byte = string.ufind, string.usub, string.ulen, string.ubyte
 
+-- A pattern's type is a table, one per capture, also when a pair's end, the
+-- text between its delimiters or a subsyntax's end is pushed with it: those
+-- take the first
 local function push_token(t, type, text)
+  if _G.type(type) == "table" then type = type[1] end
   type = type or "normal"
   local prev_type = t[#t-1]
   local prev_text = t[#t]
