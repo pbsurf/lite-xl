@@ -30,7 +30,8 @@ CommitView.context = "session"
 ---@field rev? string The revision its new side is (the commit's hash); nil
 ---for the working tree
 ---@field parent? string The revision its old side is ("HEAD" if uncommitted)
----@field title string The tab's title
+---@field title string The tab's title (after the repository's name, unless
+---it names a file)
 ---@field spec? gitkit.diffspec What it shows
 
 ---What a commit view shows: a commit, as `git show` does, or a comparison of
@@ -40,7 +41,7 @@ CommitView.context = "session"
 ---@field from? string Else the old side of a comparison
 ---@field to? string and its new side; nil for the working tree
 ---@field paths? string[] Only these files (as git names them)
----@field title string The tab's title
+---@field title string The tab's title (see gitkit.commitview.meta)
 ---@field key? string The commit list's key of what's shown, if it's one of its rows
 
 -- Searchable with search_ui (ctrl+f), as a terminal is: core's find takes only
@@ -195,12 +196,54 @@ function CommitView:get_file_at(line)
   return info.file
 end
 
+-- The title, after the repository's name unless it names a file
 function CommitView:get_name()
-  return self.meta.title
+  local meta = self.meta
+  if meta.root and not (meta.spec and meta.spec.paths) then
+    return common.basename(meta.root) .. " " .. meta.title
+  end
+  return meta.title
 end
 
+-- the repository (the tab's tooltip)
 function CommitView:get_filename()
-  return self.meta.title
+  return self.meta.root and common.home_encode(self.meta.root) or self.meta.title
+end
+
+-- For the tab's tooltip: a commit's subject, author and date, else what's
+-- compared; the files it's limited to; how many files changed.
+function CommitView:get_tab_tooltip_info()
+  local spec, t = self.meta.spec, {}
+  if not spec then return t end
+  if spec.rev then
+    local subject, author, date
+    for i, info in ipairs(self.infos) do
+      local line = self.doc.lines[i]:gsub("\n$", "")
+      if info.kind == "header" then
+        author = author or line:match("^Author:%s*(.-)%s*<") or line:match("^Author:%s*(.-)%s*$")
+        date = date or line:match("^Date:%s*(.-)%s*$")
+      elseif info.kind == "message" then
+        subject = line:match("^%s*(.-)%s*$")
+        break
+      end
+    end
+    table.insert(t, subject)
+    table.insert(t, author)
+    table.insert(t, date)
+  elseif not spec.to and spec.from == "HEAD" then
+    table.insert(t, "uncommitted changes")
+  else
+    table.insert(t, revision.short(spec.from) .. " compared with "
+      .. (spec.to and revision.short(spec.to) or "the working tree"))
+  end
+  if spec.paths then table.insert(t, table.concat(spec.paths, ", ")) end
+  if self.loading then
+    table.insert(t, "loading…")
+  elseif #self.result.files > 0 then
+    local n = #self.result.files
+    table.insert(t, n .. (n == 1 and " file" or " files") .. " changed")
+  end
+  return t
 end
 
 -- not restored with the workspace: the commit list that shows commits in it isn't

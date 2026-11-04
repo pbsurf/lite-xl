@@ -343,8 +343,8 @@ function CommitList:show_commit(idx, opts)
   local refresh = opts and opts.refresh
   local cv = refresh and self:get_commit_view() or CommitView.place(self)
   if not cv then return end
-  local spec = commit.hash and { rev = commit.hash, title = "Commit " .. revision.short(commit.hash) }
-    or { from = "HEAD", title = "Uncommitted" }
+  local spec = commit.hash and { rev = commit.hash, title = revision.short(commit.hash) }
+    or { from = "HEAD", title = "uncommitted" }
   spec.key = commit_key(commit)
   cv:show_diff(self.root, spec, { keep_place = refresh, scroll_to = commit.path or self.path })
 end
