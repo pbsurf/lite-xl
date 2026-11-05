@@ -40,6 +40,12 @@ local shapes = require "libraries.shapes"
 
 local menubar = {}
 
+-- whether one of the debug plugin's views is open
+local function debug_view_open(id)
+  local debug = package.loaded["plugins.debug"]
+  return debug and debug.find_view(id) ~= nil
+end
+
 config.plugins.menubar = common.merge({
   ---@type plugins.menubar.menu[]
   menus = {
@@ -271,6 +277,13 @@ config.plugins.menubar = common.merge({
       return debugger and debugger:should_show_drawer()
     end,
     ["line-wrapping:toggle"] = function() return core.active_view.wrapped_settings ~= nil end,
+    -- the debugger's views: open (a tab somewhere)
+    ["debug:show-call-stack"] = function() return debug_view_open("stack") end,
+    ["debug:show-variables"] = function() return debug_view_open("variables") end,
+    ["debug:show-watches"] = function() return debug_view_open("watches") end,
+    ["debug:show-threads"] = function() return debug_view_open("threads") end,
+    ["debug:show-breakpoints"] = function() return debug_view_open("breakpoints") end,
+    ["debug:show-program"] = function() return debug_view_open("program") end,
     ["draw-whitespace:toggle"] = function() return config.plugins.drawwhitespace.enabled end,
     ["lineguide:toggle"] = function() return config.plugins.lineguide.enabled end,
     ["highlight-selection:toggle"] = function() return config.plugins.highlight_selection.enabled end,
