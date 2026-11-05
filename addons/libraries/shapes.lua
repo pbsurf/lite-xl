@@ -51,4 +51,66 @@ function shapes.checkmark(x, y, size, color, thickness)
   }, color, thickness or math.max(SCALE, size / 7))
 end
 
+-- a quarter circle as a cubic Bézier: control points this far along the tangents
+local KAPPA = 0.5522847498
+
+---Draw a filled circle (or its outline, if `thickness` is given).
+---@param cx number
+---@param cy number
+---@param r number
+---@param color renderer.color
+---@param thickness? number
+function shapes.circle(cx, cy, r, color, thickness)
+  local k = r * KAPPA
+  renderer.draw_path({
+    "M", cx + r, cy,
+    "C", cx + r, cy + k, cx + k, cy + r, cx, cy + r,
+    "C", cx - k, cy + r, cx - r, cy + k, cx - r, cy,
+    "C", cx - r, cy - k, cx - k, cy - r, cx, cy - r,
+    "C", cx + k, cy - r, cx + r, cy - k, cx + r, cy,
+    "Z",
+  }, color, thickness)
+end
+
+---Draw an arrow pointing right (a current line's marker), filled, fitted in the
+---rect x, y, w, h: a shaft and a head, or with `head_only` just a triangle.
+---@param x number
+---@param y number
+---@param w number
+---@param h number
+---@param color renderer.color
+---@param head_only? boolean
+function shapes.arrow(x, y, w, h, color, head_only)
+  local cy = y + h / 2
+  if head_only then
+    renderer.draw_path({ "M", x, y, "L", x + w, cy, "L", x, y + h, "Z" }, color)
+    return
+  end
+  local head = math.min(w, h * 0.9) -- the head's length
+  local shaft = h * 0.4 / 2 -- half the shaft's thickness
+  local hx = x + w - head
+  renderer.draw_path({
+    "M", x, cy - shaft, "L", hx, cy - shaft, "L", hx, y, "L", x + w, cy,
+    "L", hx, y + h, "L", hx, cy + shaft, "L", x, cy + shaft, "Z",
+  }, color)
+end
+
+---Draw a triangle pointing right, or down if `down` (a tree's expander), fitted
+---in the square x, y, size, size.
+---@param x number
+---@param y number
+---@param size number
+---@param color renderer.color
+---@param down? boolean
+function shapes.expander(x, y, size, color, down)
+  local a, b = size * 0.2, size * 0.8
+  if down then
+    renderer.draw_path({ "M", x + a, y + size * 0.32, "L", x + b, y + size * 0.32,
+      "L", x + size / 2, y + size * 0.72, "Z" }, color)
+  else
+    renderer.draw_path({ "M", x + size * 0.32, y + a, "L", x + size * 0.72, y + size / 2,
+      "L", x + size * 0.32, y + b, "Z" }, color)
+  end
+end
+
 return shapes
