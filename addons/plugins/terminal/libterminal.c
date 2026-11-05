@@ -11,6 +11,9 @@
     #define PSEUDOCONSOLE_INHERIT_CURSOR 0x1
   #endif
 #else
+  #ifndef _GNU_SOURCE
+    #define _GNU_SOURCE // posix_openpt, ptsname
+  #endif
   #include <unistd.h>
   #include <fcntl.h>
   #include <sys/ioctl.h>
@@ -215,6 +218,7 @@ typedef struct {
     int closing;
   #else
     int master;                                        // FD for pty.
+    int slave;                                         // Its slave, held open by open_pty() (0: none).
     pid_t pid;                                         // pid for shell.
   #endif
 } terminal_t;
@@ -1181,6 +1185,10 @@ static int terminal_close_pty(terminal_t* terminal) {
       terminal->process_information.hThread = NULL;
     }
   #else
+    if (terminal->slave) {
+      close(terminal->slave);
+      terminal->slave = 0;
+    }
     if (terminal->master) {
       close(terminal->master);
       terminal->master = 0;
@@ -1352,6 +1360,24 @@ static int set_error_step(const char* step) { strncpy(error_step, step, sizeof(e
   }
 #endif
 
+#ifndef _WIN32
+  // A new pty's settings: as a terminal emulator's, cooked with echo.
+  static void pty_termios(struct termios* term) {
+    memset(term, 0, sizeof(*term));
+    term->c_cc[VINTR] = 3;
+    term->c_cc[VSTART] = '\x13';
+    term->c_cc[VSTOP] = '\x11';
+    term->c_cc[VSUSP] = 26;
+    term->c_cc[VERASE] = '\x7F';
+    term->c_cc[VEOL] = 0;
+    term->c_cc[VEOF] = 4;
+    term->c_lflag |= ISIG | ECHO | ICANON | IEXTEN | ECHOE | ECHOK | ECHOCTL | ECHOKE;
+    term->c_cflag |= CS8 | CREAD;
+    term->c_iflag |= IUTF8 | ICRNL | IXON;
+    term->c_oflag |= OPOST | ONLCR | NL0 | CR0 | TAB0 | BS0 | VT0 | FF0;
+  }
+#endif
+
 // Starts a child on a new pty (ConPTY on Windows) of `columns` by `lines`.
 // 0 on success.
 // `continues`: the program's output goes on after what's on the screen (spawned after
@@ -1424,18 +1450,8 @@ static int terminal_spawn(terminal_t* terminal, int columns, int lines, const ch
       return -1;
     }
   #else
-    struct termios term = {0};
-    term.c_cc[VINTR] = 3;
-    term.c_cc[VSTART] = '\x13';
-    term.c_cc[VSTOP] = '\x11';
-    term.c_cc[VSUSP] = 26;
-    term.c_cc[VERASE] = '\x7F';
-    term.c_cc[VEOL] = 0;
-    term.c_cc[VEOF] = 4;
-    term.c_lflag |= ISIG | ECHO | ICANON | IEXTEN | ECHOE | ECHOK | ECHOCTL | ECHOKE;
-    term.c_cflag |= CS8 | CREAD;
-    term.c_iflag |= IUTF8 | ICRNL | IXON;
-    term.c_oflag |= OPOST | ONLCR | NL0 | CR0 | TAB0 | BS0 | VT0 | FF0;
+    struct termios term;
+    pty_termios(&term);
     struct winsize size = { .ws_row = lines, .ws_col = columns };
     terminal->pid = forkpty(&terminal->master, NULL, &term, columns > 0 ? &size : NULL);
     if (terminal->pid == -1 && set_error_step("forkpty")) {
@@ -1701,17 +1717,8 @@ static int f_terminal_new(lua_State* L) {
   return 1;
 }
 
-// terminal:spawn(term, path, arguments, environment): runs another program
-// in the terminal, after the last one exited (or in a "DUMMY" one), on a new
-// pty: its output goes on after what's there. Modes the last one set are reset.
-static int f_terminal_spawn(lua_State* L) {
-  terminal_t* terminal = lua_toterminal(L, 1);
-  const char* term_env = luaL_checkstring(L, 2);
-  const char* path = luaL_checkstring(L, 3);
-  terminal_reap(terminal);
-  if (terminal->mode == MODE_PTY && !terminal->has_exited)
-    return luaL_error(L, "the terminal's program is still running");
-  terminal_close_pty(terminal);
+// Back to the normal buffer, with the modes a program set reset, for the next one.
+static void terminal_reset_modes(terminal_t* terminal) {
   if (terminal->current_view != VIEW_NORMAL_BUFFER)
     terminal_switch_buffer(terminal, VIEW_NORMAL_BUFFER);
   view_t* view = &terminal->views[VIEW_NORMAL_BUFFER];
@@ -1725,6 +1732,67 @@ static int f_terminal_spawn(lua_State* L) {
   terminal->reporting_focus = 0;
   terminal->paste_mode = PASTE_NORMAL;
   terminal->buffered_sequence[0] = 0;
+}
+
+// terminal:open_pty(): a new pty with no program of the terminal's on it, for
+// another process to open by the path returned (a debugger's program, through
+// gdb's -inferior-tty-set): what's written to it shows as a program's output,
+// and input goes to it. The terminal holds the slave open, so its output
+// doesn't end when a program on it exits, and another can open it; it closes
+// with the pty (terminal:close, or spawn). exited() is -1, -1: there's no
+// program of its own. As spawn, after the last program exited. nil on Windows.
+static int f_terminal_open_pty(lua_State* L) {
+  terminal_t* terminal = lua_toterminal(L, 1);
+  #if _WIN32
+    return 0;
+  #else
+    terminal_reap(terminal);
+    if (terminal->mode == MODE_PTY && !terminal->has_exited)
+      return luaL_error(L, "the terminal's program is still running");
+    terminal_close_pty(terminal);
+    terminal_reset_modes(terminal);
+    int master = posix_openpt(O_RDWR | O_NOCTTY | O_CLOEXEC);
+    const char* name = NULL;
+    int slave = -1;
+    if (master != -1 && grantpt(master) == 0 && unlockpt(master) == 0 && (name = ptsname(master)))
+      slave = open(name, O_RDWR | O_NOCTTY | O_CLOEXEC);
+    if (slave == -1) {
+      int error = errno;
+      if (master != -1)
+        close(master);
+      terminal->mode = MODE_DUMMY;
+      return luaL_error(L, "can't open a pty: %s", strerror(error));
+    }
+    struct termios term;
+    pty_termios(&term);
+    tcsetattr(slave, TCSANOW, &term);
+    struct winsize size = { .ws_row = terminal->lines, .ws_col = terminal->columns };
+    ioctl(master, TIOCSWINSZ, &size);
+    fcntl(master, F_SETFL, fcntl(master, F_GETFL, 0) | O_NONBLOCK);
+    terminal->mode = MODE_PTY;
+    terminal->master = master;
+    terminal->slave = slave;
+    terminal->pid = 0;
+    terminal->output_ended = 0;
+    terminal->has_exited = 1;
+    terminal->exit_code = terminal->exit_signal = -1;
+    lua_pushstring(L, name);
+    return 1;
+  #endif
+}
+
+// terminal:spawn(term, path, arguments, environment): runs another program
+// in the terminal, after the last one exited (or in a "DUMMY" one), on a new
+// pty: its output goes on after what's there. Modes the last one set are reset.
+static int f_terminal_spawn(lua_State* L) {
+  terminal_t* terminal = lua_toterminal(L, 1);
+  const char* term_env = luaL_checkstring(L, 2);
+  const char* path = luaL_checkstring(L, 3);
+  terminal_reap(terminal);
+  if (terminal->mode == MODE_PTY && !terminal->has_exited)
+    return luaL_error(L, "the terminal's program is still running");
+  terminal_close_pty(terminal);
+  terminal_reset_modes(terminal);
   char* arguments[256] = {0};
   char* environment[256] = {0};
   lua_tospawnargs(L, 4, path, arguments, environment);
@@ -1990,6 +2058,7 @@ static const luaL_Reg terminal_api[] = {
   { "update",              f_terminal_update                 },
   { "exited",              f_terminal_exited                 },
   { "spawn",               f_terminal_spawn                  },
+  { "open_pty",            f_terminal_open_pty               },
   { "output",              f_terminal_output                 },
   { "scrolled",            f_terminal_scrolled               },
   { "kill",                f_terminal_kill                   },
