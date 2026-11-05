@@ -133,6 +133,9 @@ function StackView:open_selected()
 end
 
 function StackView:row_at(x, y)
+  -- a split's views all get the mouse's moves: only rows under it, in this one
+  local p, s = self.position, self.size
+  if x < p.x or x >= p.x + s.x or y < p.y or y >= p.y + s.y then return nil end
   local _, oy = self:get_content_offset()
   local idx = math.floor((y - oy) / self:get_line_height())
   return idx >= 1 and idx <= #self.rows and idx or nil
