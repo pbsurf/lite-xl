@@ -15,7 +15,7 @@ local Gdb = Object:extend()
 Gdb.name = "gdb"
 
 ---What the views and commands may rely on (see session.lua).
-Gdb.capabilities = { pause = true, run_to = true, step_out = true, evaluate = true }
+Gdb.capabilities = { pause = true, run_to = true, step_out = true, evaluate = true, threads = true, watch = true }
 
 -- most children of a variable listed (a big array's or container's)
 local MAX_CHILDREN = 500
@@ -262,6 +262,8 @@ function Gdb:set_breakpoints(file, lines)
       local res, err = self:ask("-break-insert -f " .. mi.quote(file .. ":" .. line))
       if res and res.bkpt then
         bp = { number = res.bkpt.number, actual = bkpt_line(res.bkpt), pending = res.bkpt.pending ~= nil }
+        -- pending: no code there, in the program or the libraries loaded so far
+        if bp.pending then bp.error = "not in the program (pending)" end
         current[line] = bp
       else
         bp = { error = err }
@@ -365,6 +367,48 @@ function Gdb:variable(name, v, ref_info)
   return var
 end
 
+---An expression as a variable with its own varobj, in a frame: a struct's or
+---array's value is its contents, as gdb prints them, rather than "{...}".
+---@return debug.variable?
+---@return string? error
+function Gdb:root_variable(expression, thread_id, level)
+  local created, err = self:ask("-var-create" .. thread_frame(thread_id, level) .. " - * " .. mi.quote(expression))
+  if not created then
+    -- its message says only that it couldn't; evaluating says why
+    local _, why = self:evaluate(expression, thread_id, level)
+    return nil, why or err
+  end
+  table.insert(self.varobjs, created.name)
+  local var = self:variable(expression, created, { kind = "var", varobj = created.name })
+  if var.value and (var.value:find("^{%.%.%.}$") or var.value:find("^%[%d+%]$") or var.value == "") then
+    local value, why = self:evaluate(expression, thread_id, level)
+    if value then
+      var.value = value
+    elseif var.value == "" then
+      -- unreadable (an uninitialized pointer's target): why
+      return nil, why
+    end
+  end
+  return var
+end
+
+---An expression to watch, as a variable that unfolds.
+function Gdb:watch(expression, thread_id, level)
+  return self:root_variable(expression, thread_id, level)
+end
+
+---The threads, each with its innermost frame.
+---@return debug.thread[]?
+function Gdb:threads()
+  local res, err = self:ask("-thread-info")
+  if not res then return nil, err end
+  local threads = {}
+  for _, t in ipairs(res.threads or {}) do
+    table.insert(threads, { id = tonumber(t.id), name = t.name, target_id = t["target-id"], frame = frame_of(t.frame) })
+  end
+  return threads
+end
+
 ---A scope's or a variable's variables: { name, value, type, ref (if it has
 ---children) }.
 ---@param ref integer
@@ -379,19 +423,7 @@ function Gdb:variables(ref)
     if not res then return nil, err end
     for _, v in ipairs(res.variables or {}) do
       if (v.arg == "1") == t.args then
-        local created = self:ask("-var-create" .. thread_frame(t.thread, t.level) .. " - * " .. mi.quote(v.name))
-        if created then
-          table.insert(self.varobjs, created.name)
-          local var = self:variable(v.name, created, { kind = "var", varobj = created.name })
-          -- a struct's value is "{...}": its contents, as gdb prints them
-          if var.value and var.value:find("^{%.%.%.}$") or var.value and var.value:find("^%[%d+%]$") then
-            local e = self:ask("-data-evaluate-expression" .. thread_frame(t.thread, t.level) .. " " .. mi.quote(v.name))
-            if e and e.value then var.value = e.value end
-          end
-          table.insert(vars, var)
-        else
-          table.insert(vars, { name = v.name, value = "<unavailable>" })
-        end
+        table.insert(vars, self:root_variable(v.name, t.thread, t.level) or { name = v.name, value = "<unavailable>" })
       end
     end
   else

@@ -211,8 +211,12 @@ another repository's version, uninstalls removing dependents under `--assume-yes
   gutter sets a breakpoint (kept per project, following edits). Call Stack lists
   the frames with their arguments, those outside the project folded; Variables
   is a tree of the frame's arguments and locals, values changed since last
-  shown highlighted, step out shows the return value. The views are ordinary
-  tabs: in the bottom panel at first, kept where they're dragged. Scriptable from
+  shown highlighted, step out shows the return value. Watches evaluates
+  expressions (kept per project; "Add Watch" in the editor's context menu) the
+  same way; Threads lists the threads, each where it is in the project, to
+  switch to; Breakpoints lists them with their code, to disable or remove, and
+  says which the debugger couldn't place. The views are ordinary tabs: in the
+  bottom panel at first, kept where they're dragged. Scriptable from
   Lua (`require("plugins.debug").session`). Replaces debugger, still there for now.
 * **shapes:** antialiased shape helpers (squiggly underlines, circles, arrows) for plugins.
 * **qtcreator:** a light color theme matching Qt Creator's.

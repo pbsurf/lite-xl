@@ -36,8 +36,8 @@
     },
     {
       "id": "debug",
-      "description": "Debugger (gdb): the program in a terminal tab, breakpoints in the gutter, call stack and variables as ordinary tabs; runs the build target.",
-      "version": "0.1",
+      "description": "Debugger (gdb): the program in a terminal tab, breakpoints in the gutter; call stack, variables, watches, threads and breakpoints as ordinary tabs; runs the build target.",
+      "version": "0.2",
       "mod_version": "3",
       "path": "addons/plugins/debug",
       "dependencies": { "terminal": {}, "shapes": {}, "build": { "optional": true } }

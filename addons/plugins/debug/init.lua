@@ -71,19 +71,35 @@ style.debug = common.merge({
 ---@type debug.session?
 debug.session = nil
 
----The view classes, by id, in the order they're first shown.
-debug.view_ids = { "program", "stack", "variables" }
+---The views' ids, in the order they're first shown.
+debug.view_ids = { "program", "stack", "variables", "watches", "threads", "breakpoints" }
 local view_modules = {
   program = "plugins.debug.programview",
   stack = "plugins.debug.stackview",
   variables = "plugins.debug.variablesview",
+  watches = "plugins.debug.watchesview",
+  threads = "plugins.debug.threadsview",
+  breakpoints = "plugins.debug.breakpointsview",
 }
-local view_titles = { program = "Program", stack = "Call Stack", variables = "Variables" }
+-- shown by a session unless closed; the others once shown with their command
+-- (threads also once a program has several)
+local default_views = { program = true, stack = true, variables = true, watches = true }
 
 -- id -> the view (one each)
 local views = {}
--- ids of views closed: not reopened by a session until shown with their command
-local closed = storage.load("debug", "closed_views") or {}
+-- id -> "open" (shown by a session) or "closed" (not until shown with its
+-- command); nil for the default
+local view_state = storage.load("debug", "view_state") or {}
+
+local function set_view_state(id, state)
+  if view_state[id] == state then return end
+  view_state[id] = state
+  storage.save("debug", "view_state", view_state)
+end
+
+local function opens_with_session(id)
+  return view_state[id] == "open" or (view_state[id] == nil and default_views[id])
+end
 
 local function view_is_open(view)
   return core.root_view.root_node:get_node_for_view(view) ~= nil or panel.contains(view)
@@ -111,10 +127,7 @@ end
 
 ---Shows a view: where it is, or in the panel.
 function debug.show_view(id, focus)
-  if closed[id] then
-    closed[id] = nil
-    storage.save("debug", "closed_views", closed)
-  end
+  set_view_state(id, "open")
   panel.show(debug.get_view(id), { focus = focus })
 end
 
@@ -128,8 +141,7 @@ function Node:remove_view(root, view, ...)
       core.add_thread(function()
         if views[id] == view and not view_is_open(view) then
           views[id] = nil
-          closed[id] = true
-          storage.save("debug", "closed_views", closed)
+          set_view_state(id, "closed")
           if view.close then pcall(view.close, view) end
         end
       end)
@@ -142,7 +154,7 @@ end
 local function show_views()
   local active = core.active_view
   for _, id in ipairs(debug.view_ids) do
-    if not closed[id] and not debug.find_view(id) then
+    if opens_with_session(id) and not debug.find_view(id) then
       panel.show(debug.get_view(id), { focus = false })
     end
   end
@@ -202,9 +214,14 @@ local function on_event(name, session)
     local file, line = current_location()
     if file then show_location(file, line) end
     front_stack_once(session)
-  elseif name == "frame" then
+  elseif name == "frame" or name == "thread" then
     local file, line = current_location()
     if file then show_location(file, line) end
+  elseif name == "threads" then
+    -- a program with several: the threads, unless they were closed
+    if session.threads and #session.threads > 1 and view_state.threads == nil and not debug.find_view("threads") then
+      panel.show(debug.get_view("threads"), { focus = false })
+    end
   elseif name == "ended" then
     local program = debug.find_view("program")
     if program and program.terminal then
@@ -387,8 +404,14 @@ function DocView:draw_line_gutter(vline, x, y, width)
     local r = math.floor(self:get_font():get_height() * 0.32)
     breakpoints.load()
     local has = breakpoints.has(self.doc.abs_filename, line)
-    if has then
-      shapes.circle(cx, cy, r, style.debug.breakpoint)
+    if has and breakpoints.enabled(self.doc.abs_filename, line) then
+      -- faded if the debugger couldn't place it
+      local status = debug.is_active() and debug.session:get_breakpoint_status(self.doc.abs_filename, line)
+      shapes.circle(cx, cy, r, (status and not status.verified) and with_alpha(style.debug.breakpoint, 0.45)
+        or style.debug.breakpoint)
+    elseif has then
+      -- disabled
+      shapes.circle(cx, cy, r - SCALE / 2, style.debug.breakpoint, SCALE)
     elseif self.debug_hovered_line == line then
       -- where a click would set one
       shapes.circle(cx, cy, r, with_alpha(style.debug.breakpoint, 0.35))
@@ -536,6 +559,8 @@ command.add(nil, {
 })
 
 for _, id in ipairs(debug.view_ids) do
+  -- their commands are made as they load
+  if id ~= "program" then require(view_modules[id]) end
   command.add(nil, {
     ["debug:show-" .. id:gsub("stack", "call-stack")] = function() debug.show_view(id, true) end,
   })
@@ -568,6 +593,19 @@ if config.plugins.debug.keys then
   if idle then
     keymap.add { ["f9"] = "debug:toggle-breakpoint" }
   end
+end
+
+
+-- in the editor's context menu while debugging: the selection or the word
+-- clicked as a watch
+local menu_found, menu = pcall(require, "plugins.contextmenu")
+if menu_found then
+  menu:register(function()
+    return debug.is_active() and core.active_view:is(DocView)
+  end, {
+    menu.DIVIDER,
+    { text = "Add Watch", command = "debug:add-watch" },
+  })
 end
 
 

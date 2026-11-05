@@ -10,11 +10,16 @@ local shapes = require "libraries.shapes"
 ---The selected frame's arguments and locals, as a tree: structs, arrays and
 ---containers (through gdb's pretty printers) unfold into their members.
 ---Values that changed since they were last shown (at an earlier stop) are
----highlighted. What's unfolded
----stays so from stop to stop (by the frame's function and the variable's
----path). While the program runs, the last stop's values stay, dimmed.
+---highlighted. What's unfolded stays so from stop to stop (by the thread, the
+---frame's function and the variable's path). While the program runs, the last
+---stop's values stay, dimmed.
+---
+---Subclasses (the watches) give the tree's roots with fetch_roots().
 ---@class debug.variablesview : core.view
 local VariablesView = View:extend()
+
+-- its id in plugins.debug's views
+VariablesView.view_id = "variables"
 
 function VariablesView:new()
   VariablesView.super.new(self)
@@ -38,7 +43,7 @@ local function debug() return require "plugins.debug" end
 function VariablesView:get_name() return "Variables" end
 
 function VariablesView:get_workspace_state() return {} end
-function VariablesView:from_workspace_state() return debug().get_view("variables", self) end
+function VariablesView:from_workspace_state() return debug().get_view(self.view_id) end
 
 function VariablesView:get_line_height()
   return style.padding.y + math.max(style.font:get_height(), style.code_font:get_height())
@@ -70,11 +75,32 @@ function VariablesView:rebuild_rows()
   core.redraw = true
 end
 
--- what identifies a frame from stop to stop: its function, and its depth from
--- the outermost (so a call deeper doesn't change it)
-local function frame_key(session)
+-- what identifies a frame from stop to stop: its thread, its function, and
+-- its depth from the outermost (so a call deeper doesn't change it)
+function VariablesView.frame_key(session)
   local frame = session:get_frame()
-  return (#session.frames - session.frame_index) .. ":" .. frame.name
+  return tostring(session:thread_id()) .. ":" .. (#session.frames - session.frame_index) .. ":" .. frame.name
+end
+
+---A node for a variable, marked changed if its value differs from the one
+---last shown (at an earlier stop).
+---@param v debug.variable
+---@param key string
+---@param depth integer
+function VariablesView:make_node(session, v, key, depth)
+  local node = { name = v.name, value = v.value, type = v.type, ref = v.ref, key = key, depth = depth }
+  if v.value then
+    local seen = self.values[key]
+    if not seen then
+      self.values[key] = { value = v.value, generation = session.generation }
+    else
+      if seen.generation ~= session.generation then
+        seen.previous, seen.value, seen.generation = seen.value, v.value, session.generation
+      end
+      node.changed = seen.previous ~= nil and seen.previous ~= v.value
+    end
+  end
+  return node
 end
 
 -- fetches a node's children, and theirs that are unfolded; in a thread
@@ -83,21 +109,7 @@ function VariablesView:fetch(session, node)
   if not vars then return false end
   node.children = {}
   for _, v in ipairs(vars) do
-    local child = {
-      name = v.name, value = v.value, type = v.type, ref = v.ref,
-      key = node.key .. "/" .. v.name, depth = node.depth + 1,
-    }
-    if v.value then
-      local seen = self.values[child.key]
-      if not seen then
-        self.values[child.key] = { value = v.value, generation = session.generation }
-      else
-        if seen.generation ~= session.generation then
-          seen.previous, seen.value, seen.generation = seen.value, v.value, session.generation
-        end
-        child.changed = seen.previous ~= nil and seen.previous ~= v.value
-      end
-    end
+    local child = self:make_node(session, v, node.key .. "/" .. v.name, node.depth + 1)
     table.insert(node.children, child)
     if child.ref and self.expanded[child.key] then
       if self:fetch(session, child) == false then return false end
@@ -106,8 +118,24 @@ function VariablesView:fetch(session, node)
   return true
 end
 
+---The tree's roots, with what's unfolded fetched, in a thread: here the
+---frame's scopes. nil if it failed, or `is_stale()` became true.
+function VariablesView:fetch_roots(session, is_stale)
+  local scopes = session:scopes()
+  if not scopes or is_stale() then return nil end
+  local fkey = VariablesView.frame_key(session)
+  local tree = {}
+  for _, s in ipairs(scopes) do
+    local node = { name = s.name, ref = s.ref, scope = true, key = fkey .. ":" .. s.name, depth = 0 }
+    table.insert(tree, node)
+    if self:is_expanded(node) and self:fetch(session, node) == false then return nil end
+    if is_stale() then return nil end
+  end
+  return tree
+end
+
 ---Fetches the selected frame's variables (the session stopped, or another frame
----was selected).
+---or thread was selected).
 function VariablesView:refresh()
   local session = debug().session
   if session ~= self.session then
@@ -123,16 +151,8 @@ function VariablesView:refresh()
       if self.fetching == token then self.fetching = nil end
       core.redraw = true
     end
-    local scopes = session:scopes()
-    if not scopes or self.fetching ~= token then return give_up() end
-    local fkey = frame_key(session)
-    local tree = {}
-    for _, s in ipairs(scopes) do
-      local node = { name = s.name, ref = s.ref, scope = true, key = fkey .. ":" .. s.name, depth = 0 }
-      table.insert(tree, node)
-      if self:is_expanded(node) and self:fetch(session, node) == false then return give_up() end
-      if self.fetching ~= token then return give_up() end
-    end
+    local tree = self:fetch_roots(session, function() return self.fetching ~= token end)
+    if not tree or self.fetching ~= token then return give_up() end
     self.fetching = nil
     self.tree = tree
     self.tree_generation = session.generation
@@ -146,11 +166,23 @@ function VariablesView:update()
   VariablesView.super.update(self)
   local session = debug().session
   local key = session and session.state == "stopped" and session.frames
-    and (session.generation .. ":" .. tostring(session.frame_index))
+    and self:fetch_key(session)
   if key and key ~= self.fetched_key then
     self.fetched_key = key
     self:refresh()
   end
+end
+
+-- what the tree was fetched for: when it changes, it's fetched again
+function VariablesView:fetch_key(session)
+  return session.generation .. ":" .. tostring(session:thread_id()) .. ":" .. tostring(session.frame_index)
+end
+
+-- what's shown without rows
+function VariablesView:get_empty_text()
+  local session = debug().session
+  return session and session.state == "stopped" and (self.fetching and "…" or "No variables")
+    or "Not stopped"
 end
 
 -- the tree is the current stop's
@@ -172,6 +204,11 @@ function VariablesView:toggle(node, expand)
   else
     self:rebuild_rows()
   end
+end
+
+---Enter or a double click on a row: unfolds or folds it.
+function VariablesView:activate(node)
+  self:toggle(node)
 end
 
 function VariablesView:get_selected_row()
@@ -222,8 +259,10 @@ function VariablesView:on_mouse_pressed(button, x, y, clicks)
   local node = self.rows[i]
   self.selected_key = node.key
   local ex = self:expander_x(node)
-  if clicks > 1 or (x >= ex - style.padding.x / 2 and x < ex + self:get_indent()) then
+  if node.ref and x >= ex - style.padding.x / 2 and x < ex + self:get_indent() then
     self:toggle(node)
+  elseif clicks > 1 or node.add then
+    self:activate(node)
   end
   return true
 end
@@ -244,7 +283,7 @@ function VariablesView:draw_node(node, x, y, h, dim)
     shapes.expander(x + (indent - size) / 2, y + (h - size) / 2, size, style.dim, self:is_expanded(node))
   end
   x = x + indent
-  if node.scope then
+  if node.scope or node.add then
     return common.draw_text(style.font, style.dim, node.name, "left", x, y, 0, h)
   end
   -- an array's elements by index
@@ -260,6 +299,10 @@ function VariablesView:draw_node(node, x, y, h, dim)
       renderer.draw_rect(x, y + (h - th) / 2, font:get_width(value), th, style.debug.changed_background)
     end
     x = common.draw_text(font, color, value, "left", x, y, 0, h)
+  elseif node.error then
+    x = common.draw_text(font, style.dim, "  ", "left", x, y, 0, h)
+    -- often just out of scope: not as loud as an error
+    x = common.draw_text(style.font, style.dim, node.error, "left", x, y, 0, h)
   end
   if node.type and config.plugins.debug.show_types then
     x = common.draw_text(style.font, style.dim, "  " .. node.type, "left", x, y, 0, h)
@@ -274,10 +317,7 @@ function VariablesView:draw()
   local _, _, w = self:get_content_bounds()
   core.push_clip_rect(self.position.x, self.position.y, self.size.x, self.size.y)
   if #self.rows == 0 then
-    local session = debug().session
-    local text = session and session.state == "stopped" and (self.fetching and "…" or "No variables")
-      or "Not stopped"
-    common.draw_text(style.font, style.dim, text, "left", ox + style.padding.x, oy, 0, h)
+    common.draw_text(style.font, style.dim, self:get_empty_text(), "left", ox + style.padding.x, oy, 0, h)
   end
   local dim = not self:is_current()
   local first = math.max(1, math.floor(self.scroll.y / h))
@@ -323,9 +363,9 @@ command.add(VariablesView, {
       end
     end
   end,
-  ["debug-variables:toggle"] = function(view)
+  ["debug-variables:activate"] = function(view)
     local _, node = view:get_selected_row()
-    if node then view:toggle(node) end
+    if node then view:activate(node) end
   end,
 })
 
@@ -334,7 +374,7 @@ keymap.add {
   ["down"] = "debug-variables:select-next",
   ["right"] = "debug-variables:expand",
   ["left"] = "debug-variables:collapse",
-  ["return"] = "debug-variables:toggle",
+  ["return"] = "debug-variables:activate",
 }
 
 return VariablesView

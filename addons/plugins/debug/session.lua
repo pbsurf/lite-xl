@@ -20,7 +20,10 @@ local breakpoints = require "plugins.debug.breakpoints"
 ---
 ---Events (`session.on_event(name, session)`, set by whoever shows it):
 ---"state" (state changed), "stopped" (stopped, frames fetched), "frame" (another
----frame selected), "output" (debugger output: `session.output_log`), "ended".
+---frame selected), "thread" (another thread selected, its frames fetched),
+---"threads" (the threads listed), "breakpoints" (the debugger's breakpoints
+---changed: `breakpoint_status`), "output" (debugger output: `session.output_log`),
+---"ended".
 ---
 ---A backend (plugins.debug.gdb) is an object made with a function receiving
 ---its events, ("running"|"stopped"|"exited"|"output"|"ended", data), having
@@ -31,9 +34,10 @@ local breakpoints = require "plugins.debug.breakpoints"
 ---* continue(), pause(), step_over(thread), step_into(thread),
 ---  step_out(thread, level), run_to(file, line); terminate() -> whether
 ---  there was a debugger to end (its "ended" event follows)
----* stack(thread, limit) -> debug.frame[]; new_stop()
+---* threads() -> debug.thread[]; stack(thread, limit) -> debug.frame[]; new_stop()
 ---* scopes(thread, level) -> { name, ref }[]; variables(ref) -> debug.variable[]
 ---* evaluate(expression, thread, level) -> value, err
+---* watch(expression, thread, level) -> debug.variable, err (one that unfolds)
 ---@class debug.session : core.object
 local Session = Object:extend()
 
@@ -59,6 +63,13 @@ local Session = Object:extend()
 ---@field from? string the library, without debugging info
 ---@field args? { name: string, value?: string }[]
 ---@field external? boolean not in the project (set by the session)
+
+---@class debug.thread
+---@field id integer
+---@field name? string the thread's name (pthread_setname_np), if it has one
+---@field target_id? string the system's name for it, e.g. "Thread 0x7f... (LWP 123)"
+---@field frame? debug.frame its innermost frame
+---@field project_frame? debug.frame its innermost frame in the project (set by the session)
 
 ---@class debug.variable
 ---@field name string
@@ -94,7 +105,10 @@ function Session:new(backend_class, options)
   self.state = "starting"
   -- why it stopped: { reason, description, thread_id, signal }
   self.stop = nil
-  -- the stopped thread's frames, and the one selected (index)
+  -- the threads (once listed at a stop), the one selected (its id: at first
+  -- the one that stopped), its frames and the one selected (index)
+  self.threads = nil
+  self.thread = nil
   self.frames = nil
   self.frame_index = nil
   -- counts stops: what's fetched for one is stale at the next
@@ -107,8 +121,8 @@ function Session:new(backend_class, options)
   self.on_event = function() end
   self.backend = backend_class(function(name, data) self:on_backend_event(name, data) end)
   self.capabilities = self.backend.capabilities or {}
-  -- file -> lines set in the backend
-  self.synced = {}
+  -- file -> line -> debug.breakpoint_result, for the enabled breakpoints
+  self.breakpoint_status = {}
 end
 
 function Session:emit(name)
@@ -163,7 +177,7 @@ end
 
 function Session:on_backend_event(name, data)
   if name == "running" then
-    self.stop, self.frames, self.frame_index = nil, nil, nil
+    self.stop, self.frames, self.frame_index, self.threads = nil, nil, nil, nil
     self:set_state("running")
   elseif name == "stopped" then
     self.generation = self.generation + 1
@@ -172,21 +186,17 @@ function Session:on_backend_event(name, data)
       data.description = "Entry"
     end
     self.stop = data
-    self.frames, self.frame_index = nil, nil
+    self.frames, self.frame_index, self.threads = nil, nil, nil
+    self.thread = data.thread_id
     self:set_state("stopped")
     core.add_thread(function()
       self.backend:new_stop()
-      local frames, err = self.backend:stack(data.thread_id, config.plugins.debug.max_frames)
+      local frames, first = self:fetch_stack(data.thread_id, config.plugins.debug.max_frames)
       if self.generation ~= generation then return end
-      frames = frames or {}
-      local first
-      for i, frame in ipairs(frames) do
-        frame.external = not Session.is_project_file(frame.file)
-        if not frame.external and not first then first = i end
-      end
       self.frames = frames
       self.frame_index = (config.plugins.debug.just_my_code and first) or (#frames > 0 and 1 or nil)
       self:emit("stopped")
+      self:fetch_threads(generation)
     end)
   elseif name == "exited" then
     self.exit = data
@@ -195,27 +205,78 @@ function Session:on_backend_event(name, data)
   elseif name == "output" then
     self:log(data.text)
   elseif name == "ended" then
-    self.stop, self.frames, self.frame_index = nil, nil, nil
+    self.stop, self.frames, self.frame_index, self.threads = nil, nil, nil, nil
+    self.breakpoint_status = {}
     self:set_state("ended")
     self:emit("ended")
   end
 end
 
----Updates the debugger's breakpoints in a file to the store's, moving those
----it put on other lines.
+---A thread's frames, marked external (not the project's), and the index of
+---the first that isn't, in a core thread.
+---@return debug.frame[] frames
+---@return integer? first
+function Session:fetch_stack(thread_id, limit)
+  local frames = self.backend:stack(thread_id, limit) or {}
+  local first
+  for i, frame in ipairs(frames) do
+    frame.external = not Session.is_project_file(frame.file)
+    if not frame.external and not first then first = i end
+  end
+  return frames, first
+end
+
+-- most threads whose stacks are looked at for their project frames
+local MAX_THREAD_STACKS = 64
+-- frames looked at in each
+local THREAD_STACK_DEPTH = 32
+
+---Lists the threads, each with its innermost project frame (in a core thread).
+function Session:fetch_threads(generation)
+  local threads = self.backend:threads() or {}
+  for i, thread in ipairs(threads) do
+    if self.generation ~= generation then return end
+    if thread.id == self.thread and self.frames then
+      local frames = self.frames
+      for _, f in ipairs(frames) do
+        if not f.external then thread.project_frame = f break end
+      end
+    elseif i <= MAX_THREAD_STACKS then
+      local frames, first = self:fetch_stack(thread.id, THREAD_STACK_DEPTH)
+      thread.project_frame = first and frames[first]
+    end
+  end
+  if self.generation ~= generation then return end
+  self.threads = threads
+  self:emit("threads")
+end
+
+---Updates the debugger's breakpoints in a file to the store's enabled ones,
+---moving those it put on other lines.
 ---@param file string
 function Session:sync_breakpoints(file)
   if self.state == "ended" then return end
   run(function()
     -- set while running: gdb inserts them as it stops for it
-    local results = self.backend:set_breakpoints(file, breakpoints.lines(file))
+    local results = self.backend:set_breakpoints(file, breakpoints.lines(file, true))
+    local status = {}
     for _, r in ipairs(results) do
       if r.verified and r.actual ~= r.line and not breakpoints.has(file, r.actual) then
         breakpoints.move(file, r.line, r.actual)
+        status[r.actual] = r
+      else
+        status[r.line] = r
       end
     end
-    core.redraw = true
+    self.breakpoint_status[file] = status
+    self:emit("breakpoints")
   end)
+end
+
+---What the debugger made of a breakpoint: debug.breakpoint_result, nil if it
+---doesn't have it.
+function Session:get_breakpoint_status(file, line)
+  return self.breakpoint_status[file] and self.breakpoint_status[file][line]
 end
 
 ---The selected frame.
@@ -224,8 +285,25 @@ function Session:get_frame()
   return self.frames and self.frame_index and self.frames[self.frame_index]
 end
 
+---The selected thread's id.
 function Session:thread_id()
-  return self.stop and self.stop.thread_id
+  return self.thread
+end
+
+---Selects a thread: the stack, variables and stepping are its.
+---@param id integer
+function Session:select_thread(id)
+  if self.state ~= "stopped" or id == self.thread then return end
+  local generation = self.generation
+  self.thread = id
+  self.frames, self.frame_index = nil, nil
+  run(function()
+    local frames, first = self:fetch_stack(id, config.plugins.debug.max_frames)
+    if self.generation ~= generation or self.thread ~= id then return end
+    self.frames = frames
+    self.frame_index = (config.plugins.debug.just_my_code and first) or (#frames > 0 and 1 or nil)
+    self:emit("thread")
+  end)
 end
 
 ---Selects a frame (index into frames): variables are of it.
@@ -322,6 +400,22 @@ function Session:variables(ref, callback)
     local vars, err = self.backend:variables(ref)
     if generation ~= self.generation then return nil, "stale" end
     return vars, err
+  end
+  if callback then core.add_thread(function() callback(get()) end) else return get() end
+end
+
+---An expression as a variable (unfolding into its members) in the selected
+---frame, in a core thread (or given to `callback`).
+---@return debug.variable?
+---@return string? error
+function Session:watch(expression, callback)
+  local frame = self:get_frame()
+  local generation = self.generation
+  local function get()
+    if self.state ~= "stopped" or not frame then return nil, "not stopped" end
+    local var, err = self.backend:watch(expression, self:thread_id(), frame.level)
+    if generation ~= self.generation then return nil, "stale" end
+    return var, err
   end
   if callback then core.add_thread(function() callback(get()) end) else return get() end
 end
