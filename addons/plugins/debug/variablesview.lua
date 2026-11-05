@@ -306,7 +306,7 @@ function VariablesView:draw_node(node, x, y, h, dim)
   local indent = self:get_indent()
   x = x + node.depth * indent
   if node.ref then
-    local size = math.floor(font:get_height() * 0.6)
+    local size = math.floor(font:get_height())
     shapes.expander(x + (indent - size) / 2, y + (h - size) / 2, size, style.dim, self:is_expanded(node))
   end
   x = x + indent
