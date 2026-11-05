@@ -14,6 +14,7 @@ local shapes = require "libraries.shapes"
 local breakpoints = require "plugins.debug.breakpoints"
 local Session = require "plugins.debug.session"
 local Gdb = require "plugins.debug.gdb"
+local hover = require "plugins.debug.hover"
 
 ---Debugger: runs the program under gdb, in a terminal tab of its own, with
 ---breakpoints in the gutter, the line it stopped at marked, and its call stack
@@ -45,6 +46,9 @@ config.plugins.debug = common.merge({
   max_frames = 200,
   -- types after values in the variables
   show_types = false,
+  -- while stopped, hovering a variable in the editor shows its value (and
+  -- the language server's hover info doesn't show)
+  hover_values = true,
   -- the keys: f5 start or continue (f8 too, as before), f7 step over, shift+f7
   -- step into, ctrl+f7 step out, shift+f8 stop, f9 breakpoint, ctrl+f8 run to
   -- the cursor; when not debugging, stepping starts the program stopped at its entry
@@ -65,6 +69,8 @@ style.debug = common.merge({
   -- a value that changed since last shown
   changed = style.text,
   changed_background = { common.color "#f2c74440" },
+  -- the expression whose value is shown on hover
+  hover = { common.color "#f2c74428" },
 }, style.debug)
 
 ---The current session (or the last one, ended), nil before the first.
@@ -210,6 +216,8 @@ end
 
 local function on_event(name, session)
   if session ~= debug.session then return end
+  -- a value shown on hover may be another now
+  if name ~= "output" and name ~= "breakpoints" and name ~= "threads" then hover.clear() end
   if name == "stopped" then
     local file, line = current_location()
     if file then show_location(file, line) end
@@ -454,6 +462,20 @@ function DocView:draw_line_highlight(...)
   if self.debug_drawing_current then return end
   return draw_line_highlight(self, ...)
 end
+
+
+hover.setup(debug, supports_breakpoints)
+
+-- while stopped, the language server's hover popups don't show: hovering is
+-- for values
+core.add_thread(function()
+  local lsp = package.loaded["plugins.lsp"]
+  if lsp and lsp.hover_suppressors then
+    table.insert(lsp.hover_suppressors, function()
+      return config.plugins.debug.hover_values and debug.session ~= nil and debug.session.state == "stopped"
+    end)
+  end
+end)
 
 
 ------------------------------ Commands

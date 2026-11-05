@@ -15,7 +15,8 @@ local Gdb = Object:extend()
 Gdb.name = "gdb"
 
 ---What the views and commands may rely on (see session.lua).
-Gdb.capabilities = { pause = true, run_to = true, step_out = true, evaluate = true, threads = true, watch = true }
+Gdb.capabilities = { pause = true, run_to = true, step_out = true, evaluate = true, threads = true, watch = true,
+  function_lines = true }
 
 -- most children of a variable listed (a big array's or container's)
 local MAX_CHILDREN = 500
@@ -445,6 +446,29 @@ function Gdb:variables(ref)
     if not ok then return nil, err end
   end
   return vars
+end
+
+---The lines of the function a frame is in: its file, first and last line
+---with code (from its disassembly, mixed with the source lines). Lines of
+---functions inlined into it, in other files, aren't counted.
+---@return string? file absolute
+---@return integer? first
+---@return integer? last
+function Gdb:function_lines(thread_id, level)
+  local res, err = self:ask("-data-disassemble" .. thread_frame(thread_id, level) .. " -a $pc -- 4")
+  if not res then return nil, err end
+  local frame = self:ask("-stack-info-frame" .. thread_frame(thread_id, level))
+  local file = frame and frame.frame and frame.frame.fullname
+  if not file then return nil, "no source" end
+  local first, last
+  for _, src in ipairs(res.asm_insns or {}) do
+    local line = tonumber(src.line)
+    if line and src.fullname == file then
+      first, last = math.min(first or line, line), math.max(last or line, line)
+    end
+  end
+  if not first then return nil, "no lines" end
+  return file, first, last
 end
 
 ---An expression's value in a frame.

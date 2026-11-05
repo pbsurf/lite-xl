@@ -215,7 +215,10 @@ another repository's version, uninstalls removing dependents under `--assume-yes
   expressions (kept per project; "Add Watch" in the editor's context menu) the
   same way; Threads lists the threads, each where it is in the project, to
   switch to; Breakpoints lists them with their code, to disable or remove, and
-  says which the debugger couldn't place. The views are ordinary tabs: in the
+  says which the debugger couldn't place. While stopped, hovering a variable
+  in the editor shows its value (members and subscripts leading to it included,
+  `head->next->value`; a selection as is), in place of the language server's
+  hover popups. The views are ordinary tabs: in the
   bottom panel at first, kept where they're dragged. Scriptable from
   Lua (`require("plugins.debug").session`). Replaces debugger, still there for now.
 * **shapes:** antialiased shape helpers (squiggly underlines, circles, arrows) for plugins.

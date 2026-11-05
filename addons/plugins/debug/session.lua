@@ -38,6 +38,8 @@ local breakpoints = require "plugins.debug.breakpoints"
 ---* scopes(thread, level) -> { name, ref }[]; variables(ref) -> debug.variable[]
 ---* evaluate(expression, thread, level) -> value, err
 ---* watch(expression, thread, level) -> debug.variable, err (one that unfolds)
+---* function_lines(thread, level) -> file, first, last (capability
+---  `function_lines`): the lines of the frame's function
 ---@class debug.session : core.object
 local Session = Object:extend()
 
@@ -429,6 +431,32 @@ function Session:evaluate(expression, callback)
   local function get()
     if self.state ~= "stopped" then return nil, "not stopped" end
     return self.backend:evaluate(expression, self:thread_id(), frame and frame.level)
+  end
+  if callback then core.add_thread(function() callback(get()) end) else return get() end
+end
+
+---The lines of the selected frame's function: its file, first and last line
+---with code, in a core thread (or given to `callback`); nil if the backend
+---can't tell. Kept until the next stop.
+---@return string? file
+---@return integer? first
+---@return integer? last
+function Session:function_lines(callback)
+  local frame = self:get_frame()
+  local generation = self.generation
+  local function get()
+    if self.state ~= "stopped" or not frame or not self.capabilities.function_lines then return nil end
+    if not self.function_lines_cache or self.function_lines_cache.generation ~= generation then
+      self.function_lines_cache = { generation = generation }
+    end
+    local key = self:thread_id() .. ":" .. frame.level
+    local cached = self.function_lines_cache[key]
+    if not cached then
+      cached = { self.backend:function_lines(self:thread_id(), frame.level) }
+      if generation ~= self.generation then return nil end
+      self.function_lines_cache[key] = cached
+    end
+    return table.unpack(cached, 1, 3)
   end
   if callback then core.add_thread(function() callback(get()) end) else return get() end
 end
