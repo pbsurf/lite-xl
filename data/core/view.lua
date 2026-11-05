@@ -163,6 +163,18 @@ function View:get_h_scrollable_size()
 end
 
 
+---Whether a point is in the view. A split passes the mouse's moves to all its
+---views (so one dragging gets them outside it): what's hovered is only so
+---with the pointer over the view.
+---@param x number
+---@param y number
+---@return boolean
+function View:overlaps_point(x, y)
+  local p, s = self.position, self.size
+  return x >= p.x and x < p.x + s.x and y >= p.y and y < p.y + s.y
+end
+
+
 ---@param x number
 ---@param y number
 ---@return boolean

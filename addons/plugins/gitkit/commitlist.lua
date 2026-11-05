@@ -386,9 +386,7 @@ function CommitList:get_scrollable_size()
 end
 
 function CommitList:row_at(mx, my)
-  -- a split's views all get the mouse's moves: only rows under it, in this one
-  local p, s = self.position, self.size
-  if mx < p.x or mx >= p.x + s.x or my < p.y or my >= p.y + s.y then return nil end
+  if not self:overlaps_point(mx, my) then return nil end
   local x, y = self:get_content_offset()
   local idx = math.floor((my - y) / self:get_line_height()) + 1
   if idx >= 1 and idx <= #self.commits then return idx end

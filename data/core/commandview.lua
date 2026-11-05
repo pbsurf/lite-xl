@@ -425,8 +425,7 @@ end
 ---@param y number
 ---@return boolean
 function CommandView:input_overlaps_point(x, y)
-  return self.size.y > 0 and x >= self.position.x and x < self.position.x + self.size.x
-    and y >= self.position.y and y < self.position.y + self.size.y
+  return self:overlaps_point(x, y)
 end
 
 

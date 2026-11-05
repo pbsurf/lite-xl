@@ -991,8 +991,7 @@ end
 function BuildView:on_mouse_moved(x, y, ...)
   local result = BuildView.super.on_mouse_moved(self, x, y, ...)
   local hovered = nil
-  if not self.v_scrollbar.dragging and x >= self.position.x and x < self.position.x + self.size.x
-    and y >= self.position.y and y < self.position.y + self.size.y then
+  if not self.v_scrollbar.dragging and self:overlaps_point(x, y) then
     local _, row = self:convert_coordinates(x, y)
     hovered = self:get_message_at(row)
   end
