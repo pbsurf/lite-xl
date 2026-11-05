@@ -203,7 +203,18 @@ another repository's version, uninstalls removing dependents under `--assume-yes
   configuration (building with its preLaunchTask, running or debugging its
   program in its `cwd` with its `args` and environment) and per task; re-read
   when saved, and the targets are found again on changing project.
-* **shapes:** antialiased shape helpers (squiggly underlines) for plugins.
+* **debug:** a debugger (gdb), written for following what code does as much as
+  for finding bugs. The program runs in a terminal tab of its own (a pty from the
+  terminal plugin), so it reads the keyboard; f5 builds the target and starts it,
+  f7 / shift+f7 / ctrl+f7 step over / into / out (when not debugging, stepping
+  starts it stopped at `main`), ctrl+f8 runs to the cursor, f9 or a click in the
+  gutter sets a breakpoint (kept per project, following edits). Call Stack lists
+  the frames with their arguments, those outside the project folded; Variables
+  is a tree of the frame's arguments and locals, values changed since last
+  shown highlighted, step out shows the return value. The views are ordinary
+  tabs: in the bottom panel at first, kept where they're dragged. Scriptable from
+  Lua (`require("plugins.debug").session`). Replaces debugger, still there for now.
+* **shapes:** antialiased shape helpers (squiggly underlines, circles, arrows) for plugins.
 * **qtcreator:** a light color theme matching Qt Creator's.
 
 Also imported with changes: lsp and lintplus (squiggly diagnostics, diagnostics in

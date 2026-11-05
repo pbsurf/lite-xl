@@ -35,6 +35,14 @@
       "dependencies": { "build": {}, "json": {} }
     },
     {
+      "id": "debug",
+      "description": "Debugger (gdb): the program in a terminal tab, breakpoints in the gutter, call stack and variables as ordinary tabs; runs the build target.",
+      "version": "0.1",
+      "mod_version": "3",
+      "path": "addons/plugins/debug",
+      "dependencies": { "terminal": {}, "shapes": {}, "build": { "optional": true } }
+    },
+    {
       "id": "repl",
       "description": "Evaluate Lua in a running lite-xl; used by scripts/lxeval.",
       "version": "0.1",
