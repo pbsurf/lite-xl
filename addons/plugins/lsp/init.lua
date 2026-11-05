@@ -261,7 +261,15 @@ local function hover_modifier_held()
   return keymap.modkeys[config.plugins.lsp.mouse_hover_modifier or "ctrl"] or false
 end
 
+---Functions saying hovering is another plugin's now (the debugger's, showing
+---values while stopped): while one returns true, hovering shows nothing.
+---@type (fun(): boolean)[]
+lsp.hover_suppressors = {}
+
 lsp.hover_timer.on_timer = function()
+  for _, suppressed in ipairs(lsp.hover_suppressors) do
+    if suppressed() then return end
+  end
   local mode = config.plugins.lsp.mouse_hover_mode or "always"
   local held = hover_modifier_held()
   if mode == "modifier" and not held then return end
