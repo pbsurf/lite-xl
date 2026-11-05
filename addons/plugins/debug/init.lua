@@ -614,16 +614,22 @@ if config.plugins.debug.keys then
 end
 
 
--- in the editor's context menu while debugging: the selection or the word
--- clicked as a watch
+-- in the editor's context menu while debugging: running to the line clicked
+-- (a right-click puts the caret there), while stopped, in a debugged file;
+-- the selection or the word clicked as a watch
 local menu_found, menu = pcall(require, "plugins.contextmenu")
 if menu_found then
   menu:register(function()
     return debug.is_active() and core.active_view:is(DocView)
-  end, {
-    menu.DIVIDER,
-    { text = "Add Watch", command = "debug:add-watch" },
-  })
+  end, function()
+    local items = { menu.DIVIDER }
+    if debug.session.state == "stopped" and supports_breakpoints(core.active_view.doc) then
+      table.insert(items, { text = "Run to Here", command = "debug:run-to-cursor",
+        info = keymap.get_binding("debug:run-to-cursor") })
+    end
+    table.insert(items, { text = "Add Watch", command = "debug:add-watch" })
+    return items
+  end)
 end
 
 
