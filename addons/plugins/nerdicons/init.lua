@@ -249,20 +249,40 @@ function TreeView:get_item_chevron_width(item)
   return TreeView_get_item_chevron_width(self, item)
 end
 
--- Other plugins' views, by the module of their class (if loaded): an icon and its
--- color (nil: the text's)
+-- Tool views (terminals, results, the debugger's...), by their class: the
+-- module returning it, or a field of one ("module:field"); subclasses too, so
+-- the more specific come first. Their icons are in the text's color, files'
+-- in their type's, so a tool tab stands out among documents.
 local view_icons = {
-  ["plugins.terminal.view"] = { nil, "oct-terminal" },
-  ["plugins.gitkit.commitview"] = { known_filenames_icons[".gitignore"][1], "dev-git" },
-  ["plugins.gitkit.commitlist"] = { known_filenames_icons[".gitignore"][1], "dev-git" },
+  { "plugins.debug.programview", "cod-debug" },
+  { "plugins.build:BuildView", "cod-tools" },
+  { "plugins.terminal.view", "oct-terminal" },
+  { "plugins.build:ProblemsView", "cod-warning" },
+  { "plugins.debug.stackview", "cod-debug_stackframe" },
+  { "plugins.debug.watchesview", "cod-eye" },
+  { "plugins.debug.variablesview", "cod-symbol_variable" },
+  { "plugins.debug.threadsview", "cod-list_tree" },
+  { "plugins.debug.breakpointsview", "cod-circle_filled" },
+  { "plugins.gitkit.commitview", "dev-git" },
+  { "plugins.gitkit.commitlist", "dev-git" },
+  { "plugins.lsp.symbolresults:ReferenceResults", "cod-references" },
+  { "plugins.lsp.symbolresults", "cod-symbol_class" },
+  { "core.resultsview", "cod-search" },
+  { "core.logview", "cod-output" },
 }
 
+local function view_class(spec)
+  local module, field = spec:match("^([^:]+):?(.*)$")
+  local loaded = package.loaded[module]
+  if field ~= "" then return type(loaded) == "table" and loaded[field] or nil end
+  return loaded
+end
+
 local function view_icon(view, hovered)
-  local mt = getmetatable(view)
-  for module, icon in pairs(view_icons) do
-    if mt == package.loaded[module] then
-      return map[icon[2]], icon_font,
-        hovered and style.accent or icon[1] and readable(icon[1]) or style.text
+  for _, entry in ipairs(view_icons) do
+    local class = view_class(entry[1])
+    if type(class) == "table" and view:extends(class) then
+      return map[entry[2]], icon_font, hovered and style.accent or style.text
     end
   end
 end

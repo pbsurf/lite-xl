@@ -722,6 +722,7 @@ end
 ---it are found as lines complete (build.parse_compile_line, or the backend's),
 ---and can be clicked to go to their file.
 local BuildView = TerminalView:extend()
+build.BuildView = BuildView
 BuildView.close_on_exit = false
 
 function BuildView:new()
