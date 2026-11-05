@@ -403,6 +403,26 @@ local function with_alpha(color, a)
   return { color[1], color[2], color[3], (color[4] or 255) * a }
 end
 
+---Draws a breakpoint's marker, centered at cx, cy: a disc, a ring if it's
+---disabled, with an equals sign in it if it has a condition or hit count;
+---faded if the debugger couldn't place it.
+function debug.draw_breakpoint(cx, cy, r, file, line, faded)
+  local color = faded and with_alpha(style.debug.breakpoint, 0.45) or style.debug.breakpoint
+  local enabled = breakpoints.enabled(file, line)
+  if enabled then
+    shapes.circle(cx, cy, r, color)
+  else
+    shapes.circle(cx, cy, r - SCALE / 2, color, SCALE)
+  end
+  if breakpoints.is_conditional(file, line) then
+    local w, h = math.floor(r * 1.1), math.max(SCALE, math.floor(r * 0.22))
+    local gap = math.max(SCALE, math.floor(r * 0.28))
+    local bar = enabled and style.background or color
+    renderer.draw_rect(cx - w / 2, cy - gap / 2 - h, w, h, bar)
+    renderer.draw_rect(cx - w / 2, cy + gap / 2, w, h, bar)
+  end
+end
+
 local draw_line_gutter = DocView.draw_line_gutter
 function DocView:draw_line_gutter(vline, x, y, width)
   local bw = column_width(self)
@@ -413,14 +433,10 @@ function DocView:draw_line_gutter(vline, x, y, width)
     local r = math.floor(self:get_font():get_height() * 0.32)
     breakpoints.load()
     local has = breakpoints.has(self.doc.abs_filename, line)
-    if has and breakpoints.enabled(self.doc.abs_filename, line) then
+    if has then
       -- faded if the debugger couldn't place it
       local status = debug.is_active() and debug.session:get_breakpoint_status(self.doc.abs_filename, line)
-      shapes.circle(cx, cy, r, (status and not status.verified) and with_alpha(style.debug.breakpoint, 0.45)
-        or style.debug.breakpoint)
-    elseif has then
-      -- disabled
-      shapes.circle(cx, cy, r - SCALE / 2, style.debug.breakpoint, SCALE)
+      debug.draw_breakpoint(cx, cy, r, self.doc.abs_filename, line, status and not status.verified)
     elseif self.debug_hovered_line == line then
       -- where a click would set one
       shapes.circle(cx, cy, r, with_alpha(style.debug.breakpoint, 0.35))
@@ -630,6 +646,69 @@ if menu_found then
     table.insert(items, { text = "Add Watch", command = "debug:add-watch" })
     return items
   end)
+end
+
+
+------------------------------ Breakpoint conditions
+
+---Asks for a breakpoint's condition (setting the breakpoint if there's none):
+---an expression in the program's language; empty for none.
+function debug.edit_condition(file, line)
+  breakpoints.load()
+  local bp = breakpoints.get(file, line)
+  core.command_view:enter("Break When (condition)", {
+    text = bp and bp.condition or "",
+    select_text = true,
+    submit = function(text) breakpoints.set_condition(file, line, text) end,
+  })
+end
+
+---Asks for the hit a breakpoint stops from (setting the breakpoint if there's
+---none); empty or 1 for every hit.
+function debug.edit_hit_count(file, line)
+  breakpoints.load()
+  local bp = breakpoints.get(file, line)
+  core.command_view:enter("Break From Hit", {
+    text = bp and bp.hit_count and tostring(bp.hit_count) or "",
+    select_text = true,
+    validate = function(text)
+      return not text:find("%S") or math.tointeger(tonumber(text)) ~= nil and tonumber(text) >= 1
+    end,
+    submit = function(text) breakpoints.set_hit_count(file, line, math.tointeger(tonumber(text))) end,
+  })
+end
+
+---Context menu items for a line's breakpoint (or for setting one).
+---@return core.contextmenu.item[]
+function debug.breakpoint_menu_items(file, line)
+  breakpoints.load()
+  local bp = breakpoints.get(file, line)
+  if not bp then
+    return {
+      { text = "Add Breakpoint", command = function() breakpoints.set(file, line, true) end },
+      { text = "Add Conditional Breakpoint...", command = function() debug.edit_condition(file, line) end },
+    }
+  end
+  return {
+    { text = bp.condition and "Edit Condition..." or "Add Condition...",
+      command = function() debug.edit_condition(file, line) end },
+    { text = bp.hit_count and "Edit Hit Count..." or "Add Hit Count...",
+      command = function() debug.edit_hit_count(file, line) end },
+    { text = bp.enabled and "Disable Breakpoint" or "Enable Breakpoint",
+      command = function() breakpoints.set_enabled(file, line, not bp.enabled) end },
+    { text = "Remove Breakpoint", command = function() breakpoints.set(file, line, false) end },
+  }
+end
+
+-- the breakpoint column's own menu, in place of the editor's
+if menu_found then
+  menu:register(function()
+    local dv = core.active_view
+    return dv:is(DocView) and dv.debug_hovered_line ~= nil
+  end, function()
+    local dv = core.active_view
+    return debug.breakpoint_menu_items(dv.doc.abs_filename, dv.debug_hovered_line)
+  end, true)
 end
 
 

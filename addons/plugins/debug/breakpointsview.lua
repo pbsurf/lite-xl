@@ -8,9 +8,10 @@ local ResultsList = require "core.resultslist"
 local shapes = require "libraries.shapes"
 local breakpoints = require "plugins.debug.breakpoints"
 
----All breakpoints, by file and line, with the line's code: a checkbox enables
----or disables one (space too), Delete removes it, and selecting one shows its
----line. During a session, one the debugger couldn't place says so.
+---All breakpoints, by file and line, with the line's code and condition: a
+---checkbox enables or disables one (space too), Delete removes it, f2 edits
+---its condition, and selecting one shows its line; a right-click has these
+---too. During a session, one the debugger couldn't place says so.
 ---@class debug.breakpointsview : core.view
 local BreakpointsView = View:extend()
 
@@ -165,14 +166,18 @@ function BreakpointsView:draw_item(item, x, y, h, selected)
   x = cx + size + style.padding.x
   -- the gutter's marker
   local r = math.floor(style.code_font:get_height() * 0.28)
-  if enabled then
-    shapes.circle(x + r, y + h / 2, r, style.debug.breakpoint)
-  else
-    shapes.circle(x + r, y + h / 2, r - SCALE / 2, style.debug.breakpoint, SCALE)
-  end
+  debug().draw_breakpoint(x + r, y + h / 2, r, item.file, item.line)
   x = x + 2 * r + style.padding.x
   x = common.draw_text(style.font, enabled and style.text or style.dim,
     display_path(item.file) .. ":" .. item.line, "left", x, y, 0, h)
+  local bp = breakpoints.get(item.file, item.line)
+  if bp and bp.condition then
+    x = common.draw_text(style.font, style.dim, "  when ", "left", x, y, 0, h)
+    x = common.draw_text(style.code_font, enabled and style.text or style.dim, bp.condition, "left", x, y, 0, h)
+  end
+  if bp and bp.hit_count then
+    x = common.draw_text(style.font, style.dim, "  from hit " .. bp.hit_count, "left", x, y, 0, h)
+  end
   local code = self:get_code(item):gsub("^%s+", ""):gsub("%s+$", "")
   if #code > 200 then code = code:sub(1, 200) .. "…" end
   x = common.draw_text(style.code_font, selected and style.text or style.dim, "  " .. code, "left", x, y, 0, h)
@@ -222,11 +227,37 @@ end, {
     local item = view.items[view.selected_idx]
     breakpoints.set(item.file, item.line, false)
   end,
+  ["debug-breakpoints:edit-condition"] = function(view)
+    local item = view.items[view.selected_idx]
+    debug().edit_condition(item.file, item.line)
+  end,
+  ["debug-breakpoints:edit-hit-count"] = function(view)
+    local item = view.items[view.selected_idx]
+    debug().edit_hit_count(item.file, item.line)
+  end,
 })
 
 keymap.add {
   ["space"] = "debug-breakpoints:toggle-enabled",
   ["delete"] = "debug-breakpoints:remove",
+  ["f2"] = "debug-breakpoints:edit-condition",
 }
+
+-- a row right-clicked: selected, and its breakpoint's menu
+local menu_found, menu = pcall(require, "plugins.contextmenu")
+if menu_found then
+  menu:register(function()
+    local view = core.active_view
+    return view:is(BreakpointsView) and view.hovered_row ~= nil
+  end, function()
+    local view = core.active_view
+    view.selected_idx = view.hovered_row
+    local item = view.items[view.selected_idx]
+    local items = debug().breakpoint_menu_items(item.file, item.line)
+    table.insert(items, menu.DIVIDER)
+    table.insert(items, { text = "Remove All Breakpoints", command = "debug:clear-breakpoints" })
+    return items
+  end)
+end
 
 return BreakpointsView

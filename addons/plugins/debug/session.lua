@@ -30,7 +30,8 @@ local breakpoints = require "plugins.debug.breakpoints"
 ---`capabilities` and these methods, all called in a core thread:
 ---* start(launch_options) -> ok, err; run(stop_at_entry) -> ok, err;
 ---  run_to_start(file, line) (before run: where to stop first)
----* set_breakpoints(file, lines) -> debug.breakpoint_result[]
+---* set_breakpoints(file, specs) -> debug.breakpoint_result[]; specs: { line,
+---  condition?, hit_count? }[] (capability `conditions` for the last two)
 ---* continue(), pause(), step_over(thread), step_into(thread),
 ---  step_out(thread, level), run_to(file, line); terminate() -> whether
 ---  there was a debugger to end (its "ended" event follows)
@@ -260,7 +261,7 @@ function Session:sync_breakpoints(file)
   if self.state == "ended" then return end
   run(function()
     -- set while running: gdb inserts them as it stops for it
-    local results = self.backend:set_breakpoints(file, breakpoints.lines(file, true))
+    local results = self.backend:set_breakpoints(file, breakpoints.specs(file))
     local status = {}
     for _, r in ipairs(results) do
       if r.verified and r.actual ~= r.line and not breakpoints.has(file, r.actual) then

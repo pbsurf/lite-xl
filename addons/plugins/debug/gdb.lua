@@ -16,7 +16,7 @@ Gdb.name = "gdb"
 
 ---What the views and commands may rely on (see session.lua).
 Gdb.capabilities = { pause = true, run_to = true, step_out = true, evaluate = true, threads = true, watch = true,
-  function_lines = true }
+  function_lines = true, conditions = true }
 
 -- most children of a variable listed (a big array's or container's)
 local MAX_CHILDREN = 500
@@ -241,34 +241,43 @@ local function bkpt_line(bkpt)
   end
 end
 
----Makes the file's breakpoints those lines.
+---Makes the file's breakpoints these: lines, each with an optional condition
+---(-c) and the hit to stop from (-i, ignoring those before). One whose
+---condition or hit count changed is inserted again.
 ---@param file string absolute
----@param lines integer[]
+---@param specs { line: integer, condition?: string, hit_count?: integer }[]
 ---@return debug.breakpoint_result[]
-function Gdb:set_breakpoints(file, lines)
+function Gdb:set_breakpoints(file, specs)
   local current = self.breakpoints[file] or {}
   self.breakpoints[file] = current
   local wanted = {}
-  for _, line in ipairs(lines) do wanted[line] = true end
+  for _, spec in ipairs(specs) do wanted[spec.line] = spec end
   for line, bp in pairs(current) do
-    if not wanted[line] then
-      self:ask("-break-delete " .. bp.number)
+    local spec = wanted[line]
+    if not spec or spec.condition ~= bp.condition or spec.hit_count ~= bp.hit_count then
+      if bp.number then self:ask("-break-delete " .. bp.number) end
       current[line] = nil
     end
   end
   local results = {}
-  for _, line in ipairs(lines) do
+  for _, spec in ipairs(specs) do
+    local line = spec.line
     local bp = current[line]
     if not bp then
-      local res, err = self:ask("-break-insert -f " .. mi.quote(file .. ":" .. line))
+      local options = " -f"
+      if spec.condition then options = options .. " -c " .. mi.quote(spec.condition) end
+      if spec.hit_count then options = options .. " -i " .. (spec.hit_count - 1) end
+      local res, err = self:ask("-break-insert" .. options .. " " .. mi.quote(file .. ":" .. line))
       if res and res.bkpt then
         bp = { number = res.bkpt.number, actual = bkpt_line(res.bkpt), pending = res.bkpt.pending ~= nil }
         -- pending: no code there, in the program or the libraries loaded so far
         if bp.pending then bp.error = "not in the program (pending)" end
-        current[line] = bp
       else
+        -- kept, so it isn't tried again until it changes
         bp = { error = err }
       end
+      bp.condition, bp.hit_count = spec.condition, spec.hit_count
+      current[line] = bp
     end
     table.insert(results, { line = line, actual = bp.actual or line,
       verified = bp.number ~= nil and not bp.pending, message = bp.error })
