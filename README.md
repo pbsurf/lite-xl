@@ -206,11 +206,10 @@ another repository's version, uninstalls removing dependents under `--assume-yes
 * **debug:** a debugger (gdb), written for following what code does as much as
   for finding bugs. The program runs in a terminal tab of its own (a pty from the
   terminal plugin), so it reads the keyboard; f5 builds the target and starts it,
-  f7 / shift+f7 / ctrl+f7 step over / into / out (when not debugging, stepping
-  starts it stopped at `main`), ctrl+f8 runs to the cursor, f9 or a click in the
-  gutter sets a breakpoint (kept per project, following edits). Call Stack lists
-  the frames with their arguments, those outside the project folded; Variables
-  is a tree of the frame's arguments and locals, values changed since last
+  f10 / f11 / f12 step over / into / out, ctrl+f8 runs to the cursor, f9 or a
+  click in the gutter sets a breakpoint (kept per project, following edits).
+  Call Stack lists the frames with their arguments, those outside the project
+  folded; Variables is a tree of the frame's arguments and locals, values changed since last
   shown highlighted, step out shows the return value. Watches evaluates
   expressions (kept per project; "Add Watch" in the editor's context menu) the
   same way; Threads lists the threads, each where it is in the project, to

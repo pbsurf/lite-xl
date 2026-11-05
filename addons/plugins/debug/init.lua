@@ -49,11 +49,12 @@ config.plugins.debug = common.merge({
   -- while stopped, hovering a variable in the editor shows its value (and
   -- the language server's hover info doesn't show)
   hover_values = true,
-  -- the keys: f5 start or continue (f8 too, as before), f7 step over, shift+f7
-  -- step into, ctrl+f7 step out, shift+f8 stop, f9 breakpoint, ctrl+f8 run to
-  -- the cursor; when not debugging, stepping starts the program stopped at its entry
+  -- the keys: f5 start or continue (f8 too, as before), f10 step over, f11
+  -- step into, f12 step out, shift+f5 or shift+f8 stop, f9 breakpoint, ctrl+f8
+  -- run to the cursor. f10 and f11 step only while stopped: otherwise they're
+  -- line wrapping's and fullscreen's
   keys = true,
-  -- also the keys that work without a session: starting (f5, f8, f7) and f9;
+  -- also the keys that work without a session: starting (f5, f8) and f9;
   -- the commands stay available, the gutter takes clicks, and ctrl+f8 (run to
   -- the cursor) starts too
   idle_keys = true,
@@ -524,11 +525,6 @@ command.add(session_in("stopped"), {
   ["debug:step-out"] = function(s) s:step_out() end,
 })
 
--- stepping when not debugging starts the program stopped at its entry
-command.add(idle, {
-  ["debug:step-over-or-start"] = function() debug.start({ stop_at_entry = true }) end,
-})
-
 command.add(session_in("running"), {
   ["debug:pause"] = function(s) s:pause() end,
 })
@@ -604,9 +600,9 @@ if config.plugins.debug.keys then
     ["f8"]         = { idle and "debug:start-or-continue" or "debug:continue", "debug:pause" },
     ["shift+f5"]   = "debug:stop",
     ["shift+f8"]   = "debug:stop",
-    ["f7"]         = idle and { "debug:step-over", "debug:step-over-or-start" } or "debug:step-over",
-    ["shift+f7"]   = idle and { "debug:step-into", "debug:step-over-or-start" } or "debug:step-into",
-    ["ctrl+f7"]    = "debug:step-out",
+    ["f10"]        = "debug:step-over",
+    ["f11"]        = "debug:step-into",
+    ["f12"]        = "debug:step-out",
     ["ctrl+f8"]    = "debug:run-to-cursor",
     ["ctrl+alt+up"]   = "debug:frame-up",
     ["ctrl+alt+down"] = "debug:frame-down",
