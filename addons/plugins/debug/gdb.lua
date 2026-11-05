@@ -143,6 +143,8 @@ function Gdb:on_record(rec)
           reason = reason, description = stop_description(r),
           thread_id = tonumber(r["thread-id"]), frame = frame_of(r.frame),
           signal = reason == "signal-received" and r["signal-name"] ~= "SIGINT" and r["signal-name"] or nil,
+          -- a function finished: what it returned, and the gdb variable holding it
+          return_value = r["return-value"], return_var = r["gdb-result-var"],
         })
       end
     end

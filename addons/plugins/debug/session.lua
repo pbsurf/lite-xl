@@ -106,8 +106,12 @@ end
 function Session:new(backend_class, options)
   self.options = options
   self.state = "starting"
-  -- why it stopped: { reason, description, thread_id, signal }
+  -- why it stopped: { reason, description, thread_id, signal, returned }, where
+  -- returned is what a function stepped out of returned: { name (the
+  -- function's), value, var (an expression for it: unfolds with watch()) }
   self.stop = nil
+  -- the function being stepped out of, for the stop's returned
+  self.returning_from = nil
   -- the threads (once listed at a stop), the one selected (its id: at first
   -- the one that stopped), its frames and the one selected (index)
   self.threads = nil
@@ -188,6 +192,10 @@ function Session:on_backend_event(name, data)
     if generation == 1 and self.options.stop_at_entry and data.reason == "breakpoint-hit" then
       data.description = "Entry"
     end
+    if data.reason == "function-finished" and data.return_value then
+      data.returned = { name = self.returning_from or "?", value = data.return_value, var = data.return_var }
+    end
+    self.returning_from = nil
     self.stop = data
     self.frames, self.frame_index, self.threads = nil, nil, nil
     self.thread = data.thread_id
@@ -343,21 +351,57 @@ function Session:step_target()
   end
 end
 
-function Session:step_over()
-  local target = self:step_target()
-  if target then return action("step_out")(self, self:thread_id(), self.frames[target - 1].level) end
-  return action("step_over")(self, self:thread_id())
+-- steps out of the frame at index i (in a core thread)
+local function step_out_of(self, i)
+  local frame = self.frames and self.frames[i]
+  self.returning_from = frame and frame.name
+  local ok, err = self.backend:step_out(self:thread_id(), frame and frame.level or 0)
+  if not ok then
+    self.returning_from = nil
+    if err then self:log("step_out: " .. err .. "\n") end
+  end
 end
 
-function Session:step_into()
-  local target = self:step_target()
-  if target then return action("step_out")(self, self:thread_id(), self.frames[target - 1].level) end
-  return action("step_into")(self, self:thread_id())
+-- Stepping over or into the innermost frame's last line, its function's end,
+-- steps out of it instead: it stops at the same place in the caller, but
+-- knowing what the function returned. Only with the innermost frame selected
+-- (when it isn't, other rules apply: step_target); not when the caller isn't
+-- the project's (main's), nor for a function on one line (it may call another).
+function Session:at_function_end()
+  if self.frame_index ~= 1 then return false end
+  local frame = self:get_frame()
+  local caller = self.frames[2]
+  if not frame or not frame.line or not caller or caller.external then return false end
+  local file, first, last = self:function_lines()
+  return file == frame.file and first ~= nil and first < last and frame.line == last
 end
+
+local function step(self, name)
+  local target = self:step_target()
+  if target then
+    if self.state ~= "stopped" then return false end
+    run(function() step_out_of(self, target - 1) end)
+    return true
+  end
+  if self.state ~= "stopped" then return false end
+  local generation = self.generation
+  run(function()
+    local at_end = self:at_function_end()
+    if self.generation ~= generation or self.state ~= "stopped" then return end
+    if at_end then return step_out_of(self, self.frame_index or 1) end
+    local ok, err = self.backend[name](self.backend, self:thread_id())
+    if not ok and err then self:log(name .. ": " .. err .. "\n") end
+  end)
+  return true
+end
+
+function Session:step_over() return step(self, "step_over") end
+function Session:step_into() return step(self, "step_into") end
 
 function Session:step_out()
-  local frame = self:get_frame()
-  return action("step_out")(self, self:thread_id(), frame and frame.level or 0)
+  if self.state ~= "stopped" then return false end
+  run(function() step_out_of(self, self.frame_index or 1) end)
+  return true
 end
 
 ---Runs to a line (continuing if stopped).

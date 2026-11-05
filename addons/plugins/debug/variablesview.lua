@@ -9,7 +9,9 @@ local tooltip = require "core.tooltip"
 local shapes = require "libraries.shapes"
 
 ---The selected frame's arguments and locals, as a tree: structs, arrays and
----containers (through gdb's pretty printers) unfold into their members.
+---containers (through gdb's pretty printers) unfold into their members. Right
+---after a function returned (stepping out of it, or over its end), what it
+---returned comes first.
 ---Values that changed since they were last shown (at an earlier stop) are
 ---highlighted. Hovering a row shows its type. What's unfolded stays so from stop to stop (by the thread, the
 ---frame's function and the variable's path). While the program runs, the last
@@ -120,12 +122,16 @@ function VariablesView:fetch(session, node)
 end
 
 ---The tree's roots, with what's unfolded fetched, in a thread: here the
----frame's scopes. nil if it failed, or `is_stale()` became true.
+---frame's scopes, after what a function stepped out of returned, at that
+---stop. nil if it failed, or `is_stale()` became true.
 function VariablesView:fetch_roots(session, is_stale)
   local scopes = session:scopes()
   if not scopes or is_stale() then return nil end
   local fkey = VariablesView.frame_key(session)
   local tree = {}
+  local returned = self:fetch_returned(session, fkey)
+  if returned == false or is_stale() then return nil end
+  if returned then table.insert(tree, returned) end
   for _, s in ipairs(scopes) do
     local node = { name = s.name, ref = s.ref, scope = true, key = fkey .. ":" .. s.name, depth = 0 }
     table.insert(tree, node)
@@ -133,6 +139,26 @@ function VariablesView:fetch_roots(session, is_stale)
     if is_stale() then return nil end
   end
   return tree
+end
+
+-- The Returned scope, at a stop after a function returned, in the frame it
+-- returned to: the function and its value (unfolding, through its gdb
+-- variable). nil if there's none, false if fetching failed.
+function VariablesView:fetch_returned(session, fkey)
+  local returned = session.stop and session.stop.returned
+  local frame = session:get_frame()
+  if not returned or not frame or frame.level ~= 0 then return nil end
+  local var = returned.var and session:watch(returned.var)
+  -- ref: unfolds and folds as the other scopes (its child is already there)
+  local node = { name = "Returned", scope = true, ref = 0, key = fkey .. ":Returned", depth = 0 }
+  local child = {
+    name = returned.name .. "()", value = var and var.value or returned.value,
+    type = var and var.type, ref = var and var.ref, depth = 1,
+    key = node.key .. "/" .. returned.name,
+  }
+  node.children = { child }
+  if child.ref and self.expanded[child.key] and self:fetch(session, child) == false then return false end
+  return node
 end
 
 ---Fetches the selected frame's variables (the session stopped, or another frame
