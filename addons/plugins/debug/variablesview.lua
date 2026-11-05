@@ -5,12 +5,13 @@ local config = require "core.config"
 local keymap = require "core.keymap"
 local style = require "core.style"
 local View = require "core.view"
+local tooltip = require "core.tooltip"
 local shapes = require "libraries.shapes"
 
 ---The selected frame's arguments and locals, as a tree: structs, arrays and
 ---containers (through gdb's pretty printers) unfold into their members.
 ---Values that changed since they were last shown (at an earlier stop) are
----highlighted. What's unfolded stays so from stop to stop (by the thread, the
+---highlighted. Hovering a row shows its type. What's unfolded stays so from stop to stop (by the thread, the
 ---frame's function and the variable's path). While the program runs, the last
 ---stop's values stay, dimmed.
 ---
@@ -232,17 +233,42 @@ function VariablesView:row_at(x, y)
   return self.rows[i] and i or nil
 end
 
+-- the row's tooltip target: its key, if it has a type to show
+local function tooltip_target(node)
+  return node and node.type and node.type ~= "" and node.key or nil
+end
+
 function VariablesView:on_mouse_moved(x, y, ...)
   if VariablesView.super.on_mouse_moved(self, x, y, ...) then
     self.hovered_row = nil
+    tooltip.hover(self, nil)
     return true
   end
   self.hovered_row = self:row_at(x, y)
+  -- by key: a row rebuilt at a stop is the same target
+  tooltip.hover(self, tooltip_target(self.rows[self.hovered_row]))
 end
 
 function VariablesView:on_mouse_left()
   VariablesView.super.on_mouse_left(self)
   self.hovered_row = nil
+  tooltip.hover(self, nil)
+end
+
+-- the type, in a box under the row, from the name
+function VariablesView:draw_tooltip(node, y, h)
+  local font = style.code_font
+  local text = node.type
+  local w = font:get_width(text) + style.padding.x * 2
+  local th = font:get_height() + style.padding.y
+  local root = core.root_view.root_node
+  local x = self:expander_x(node) + self:get_indent()
+  x = math.max(0, math.min(x, root.size.x - w - 1))
+  -- below the row, else above it
+  local ty = y + h
+  if ty + th > root.size.y then ty = y - th end
+  common.draw_popup_box(x, ty, w, th)
+  renderer.draw_text(font, text, x + style.padding.x, ty + style.padding.y / 2, style.text)
 end
 
 function VariablesView:expander_x(node)
@@ -330,6 +356,10 @@ function VariablesView:draw()
     end
     local x = self:draw_node(node, ox + style.padding.x, y, h, dim)
     self.max_h_scroll = math.max(self.max_h_scroll, x + style.padding.x - self.position.x + self.scroll.x)
+    local target = i == self.hovered_row and tooltip_target(node)
+    if target and tooltip.shown(self, target) then
+      core.root_view:defer_draw(self.draw_tooltip, self, node, y, h)
+    end
   end
   core.pop_clip_rect()
   self:draw_scrollbar()
