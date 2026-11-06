@@ -32,11 +32,12 @@ local function show_menu(node, x, y)
   local items = {}
   local icon_w = 0
   for _, view in ipairs(node.views) do
-    local icon, icon_font, icon_color = view:get_icon(false)
+    local icon, icon_font, icon_color, sub_icon, sub_scale = view:get_icon(false)
     if icon then icon_w = math.max(icon_w, icon_font:get_width(icon)) end
     table.insert(items, {
       text = view:get_name(), font = view:get_name_style(style.font),
       icon = icon, icon_font = icon_font, icon_color = icon_color,
+      sub_icon = sub_icon, sub_scale = sub_scale,
       badge = view:get_icon_badge(),
       active = view == node.active_view,
       command = function()
@@ -90,10 +91,13 @@ function menu:draw_context_menu()
     local tx = x + style.padding.x
     if item.icon then
       common.draw_text(item.icon_font, item.icon_color, item.icon, nil, tx, y, 0, h)
+      local background = i == self.selected and style.selection or style.popup_background
+      if item.sub_icon then
+        common.draw_icon_sub(item.sub_icon, item.icon_color, background,
+          item.icon_font, item.icon, tx, y, h, item.sub_scale)
+      end
       if item.badge then
-        common.draw_icon_badge(item.badge,
-          i == self.selected and style.selection or style.popup_background,
-          item.icon_font, item.icon, tx, y, h)
+        common.draw_icon_badge(item.badge, background, item.icon_font, item.icon, tx, y, h)
       end
     end
     local color = item.active and style.accent or style.text

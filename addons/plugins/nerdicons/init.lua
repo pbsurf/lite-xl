@@ -252,17 +252,21 @@ end
 -- Tool views (terminals, results, the debugger's...), by their class: the
 -- module returning it, or a field of one ("module:field"); subclasses too, so
 -- the more specific come first. Their icons are in the text's color, files'
--- in their type's, so a tool tab stands out among documents.
+-- in their type's, so a tool tab stands out among documents. A third icon is
+-- drawn small at the icon's lower right: the debugger's views are its icon,
+-- each with its own. A fourth value scales that one: the font's glyphs each
+-- fill their box (Nerd Fonts 3.1 scales Codicons one by one), so a dot that's
+-- small in the original needs it.
 local view_icons = {
   { "plugins.debug.programview", "cod-debug" },
   { "plugins.build:BuildView", "cod-tools" },
   { "plugins.terminal.view", "oct-terminal" },
   { "plugins.build:ProblemsView", "cod-warning" },
-  { "plugins.debug.stackview", "cod-debug_stackframe" },
-  { "plugins.debug.watchesview", "cod-eye" },
-  { "plugins.debug.variablesview", "cod-symbol_variable" },
-  { "plugins.debug.threadsview", "cod-list_tree" },
-  { "plugins.debug.breakpointsview", "cod-circle_filled" },
+  { "plugins.debug.stackview", "cod-debug", "cod-debug_stackframe" },
+  { "plugins.debug.watchesview", "cod-debug", "cod-eye" },
+  { "plugins.debug.variablesview", "cod-debug", "md-variable" },
+  { "plugins.debug.threadsview", "cod-debug", "cod-list_tree" },
+  { "plugins.debug.breakpointsview", "cod-debug", "cod-circle_filled", 0.6 },
   { "plugins.gitkit.commitview", "dev-git" },
   { "plugins.gitkit.commitlist", "dev-git" },
   { "plugins.lsp.symbolresults:ReferenceResults", "cod-references" },
@@ -282,7 +286,8 @@ local function view_icon(view, hovered)
   for _, entry in ipairs(view_icons) do
     local class = view_class(entry[1])
     if type(class) == "table" and view:extends(class) then
-      return map[entry[2]], icon_font, hovered and style.accent or style.text
+      return map[entry[2]], icon_font, hovered and style.accent or style.text,
+        entry[3] and map[entry[3]], entry[4]
     end
   end
 end
@@ -290,25 +295,25 @@ end
 -- (DocView's, the file's icon, is its own: subclasses of it are checked there)
 local View_get_icon = View.get_icon
 function View:get_icon(hovered)
-  local icon, font, color = view_icon(self, hovered)
-  if icon then return icon, font, color end
+  local icon, font, color, sub_icon, sub_scale = view_icon(self, hovered)
+  if icon then return icon, font, color, sub_icon, sub_scale end
   return View_get_icon(self, hovered)
 end
 
 local DocView = require "core.docview"
 local DocView_get_icon = DocView.get_icon
 function DocView:get_icon(hovered)
-  local icon, font, color = view_icon(self, hovered)
-  if icon then return icon, font, color end
+  local icon, font, color, sub_icon, sub_scale = view_icon(self, hovered)
+  if icon then return icon, font, color, sub_icon, sub_scale end
   return DocView_get_icon(self, hovered)
 end
 
 -- Override function to draw icons in tabs titles if setting is enabled
 local Node_draw_tab_title = Node.draw_tab_title
 function Node:draw_tab_title(view, font, is_active, is_hovered, x, y, w, h)
-  local icon, icon_font, color
+  local icon, icon_font, color, sub_icon, sub_scale
   if config.plugins.nerdicons.draw_tab_icons and view then
-    icon, icon_font, color = view:get_icon(is_hovered)
+    icon, icon_font, color, sub_icon, sub_scale = view:get_icon(is_hovered)
   end
   if icon then
     -- Icon and title as one group: centered while the title fits, otherwise the icon
@@ -317,10 +322,13 @@ function Node:draw_tab_title(view, font, is_active, is_hovered, x, y, w, h)
     local group_w = icon_w + font:get_width(view:get_name())
     local ix = x + math.max(0, (w - group_w) / 2)
     common.draw_text(icon_font, color, icon, nil, ix, y, 0, h)
+    local background = is_active and style.background or style.background2
+    if sub_icon then
+      common.draw_icon_sub(sub_icon, color, background, icon_font, icon, ix, y, h, sub_scale)
+    end
     local badge = view:get_icon_badge()
     if badge then
-      common.draw_icon_badge(badge, is_active and style.background or style.background2,
-        icon_font, icon, ix, y, h)
+      common.draw_icon_badge(badge, background, icon_font, icon, ix, y, h)
     end
     Node_draw_tab_title(self, view, font, is_active, is_hovered, ix + icon_w, y, x + w - ix - icon_w, h)
   else
