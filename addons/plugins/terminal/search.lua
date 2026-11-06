@@ -12,6 +12,8 @@ local core = require "core"
 ---@field search_backward boolean? searches go up (search_ui flips its directions)
 local SearchDoc = {}
 SearchDoc.__index = SearchDoc
+-- search_ui doesn't replace in it
+SearchDoc.read_only = true
 
 local search = {}
 

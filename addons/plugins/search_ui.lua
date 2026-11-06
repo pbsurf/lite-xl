@@ -65,9 +65,9 @@ config.plugins.search_ui = common.merge({
 }, config.plugins.search_ui)
 
 -- The view searched: a DocView, or another view providing get_search_doc(),
--- returning a read-only doc-like object (lines, get_selection, set_selection,
--- get_text, sanitize_position, optionally search_backward: next and previous
--- swapped), and scroll_to_line(line) (a terminal)
+-- returning a doc-like object with read_only set (lines, get_selection,
+-- set_selection, get_text, sanitize_position, optionally search_backward: next
+-- and previous swapped), and scroll_to_line(line) (a terminal)
 ---@type core.docview
 local doc_view = nil
 
@@ -351,7 +351,7 @@ local replace_shown = false
 local row_was_shown = false
 
 local function can_replace()
-  return not (doc_view and doc_view.get_search_doc)
+  return not (doc_view and (doc_view.get_search_doc or doc_view.doc.read_only))
 end
 
 local function row_shown()
@@ -587,7 +587,7 @@ local function find_replace()
     set_target(core.last_active_view)
   end
   local doc = target_doc(doc_view)
-  if not doc.replace then
+  if doc.read_only then
     status:set_label("Read only")
     return
   end
