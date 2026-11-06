@@ -6,14 +6,15 @@ local keymap = require "core.keymap"
 local common = require "core.common"
 
 config.plugins.tab_switcher = common.merge({
-  -- false: the switch commands change tabs immediately instead of showing a list;
-  -- while the modifier keys are held they keep stepping through the same list
+  -- false: switching through all tabs changes tabs immediately instead of showing
+  -- a list; while the modifier keys are held it keeps stepping through the same
+  -- list. Switching within the current split always does that.
   show_list = true,
   config_spec = {
     name = "Tab Switcher",
     {
       label = "Show List",
-      description = "Show the list of tabs when switching, instead of switching immediately.",
+      description = "Show the list of tabs when switching through all tabs, instead of switching immediately.",
       path = "show_list",
       type = "toggle",
       default = true
@@ -185,19 +186,28 @@ command.add(function(items)
   end,
 })
 
+---The split whose tabs the current-split commands use: the active view's, or
+---with the file browser or another locked node active, the last used split.
+---@return core.node
+local function current_split()
+  local node = core.root_view:get_active_node()
+  if node.locked then node = core.root_view:get_last_used_node() end
+  return node
+end
+
 command.add(function(items)
-    items = items or tab_switcher.get_tab_list(core.root_view:get_active_node())
+    items = items or tab_switcher.get_tab_list(current_split())
     return #items > 0, items
   end, {
   ["tab-switcher:tab-list-current-split"] = function(items)
     ask_selection("Switch to tab in current split", items)
   end,
+  -- within a split, the tabs change as you step, without a list
   ["tab-switcher:switch-to-last-tab-in-current-split"] = function(items)
-    if not config.plugins.tab_switcher.show_list then
-      return start_cycle(items, 1)
-    end
-    command.perform("tab-switcher:tab-list-current-split", items)
-    command.perform("tab-switcher:previous-tab")
+    start_cycle(items, 1)
+  end,
+  ["tab-switcher:switch-to-oldest-tab-in-current-split"] = function(items)
+    start_cycle(items, -1)
   end,
 })
 
