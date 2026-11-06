@@ -130,9 +130,12 @@ function View:get_tab_tooltip_info()
 end
 
 ---The icon drawn with this view's name in tab lists (and in tabs by an icon
----plugin such as nerdicons), or nil for none.
+---plugin such as nerdicons), or nil for none; optionally with a second icon
+---from the same font, drawn small at its lower right (see
+---common.draw_icon_sub, which takes sub_scale): a family's icon, say, and this
+---member's.
 ---@param hovered? boolean
----@return string? icon, renderer.font? font, renderer.color? color
+---@return string? icon, renderer.font? font, renderer.color? color, string? sub_icon, number? sub_scale
 function View:get_icon(hovered)
   return nil
 end

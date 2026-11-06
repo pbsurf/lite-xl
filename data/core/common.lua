@@ -408,6 +408,57 @@ function common.draw_icon_badge(color, background, font, icon, x, y, h)
 end
 
 
+-- per font: { size = its size, [scale] = a copy at 0.6 * scale of it }
+local sub_fonts = setmetatable({}, { __mode = "k" })
+
+local function sub_font(font, scale)
+  local size = font:get_size()
+  local cached = sub_fonts[font]
+  if not cached or cached.size ~= size then
+    cached = { size = size }
+    sub_fonts[font] = cached
+  end
+  if not cached[scale] then cached[scale] = font:copy(size * 0.6 * scale) end
+  return cached[scale]
+end
+
+---Draws a small icon at the lower right of an icon drawn with
+---`common.draw_text(font, color, icon, nil, x, y, 0, h)`, on a disc of the
+---background color to set it apart from the icon. It's from the same font,
+---at 0.6 its size times scale (default 1), centered on the disc it would
+---have at 1: for a glyph that fills its box where others leave space around
+---them.
+---@param sub_icon string
+---@param color renderer.color
+---@param background renderer.color
+---@param font renderer.font
+---@param icon string
+---@param x number
+---@param y number
+---@param h number
+---@param scale? number
+function common.draw_icon_sub(sub_icon, color, background, font, icon, x, y, h, scale)
+  local th = font:get_height()
+  local base = sub_font(font, 1)
+  local bw, bh = base:get_width(sub_icon), base:get_height()
+  -- its center at the icon's lower right corner, a little in from it
+  local cx = x + font:get_width(icon) - bw * 0.3
+  local cy = common.round(y + (h - th) / 2) + th - bh * 0.4
+  local r = math.max(bw, bh * 0.8) / 2 + 1.5 * SCALE
+  local k = r * 0.5523  -- control point distance for a quarter circle
+  renderer.draw_path({
+    "M", cx + r, cy,
+    "C", cx + r, cy + k, cx + k, cy + r, cx, cy + r,
+    "C", cx - k, cy + r, cx - r, cy + k, cx - r, cy,
+    "C", cx - r, cy - k, cx - k, cy - r, cx, cy - r,
+    "C", cx + k, cy - r, cx + r, cy - k, cx + r, cy, "Z",
+  }, background)
+  local f = scale and scale ~= 1 and sub_font(font, scale) or base
+  local sw, sh = f:get_width(sub_icon), f:get_height()
+  renderer.draw_text(f, sub_icon, cx - sw / 2, cy - sh / 2, color)
+end
+
+
 ---Shortens text with an ellipsis so that it fits a width: its end is cut, or
 ---its start with `from_start` (for a path, say, whose end matters most).
 ---@param font renderer.font
