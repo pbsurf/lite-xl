@@ -365,9 +365,9 @@ function TerminalView:from_workspace_state(state)
 end
 
 ---Options are config.plugins.terminal, overridden by the profile (options.profile,
----else the configured one; none if options.shell is given, as for the build and
----debugger plugins' "DUMMY" views), overridden by options; environment is merged
----at each step.
+---else the configured one; none if options.shell is given, as for the build
+---plugin's "DUMMY" view), overridden by options; environment is merged at each
+---step.
 function TerminalView:new(options)
   TerminalView.super.new(self)
   options = options or {}
@@ -386,7 +386,7 @@ function TerminalView:new(options)
     self.options.font:set_letter_spacing(self.options.letter_spacing)
   end
   -- each view resizes its bold font to match its font, and views can have different
-  -- fonts (the debugger's terminal), so each needs its own copy
+  -- fonts (options.font), so each needs its own copy
   self.options.bold_font = self.options.bold_font:copy(self.options.font:get_size())
   self.options.bold_font:set_letter_spacing(self.options.letter_spacing)
   self.options.environment = common.merge(options.environment, {})
@@ -514,7 +514,7 @@ function TerminalView:update()
   if self.options.bold_font:get_size() ~= self.options.font:get_size() then
     self.options.bold_font:set_size(self.options.font:get_size())
   end
-  -- not while hidden (the debugger's closed drawer): shrunk to a line, a terminal would push
+  -- not while hidden (a collapsed panel): shrunk to a line, a terminal would push
   -- what's on screen to the scrollback, and it doesn't come back
   if self.size.x > 0 and self.size.y > 0 and ((self.last_font_size and self.last_font_size ~= self.options.font:get_size()) or not self.terminal or self.last_size.x ~= self.size.x or self.last_size.y ~= self.size.y) then
     local padding_x, padding_y = self:get_padding()

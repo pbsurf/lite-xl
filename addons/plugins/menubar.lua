@@ -133,7 +133,6 @@ config.plugins.menubar = common.merge({
       { command = "build:toggle-output", text = "Build Output" },
       { command = "core:open-log", text = "Log" },
       "-",
-      { command = "debugger:toggle-drawer", text = "Debugger" },
       { command = "debug:show-call-stack", text = "Call Stack" },
       { command = "debug:show-variables", text = "Variables" },
       { command = "debug:show-watches", text = "Watches" },
@@ -216,18 +215,17 @@ config.plugins.menubar = common.merge({
       { command = "build:select-target", text = "Select Target..." },
       { command = "build:next-target", text = "Next Target" },
       "-",
-      -- the debug plugin's, else the older debugger's
-      { command = { "debug:build-and-start", "debugger:build-and-start" }, text = "Build and Debug" },
-      { command = { "debug:start-or-continue", "debugger:start-or-continue" }, text = "Start or Continue Debugging" },
-      { command = { "debug:start-at-entry" }, text = "Start at Entry" },
-      { command = { "debug:pause", "debugger:halt" }, text = "Pause" },
-      { command = { "debug:stop", "debugger:terminate" }, text = "Stop Debugging" },
-      { command = { "debug:step-over", "debugger:step-over" }, text = "Step Over" },
-      { command = { "debug:step-into", "debugger:step-into" }, text = "Step Into" },
-      { command = { "debug:step-out", "debugger:step-out" }, text = "Step Out" },
-      { command = { "debug:run-to-cursor" }, text = "Run to Cursor" },
-      { command = { "debug:toggle-breakpoint", "debugger:toggle-line-breakpoint" }, text = "Toggle Breakpoint" },
-      { command = { "debug:add-watch" }, text = "Add Watch..." },
+      { command = "debug:build-and-start", text = "Build and Debug" },
+      { command = "debug:start-or-continue", text = "Start or Continue Debugging" },
+      { command = "debug:start-at-entry", text = "Start at Entry" },
+      { command = "debug:pause", text = "Pause" },
+      { command = "debug:stop", text = "Stop Debugging" },
+      { command = "debug:step-over", text = "Step Over" },
+      { command = "debug:step-into", text = "Step Into" },
+      { command = "debug:step-out", text = "Step Out" },
+      { command = "debug:run-to-cursor", text = "Run to Cursor" },
+      { command = "debug:toggle-breakpoint", text = "Toggle Breakpoint" },
+      { command = "debug:add-watch", text = "Add Watch..." },
     } },
     { title = "Tools", rows = {
       { command = "indent:set-file-indent-size", text = "Set Indent Size..." },
@@ -271,10 +269,6 @@ config.plugins.menubar = common.merge({
     ["build:toggle-output"] = function()
       local build = package.loaded["plugins.build"]
       return build and build.is_output_shown()
-    end,
-    ["debugger:toggle-drawer"] = function()
-      local debugger = package.loaded["plugins.debugger"]
-      return debugger and debugger:should_show_drawer()
     end,
     ["line-wrapping:toggle"] = function() return core.active_view.wrapped_settings ~= nil end,
     -- the debugger's views: open (a tab somewhere)

@@ -27,14 +27,6 @@
       "dependencies": { "json": {}, "terminal": {} }
     },
     {
-      "id": "debugger",
-      "description": "Debugger (lite-xl-ide 50c1b40) with a breakpoint column and glyph markers; runs the build target's binary in its working directory and environment.",
-      "version": "0.2",
-      "mod_version": "3",
-      "path": "addons/plugins/debugger",
-      "dependencies": { "build": {}, "json": {} }
-    },
-    {
       "id": "debug",
       "description": "Debugger (gdb): the program in a terminal tab, breakpoints in the gutter; call stack, variables, watches, threads and breakpoints as ordinary tabs; runs the build target.",
       "version": "0.2",

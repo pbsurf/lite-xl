@@ -1,6 +1,6 @@
 -- Targets from VS Code's .vscode/tasks.json and .vscode/launch.json: one per
 -- launch configuration (request "launch"), building with its preLaunchTask
--- and running its program (debuggable with the debugger plugin for the native
+-- and running its program (debuggable with the debug plugin for the native
 -- types: cppdbg, gdb, lldb), then one per task, build only.
 --
 -- Supported: JSON with comments and trailing commas; the "linux"/"osx"/

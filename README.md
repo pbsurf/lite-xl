@@ -74,7 +74,7 @@ upstream's `release/v2.1.x`. Additions to the editor:
   wakes the editor only when there's data, so an idle editor uses no CPU.
 * **Key bindings:** those made in the user module come before plugins'
   (no matter that plugins load later), and `config.plugin_keys` chooses which
-  of a plugin's bindings to keep (`{ build = { "f6" }, debugger = false }`);
+  of a plugin's bindings to keep (`{ build = { "f6" }, debug = false }`);
   `keymap.origin` records which plugin added each.
 * **Ctrl+P modes**, as in VS Code: `>` runs a command, `:` goes to a line, and
   with lsp `@` finds a symbol in the file and `#` one in the workspace
@@ -221,14 +221,13 @@ another repository's version, uninstalls removing dependents under `--assume-yes
   `head->next->value`; a selection as is), in place of the language server's
   hover popups. The views are ordinary tabs: in the bottom panel at first, kept
   where they're dragged. Scriptable from
-  Lua (`require("plugins.debug").session`). Replaces debugger, still there for now.
+  Lua (`require("plugins.debug").session`).
 * **shapes:** antialiased shape helpers (squiggly underlines, circles, arrows) for plugins.
 * **qtcreator:** a light color theme matching Qt Creator's.
 
 Also imported with changes: lsp and lintplus (squiggly diagnostics, diagnostics in
-hover popups), debugger (from lite-xl-ide), tab_switcher, tab_overflow,
-minimap, nerdicons, language_yaml, the widget library, and repl (evaluates Lua in
-a running editor).
+hover popups), tab_switcher, tab_overflow, minimap, nerdicons, language_yaml, the
+widget library, and repl (evaluates Lua in a running editor).
 
 ## Overview
 
