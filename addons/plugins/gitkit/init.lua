@@ -54,7 +54,6 @@ config.plugins.gitkit = common.merge({
 local git = require "plugins.gitkit.git"
 local CommitList = require "plugins.gitkit.commitlist"
 local CommitView = require "plugins.gitkit.commitview"
-local ReadDoc = require "plugins.gitkit.readdoc"
 local revision = require "plugins.gitkit.revision"
 local diff = require "plugins.gitkit.diff"
 
@@ -355,25 +354,12 @@ if config.plugins.contextmenu ~= false then
   end)
 end
 
--- Read-only docs (commits, files at a revision) can't be cut from, pasted
--- into or replaced in; the commit view can be searched (core's find takes
--- only plain DocViews)
+-- the commit view can be searched (core's find takes only plain DocViews)
 local function wrap_predicate(name, fn)
   local cmd = command.map[name]
   if not cmd then return end
   local predicate = cmd.predicate
   cmd.predicate = function(...) return fn(predicate, ...) end
-end
-
-local function read_only(view)
-  return view:extends(DocView) and view.doc:is(ReadDoc)
-end
-
-for _, name in ipairs({ "doc:cut", "doc:paste", "find-replace:replace" }) do
-  wrap_predicate(name, function(predicate, ...)
-    if read_only(core.active_view) then return false end
-    return predicate(...)
-  end)
 end
 
 wrap_predicate("find-replace:find", function(predicate, ...)

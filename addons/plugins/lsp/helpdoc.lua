@@ -5,6 +5,8 @@ local Doc = require "core.doc"
 ---@class lsp.helpdoc : core.doc
 local HelpDoc = Doc:extend()
 
+HelpDoc.read_only = true
+
 ---Set the help text.
 ---@param text string
 function HelpDoc:set_text(text)
@@ -22,8 +24,6 @@ function HelpDoc:set_text(text)
   self:reset_syntax()
 end
 
-function HelpDoc:raw_insert(...) end
-function HelpDoc:raw_remove(...) end
 function HelpDoc:load(...) end
 function HelpDoc:reload() end
 function HelpDoc:save(...) end

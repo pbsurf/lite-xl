@@ -14,6 +14,8 @@ local ReadDoc = Doc:extend()
 
 function ReadDoc:__tostring() return "ReadDoc" end
 
+ReadDoc.read_only = true
+
 ---@param name string
 ---@param syntax_path? string
 function ReadDoc:new(name, syntax_path)
@@ -56,8 +58,6 @@ end
 
 function ReadDoc:get_name() return self.name end
 function ReadDoc:is_dirty() return false end
-function ReadDoc:raw_insert(...) end
-function ReadDoc:raw_remove(...) end
 function ReadDoc:load(...) end
 function ReadDoc:reload() end
 function ReadDoc:save()
