@@ -303,7 +303,8 @@ local function get_partial_symbol()
 end
 
 local function get_active_view()
-  if core.active_view:is(DocView) then
+  -- nothing to complete in a doc that can't be edited
+  if core.active_view:is(DocView) and not core.active_view.doc.read_only then
     return core.active_view
   end
 end

@@ -295,3 +295,13 @@ command.add("core.commandview", {
     if last_sel then update_preview(last_sel, last_fn, last_text) end
   end
 })
+
+-- replacing can't change a read-only doc
+local replace_cmd = command.map["find-replace:replace"]
+local replace_predicate = replace_cmd.predicate
+replace_cmd.predicate = function(...)
+  if core.active_view:extends(DocView) and core.active_view.doc.read_only then
+    return false
+  end
+  return replace_predicate(...)
+end

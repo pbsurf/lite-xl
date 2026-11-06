@@ -10,6 +10,12 @@ local Doc = Object:extend()
 
 function Doc:__tostring() return "Doc" end
 
+---True for a doc that can't be edited (a commit, help text...): insert and
+---remove do nothing, typing doesn't move the cursor, and the editing commands
+---are disabled in it. Subclasses set it.
+---@type boolean
+Doc.read_only = false
+
 local function split_lines(text)
   local res = {}
   for line in (text .. "\n"):gmatch("(.-)\n") do
@@ -559,6 +565,7 @@ end
 
 
 function Doc:insert(line, col, text)
+  if self.read_only then return end
   self.redo_stack = { idx = 1 }
   -- Reset the clean id when we're pushing something new before it
   if self:get_change_id() < self.clean_change_id then
@@ -571,6 +578,7 @@ end
 
 
 function Doc:remove(line1, col1, line2, col2)
+  if self.read_only then return end
   self.redo_stack = { idx = 1 }
   line1, col1 = self:sanitize_position(line1, col1)
   line2, col2 = self:sanitize_position(line2, col2)
@@ -591,6 +599,7 @@ end
 
 
 function Doc:text_input(text, idx)
+  if self.read_only then return end
   for sidx, line1, col1, line2, col2 in self:get_selections(true, idx or true) do
     if line1 ~= line2 or col1 ~= col2 then
       self:delete_to_cursor(sidx)
@@ -602,6 +611,7 @@ end
 
 
 function Doc:ime_text_editing(text, start, length, idx)
+  if self.read_only then return end
   for sidx, line1, col1, line2, col2 in self:get_selections(true, idx or true) do
     if line1 ~= line2 or col1 ~= col2 then
       self:delete_to_cursor(sidx)

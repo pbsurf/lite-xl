@@ -723,6 +723,28 @@ end
 
 command.add("core.docview", commands)
 
+-- commands that change the text: disabled in a read-only doc, so their keys
+-- fall through to other bindings instead of moving the cursor
+local editing = {
+  "doc:cut", "doc:paste", "doc:undo", "doc:redo",
+  "doc:newline", "doc:newline-below", "doc:newline-above",
+  "doc:delete", "doc:backspace", "doc:join-lines", "doc:indent", "doc:unindent",
+  "doc:duplicate-lines", "doc:delete-lines", "doc:move-lines-up",
+  "doc:move-lines-down", "doc:toggle-block-comments", "doc:toggle-line-comments",
+  "doc:upper-case", "doc:lower-case", "doc:toggle-line-ending",
+}
+for name in pairs(translations) do table.insert(editing, "doc:delete-to-" .. name) end
+for _, name in ipairs(editing) do
+  local cmd = command.map[name]
+  local predicate = cmd.predicate
+  cmd.predicate = function(...)
+    if core.active_view:extends(DocView) and core.active_view.doc.read_only then
+      return false
+    end
+    return predicate(...)
+  end
+end
+
 local function can_undo(stack) return stack[stack.idx - 1] ~= nil end
 local function can_copy(dv) return config.copy_whole_line or dv.doc:has_any_selection() end
 local function has_filename(dv) return dv.doc.filename ~= nil end
