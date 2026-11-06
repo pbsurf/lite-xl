@@ -1938,13 +1938,15 @@ end
 function core.compose_window_title(title)
   local parts = {}
   if title and title ~= "" then
+    local pre, rest = title:match("^(%* )(.*)$")
+    if pre then title = rest end
     local path = common.home_expand(title)
     if core.project_dir and common.path_belongs_to(path, core.project_dir) then
       title = path:sub(#core.project_dir + 2)
     elseif common.is_absolute_path(path) then
       title = common.basename(path)
     end
-    table.insert(parts, title)
+    table.insert(parts, (pre or "") .. title)
   end
   if core.project_dir then table.insert(parts, common.basename(core.project_dir)) end
   table.insert(parts, "Lite XL")
