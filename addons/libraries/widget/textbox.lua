@@ -194,11 +194,22 @@ function TextBox:get_text()
   return self.textview:get_text()
 end
 
---- Set the text displayed on the textbox.
+--- Set the text displayed on the textbox; "" shows the placeholder, unless
+--- the box is focused.
 ---@param text string
 ---@param select? boolean
 function TextBox:set_text(text, select)
-  self.textview:set_text(text, select)
+  if text == "" and not self.active then
+    if self.placeholder_active then return end
+    local was_empty = self.textview:get_text() == ""
+    -- the doc holds the placeholder while it's shown: on_change isn't told
+    self.placeholder_active = true
+    self.textview:set_text(self.placeholder)
+    if not was_empty then self:on_change("") end
+  else
+    self.placeholder_active = false
+    self.textview:set_text(text, select)
+  end
 end
 
 --
@@ -255,7 +266,7 @@ function TextBox:activate()
   self.hover_border = style.caret
   if self.placeholder_active then
     self.placeholder_active = false
-    self:set_text("")
+    self.textview:set_text("")
   end
   self.active = true
   core.request_cursor("ibeam")
@@ -266,7 +277,7 @@ function TextBox:deactivate()
   self.drag_select = false
   if self:get_text() == "" then
     self.placeholder_active = true
-    self:set_text(self.placeholder)
+    self.textview:set_text(self.placeholder)
   end
   self.active = false
   core.request_cursor("arrow")

@@ -114,7 +114,6 @@ function NumberBox:set_value(value)
   else
     self.textbox:set_text(tostring(self.minimum))
   end
-  self.textbox.placeholder_active = false
   self.current_text = self.textbox:get_text()
   self:on_change(tonumber(self.current_text))
 end
