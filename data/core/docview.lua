@@ -92,7 +92,6 @@ end
 ---The file's name, or, when another open doc has a file of the same name, the
 ---shortest end of its path that no other one shares (e.g. core/init.lua).
 function DocView:get_name()
-  local pre = self.doc:is_dirty() and "* " or ""
   local path = self.doc.abs_filename or self.doc:get_name()
   local name = path:match("[^/\\]*$")
   local parts, n = nil, 1
@@ -109,18 +108,23 @@ function DocView:get_name()
       n = math.max(n, shared + 1)
     end
   end
-  if n == 1 then return pre .. name end
-  if n > #parts then return pre .. common.home_encode(path) end
-  return pre .. table.concat(parts, PATHSEP, #parts - n + 1)
+  if n == 1 then return name end
+  if n > #parts then return common.home_encode(path) end
+  return table.concat(parts, PATHSEP, #parts - n + 1)
+end
+
+
+function DocView:is_modified()
+  return self.doc:is_dirty()
 end
 
 
 function DocView:get_filename()
+  local pre = self.doc:is_dirty() and "* " or ""
   if self.doc.abs_filename then
-    local pre = self.doc:is_dirty() and "* " or ""
     return pre .. common.home_encode(self.doc.abs_filename)
   end
-  return self:get_name()
+  return pre .. self:get_name()
 end
 
 

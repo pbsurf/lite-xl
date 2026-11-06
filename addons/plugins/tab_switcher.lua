@@ -104,7 +104,7 @@ function tab_switcher.get_tab_list(base_node)
   }
   for _,v in ipairs(raw_list) do
     table.insert(list, setmetatable({
-      text = v:get_name(),
+      text = (v:is_modified() and "* " or "") .. v:get_name(),
       font = v:get_name_style(core.command_view:get_font()),
       view = v
     }, mt))

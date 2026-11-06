@@ -345,7 +345,8 @@ local TerminalView = View:extend()
 -- what the program wrote, as the build plugin's terminal does)
 TerminalView.close_on_exit = true
 
-function TerminalView:get_name() return (self.modified_since_last_focus and "* " or "") .. (self.terminal and self.terminal:name() or "Terminal") end
+function TerminalView:get_name() return self.terminal and self.terminal:name() or "Terminal" end
+function TerminalView:is_modified() return self.modified_since_last_focus end
 function TerminalView:supports_text_input() return true end
 
 -- the workspace plugin reopens a terminal tab (as a new shell) with its profile and

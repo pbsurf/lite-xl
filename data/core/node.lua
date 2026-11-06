@@ -803,10 +803,14 @@ function Node:draw_tab(view, is_active, is_hovered, is_close_hovered, x, y, w, h
     end
     renderer.draw_rect(x, y, fw, h - (is_active and 0 or style.divider_size), color)
   end
-  -- Close button
+  -- Close button, or for a modified view a dot in its place, on any tab,
+  -- that turns into the close button when hovered
   local cx, cw, cpad = close_button_location(x, w)
   local show_close_button = ((is_active or is_hovered) and not standalone and config.tab_close_button)
-  if show_close_button then
+  if view:is_modified() and not is_close_hovered then
+    local color = is_active and style.text or style.dim
+    common.draw_circle(cx + cw / 2, y + h / 2, math.min(cw, h) * 0.3, color)
+  elseif show_close_button then
     local close_style = is_close_hovered and style.text or style.dim
     common.draw_text(style.icon_font, close_style, "C", nil, cx, y, cw, h)
   end

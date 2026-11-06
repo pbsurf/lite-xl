@@ -98,6 +98,14 @@ function View:get_name()
   return "---"
 end
 
+
+---Whether the view has changes to draw attention to (e.g. a doc's unsaved
+---changes): its tab shows a dot in place of the close button.
+---@return boolean
+function View:is_modified()
+  return false
+end
+
 ---The font to draw this view's name in (tab titles, tab lists), derived from
 ---`font`, the one the caller would use; e.g. an italic copy. Italic for a
 ---view the next of its kind replaces (`reusable`, core.reusable).

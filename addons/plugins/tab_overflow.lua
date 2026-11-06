@@ -35,7 +35,7 @@ local function show_menu(node, x, y)
     local icon, icon_font, icon_color, sub_icon, sub_scale = view:get_icon(false)
     if icon then icon_w = math.max(icon_w, icon_font:get_width(icon)) end
     table.insert(items, {
-      text = view:get_name(), font = view:get_name_style(style.font),
+      text = (view:is_modified() and "* " or "") .. view:get_name(), font = view:get_name_style(style.font),
       icon = icon, icon_font = icon_font, icon_color = icon_color,
       sub_icon = sub_icon, sub_scale = sub_scale,
       badge = view:get_icon_badge(),

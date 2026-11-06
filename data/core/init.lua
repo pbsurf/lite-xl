@@ -1926,8 +1926,11 @@ end
 
 
 local function get_title_filename(view)
-  local doc_filename = view.get_filename and view:get_filename() or view:get_name()
-  if doc_filename ~= "---" then return doc_filename end
+  if view.get_filename then return view:get_filename() end
+  local name = view:get_name()
+  -- nil (e.g. the treeview's) keeps the title as it is
+  if name == nil then return nil end
+  if name ~= "---" then return (view:is_modified() and "* " or "") .. name end
   return ""
 end
 

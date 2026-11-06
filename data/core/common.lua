@@ -378,6 +378,23 @@ function common.italic_font(font)
 end
 
 
+---Draws a filled, antialiased circle.
+---@param cx number
+---@param cy number
+---@param r number
+---@param color renderer.color
+function common.draw_circle(cx, cy, r, color)
+  local k = r * 0.5523  -- control point distance for a quarter circle
+  renderer.draw_path({
+    "M", cx + r, cy,
+    "C", cx + r, cy + k, cx + k, cy + r, cx, cy + r,
+    "C", cx - k, cy + r, cx - r, cy + k, cx - r, cy,
+    "C", cx - r, cy - k, cx - k, cy - r, cx, cy - r,
+    "C", cx + k, cy - r, cx + r, cy - k, cx + r, cy, "Z",
+  }, color)
+end
+
+
 ---Draws a dot at the top right corner of an icon drawn with
 ---`common.draw_text(font, color, icon, nil, x, y, 0, h)`, ringed with the
 ---background color to set it apart from the icon.
@@ -392,19 +409,9 @@ function common.draw_icon_badge(color, background, font, icon, x, y, h)
   local th = font:get_height()
   local cx = x + font:get_width(icon) - th * 0.1
   local cy = common.round(y + (h - th) / 2) + th * 0.3
-  local function circle(r, c)
-    local k = r * 0.5523  -- control point distance for a quarter circle
-    renderer.draw_path({
-      "M", cx + r, cy,
-      "C", cx + r, cy + k, cx + k, cy + r, cx, cy + r,
-      "C", cx - k, cy + r, cx - r, cy + k, cx - r, cy,
-      "C", cx - r, cy - k, cx - k, cy - r, cx, cy - r,
-      "C", cx + k, cy - r, cx + r, cy - k, cx + r, cy, "Z",
-    }, c)
-  end
   local r = th * 0.17
-  circle(r + 1.5 * SCALE, background)
-  circle(r, color)
+  common.draw_circle(cx, cy, r + 1.5 * SCALE, background)
+  common.draw_circle(cx, cy, r, color)
 end
 
 
@@ -445,14 +452,7 @@ function common.draw_icon_sub(sub_icon, color, background, font, icon, x, y, h, 
   local cx = x + font:get_width(icon) - bw * 0.3
   local cy = common.round(y + (h - th) / 2) + th - bh * 0.4
   local r = math.max(bw, bh * 0.8) / 2 + 1.5 * SCALE
-  local k = r * 0.5523  -- control point distance for a quarter circle
-  renderer.draw_path({
-    "M", cx + r, cy,
-    "C", cx + r, cy + k, cx + k, cy + r, cx, cy + r,
-    "C", cx - k, cy + r, cx - r, cy + k, cx - r, cy,
-    "C", cx - r, cy - k, cx - k, cy - r, cx, cy - r,
-    "C", cx + k, cy - r, cx + r, cy - k, cx + r, cy, "Z",
-  }, background)
+  common.draw_circle(cx, cy, r, background)
   local f = scale and scale ~= 1 and sub_font(font, scale) or base
   local sw, sh = f:get_width(sub_icon), f:get_height()
   renderer.draw_text(f, sub_icon, cx - sw / 2, cy - sh / 2, color)
