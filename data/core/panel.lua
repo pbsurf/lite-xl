@@ -91,7 +91,7 @@ local function on_collapse(node)
   end
 end
 
--- an empty panel leaf lists what opens in it, not the editor's start screen
+-- an empty panel leaf lists what opens in it, not the editor's shortcuts
 -- (lines of commands without a key binding, from plugins not loaded, left out)
 local empty_lines = {
   { fmt = "%s for a terminal", cmd = "terminal:swap-focus" },
@@ -108,7 +108,7 @@ function panel.init_leaf(node)
   node.on_collapse = on_collapse
   node.fit_tab_width, node.max_tab_width = true, 640
   for _, view in ipairs(node.views) do
-    if view:is(EmptyView) then view.lines, view.show_title = empty_lines, false end
+    if view:is(EmptyView) then view.lines = empty_lines end
   end
 end
 
