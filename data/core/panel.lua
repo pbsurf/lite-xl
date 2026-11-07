@@ -122,7 +122,8 @@ function Node:split(...)
 end
 
 -- A split of the editor area (the unlocked root): the editor area above, the
--- panel's region below
+-- panel's region below. Returns the region's node in the tree: a copy of
+-- `region` (Node:consume), which isn't used after.
 local function attach(region)
   -- sizes as they are now: a node that just went away (the panel, hidden) may
   -- still have left its sibling the size it had
@@ -132,7 +133,8 @@ local function attach(region)
   local active = core.active_view
   local root = core.root_view:get_unlocked_root()
   local area_h = root.size.y
-  root:split("down"):consume(region)
+  local node = root:split("down")
+  node:consume(region)
   root.get_divider_size, root.get_divider_color = divider_size, divider_color
   if area_h > 0 and panel.height then
     root.divider = 1 - common.clamp(panel.height, area_h * 0.1, area_h * 0.9) / area_h
@@ -140,6 +142,7 @@ local function attach(region)
     root.divider = hidden_divider or 2 / 3
   end
   core.set_active_view(active)
+  return node
 end
 
 -- a new panel, empty; the focus stays (a new node focuses its EmptyView)
@@ -148,8 +151,7 @@ local function create()
   local region = Node()
   core.set_active_view(active)
   panel.init_leaf(region)
-  attach(region)
-  return region
+  return attach(region)
 end
 
 ---Whether a view is in the panel (shown or hidden).
