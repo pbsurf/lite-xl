@@ -1,7 +1,8 @@
 -- mod-version:3
 -- Buttons for the tab bar while its tabs scroll: scroll_left and scroll_right, and
 -- menu, which shows how many tabs there are and opens a menu of all the tabs in
--- the split. config.tab_buttons chooses which show; tab-overflow:show opens the
+-- the split, each with a close button (delete closes the selected one from the
+-- keyboard). config.tab_buttons chooses which show; tab-overflow:show opens the
 -- menu from the keyboard.
 local core = require "core"
 local common = require "core.common"
@@ -27,6 +28,15 @@ Node.tab_buttons.scroll_right = {
   end,
 }
 
+-- index of the item whose close button the mouse is over, or 0
+menu.hovered_close = 0
+
+-- An item's close button: x and width, as a tab's
+local function close_button_location(x, w)
+  local cw = style.icon_font:get_width("C")
+  return x + w - cw - style.padding.x / 2, cw
+end
+
 ---Shows the menu of the node's tabs, its top right corner at x, y.
 local function show_menu(node, x, y)
   local items = {}
@@ -35,11 +45,12 @@ local function show_menu(node, x, y)
     local icon, icon_font, icon_color, sub_icon, sub_scale = view:get_icon(false)
     if icon then icon_w = math.max(icon_w, icon_font:get_width(icon)) end
     table.insert(items, {
-      text = (view:is_modified() and "* " or "") .. view:get_name(), font = view:get_name_style(style.font),
+      text = view:get_name(), font = view:get_name_style(style.font),
       icon = icon, icon_font = icon_font, icon_color = icon_color,
       sub_icon = sub_icon, sub_scale = sub_scale,
       badge = view:get_icon_badge(),
       active = view == node.active_view,
+      view = view,
       command = function()
         if node:get_view_idx(view) then node:set_active_view(view) end
       end,
@@ -48,15 +59,34 @@ local function show_menu(node, x, y)
   menu.itemset = {}
   menu:register(nil, items)
   if menu:show(x, y) then
-    -- ContextMenu sizes the menu from the text only: add the icon column
+    -- ContextMenu sizes the menu from the text only: add the icon column and
+    -- the close buttons'
     menu.icon_w = icon_w > 0 and icon_w + style.padding.x / 2 or 0
     menu.items.width = menu.items.width + menu.icon_w
+      + style.icon_font:get_width("C") + style.padding.x / 2
     menu.position.x = math.max(0, x - menu.items.width)
-    menu.node = node
+    menu.node, menu.anchor_x, menu.anchor_y = node, x, y
+    menu.hovered_close = 0
     for i, item in ipairs(items) do
       if item.active then menu.selected = i end
     end
   end
+end
+
+---Closes the item's view, keeping the menu open on the remaining tabs; a
+---prompt to save it (or no tabs left) closes the menu.
+local function close_item(item)
+  local node = menu.node
+  node:close_view(core.root_view.root_node, item.view)
+  if node:get_view_idx(item.view) or #node.views == 0
+      or not core.root_view.root_node:get_node_for_view(node.views[1]) then
+    menu:hide()
+    return
+  end
+  local selected = menu.selected
+  show_menu(node, menu.anchor_x, menu.anchor_y)
+  menu.selected = math.min(selected, #menu.items)
+  if menu.mouse_x then menu:on_mouse_moved(menu.mouse_x, menu.mouse_y) end
 end
 
 -- "N ▾", N the number of tabs
@@ -100,8 +130,48 @@ function menu:draw_context_menu()
         common.draw_icon_badge(item.badge, background, item.icon_font, item.icon, tx, y, h)
       end
     end
+    local cx, cw = close_button_location(x, w)
     local color = item.active and style.accent or style.text
+    core.push_clip_rect(x, y, cx - x, h)
     common.draw_text(item.font, color, item.text, "left", tx + self.icon_w, y, w, h)
+    core.pop_clip_rect()
+    -- as on tabs: a dot for a modified view, the close button on the
+    -- selected item and in place of the dot when hovered
+    local close_hovered = i == self.hovered_close
+    if item.view:is_modified() and not close_hovered then
+      common.draw_circle(cx + cw / 2, y + h / 2, math.min(cw, h) * 0.3,
+        i == self.selected and style.text or style.dim)
+    elseif i == self.selected then
+      common.draw_text(style.icon_font, close_hovered and style.text or style.dim,
+        "C", nil, cx, y, cw, h)
+    end
+  end
+end
+
+local menu_on_mouse_moved = menu.on_mouse_moved
+function menu:on_mouse_moved(px, py, ...)
+  if not menu_on_mouse_moved(self, px, py, ...) then return false end
+  self.mouse_x, self.mouse_y = px, py
+  self.hovered_close = 0
+  for i, _, x, y, w, h in self:each_item() do
+    if i == self.selected then
+      local cx, cw = close_button_location(x, w)
+      if px >= cx and px < cx + cw and py > y and py <= y + h then
+        self.hovered_close = i
+      end
+      break
+    end
+  end
+  return true
+end
+
+local menu_on_key_pressed = menu.on_key_pressed
+function menu:on_key_pressed(key)
+  local item = self:get_item_selected()
+  if key == "delete" and item then
+    close_item(item)
+  else
+    menu_on_key_pressed(self, key)
   end
 end
 
@@ -116,6 +186,10 @@ function RootView:on_mouse_pressed(button, x, y, clicks)
   if x < mx or x >= mx + menu.items.width or y < my or y >= my + menu.items.height then
     menu.selected = -1
   end
+  if button == "left" and menu.hovered_close > 0 then
+    close_item(menu.items[menu.hovered_close])
+    return true
+  end
   return menu:on_mouse_pressed(button, x, y, clicks)
 end
 
@@ -128,7 +202,8 @@ end
 local menu_hide = menu.hide
 function menu:hide()
   menu_hide(self)
-  self.node = nil
+  self.node, self.mouse_x, self.mouse_y = nil, nil, nil
+  self.hovered_close = 0
 end
 
 local root_update = RootView.update
