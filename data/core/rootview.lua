@@ -339,6 +339,21 @@ end
 
 ---@param button core.view.mousebutton
 ---@param x number
+-- a doc's tab dropped on another node replaces its tab of that doc there, if
+-- it has one: a node has one tab per doc, as open_doc() keeps it (the node
+-- looked up: the one dropped on may have been moved into its parent, when the
+-- dragged tab's node went away)
+local function close_other_views_of_doc(root, view)
+  if not view:is(DocView) then return end
+  local node = root:get_node_for_view(view)
+  for i = #node.views, 1, -1 do
+    local other = node.views[i]
+    if other ~= view and other:is(DocView) and other.doc == view.doc then
+      node:close_view(root, other)
+    end
+  end
+end
+
 ---@param y number
 function RootView:on_mouse_released(button, x, y, ...)
   if self.dragged_divider then
@@ -363,11 +378,13 @@ function RootView:on_mouse_released(button, x, y, ...)
           elseif split_type == "middle" and node ~= dragged_node then -- move to other node
             dragged_node:remove_view(self.root_node, view)
             node:add_view(view)
+            close_other_views_of_doc(self.root_node, view)
             self.root_node:get_node_for_view(view):set_active_view(view)
           elseif split_type == "tab" then -- move besides other tabs
             local tab_index = node:get_drag_overlay_tab_position(self.mouse.x, self.mouse.y, dragged_node, self.dragged_node.idx)
             dragged_node:remove_view(self.root_node, view)
             node:add_view(view, tab_index)
+            if node ~= dragged_node then close_other_views_of_doc(self.root_node, view) end
             self.root_node:get_node_for_view(view):set_active_view(view)
           end
           -- a reusable view dragged out of the panel, or within the editor, is
