@@ -45,7 +45,8 @@ upstream's `release/v2.1.x`. Additions to the editor:
   tabs can be dragged or moved (tab menu) to the editor and back. It can be split
   like the editor. ctrl+j (`root:toggle-panel`; join lines moves to
   ctrl+shift+j), or the icon at the right end of the status bar, hides it with all
-  its tabs, their programs running on, and shows it again. The workspace saves it
+  its tabs, their programs running on, and shows it again (empty if it had none,
+  to drag tabs to). The workspace saves it
   (the tabs that can be restored, like the debugger's) and restores it hidden.
 * **Preview tabs** (`core.reusable`, from the ephemeral_tabs plugin, which this
   replaces): a file opened while browsing (a click in the tree, go to definition,

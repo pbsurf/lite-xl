@@ -117,8 +117,8 @@ command.add(function()
 end, t)
 
 -- the bottom panel: hidden with all its tabs (their programs running on), or
--- shown again as it was
-command.add(function() return panel.is_shown() or panel.has_hidden() end, {
+-- shown again as it was (empty if it had none)
+command.add(nil, {
   ["root:toggle-panel"] = function() panel.toggle() end,
 })
 

@@ -443,7 +443,7 @@ end
 
 ---The bottom panel's toggle (core.panel, root:toggle-panel), last on the right:
 ---a window with its bottom part filled while the panel is shown, an outline
----while it's hidden; dim with nothing to show.
+---while it's hidden; dim with nothing to show (a click shows it empty).
 function StatusView:register_panel_item()
   local item = self:add_item({
     name = "core:panel",
@@ -456,7 +456,7 @@ function StatusView:register_panel_item()
       key = key and " (" .. key .. ")" or ""
       if panel.is_shown() then return "Hide the bottom panel" .. key end
       if panel.has_hidden() then return "Show the bottom panel" .. key end
-      return "The bottom panel is empty"
+      return "Show the bottom panel, empty" .. key
     end,
   })
   item.on_draw = function(x, y, h, hovered, calc_only)

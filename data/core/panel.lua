@@ -2,6 +2,7 @@ local core = require "core"
 local common = require "core.common"
 local style = require "core.style"
 local Node = require "core.node"
+local EmptyView = require "core.emptyview"
 local reusable = require "core.reusable"
 
 ---The bottom panel: a region below the editor area, split from it, holding
@@ -128,6 +129,26 @@ local function attach(region)
   core.set_active_view(active)
 end
 
+-- a new panel, empty; the focus stays (a new node focuses its EmptyView)
+local function create()
+  local active = core.active_view
+  local region = Node()
+  core.set_active_view(active)
+  panel.init_leaf(region)
+  attach(region)
+  return region
+end
+
+-- an empty panel leaf says what it's for, not the editor's start screen
+local empty_draw = EmptyView.draw
+function EmptyView:draw()
+  local node = core.root_view.root_node:get_node_for_view(self)
+  if not (node and node.is_panel) then return empty_draw(self) end
+  self:draw_background(style.background)
+  common.draw_text(style.font, style.dim, "Drag tabs here", "center",
+    self.position.x, self.position.y, self.size.x, self.size.y)
+end
+
 ---Whether a view is in the panel (shown or hidden).
 ---@param view core.view
 ---@return boolean
@@ -152,13 +173,7 @@ function panel.show(view, opts)
   local root = core.root_view.root_node
   local node = root:get_node_for_view(view)
   if not node then
-    local region = panel.get_region()
-    if not region then
-      region = Node()
-      panel.init_leaf(region)
-      attach(region)
-    end
-    node = last_used_leaf(region)
+    node = last_used_leaf(panel.get_region() or create())
     node:add_view(view)
   end
   node:set_active_view(view)
@@ -204,8 +219,12 @@ function panel.hide()
   if region.size.y > 0 then panel.height = region.size.y end
   hidden_divider = region.size.y <= 0 and split.divider or nil
   split:consume(split.a == region and split.b or split.a)
-  hidden = region
-  for _, view in ipairs(region:get_children()) do view:on_mouse_left() end
+  -- kept if it has tabs
+  local views = region:get_children()
+  for _, view in ipairs(views) do view:on_mouse_left() end
+  for _, view in ipairs(views) do
+    if not view:is(EmptyView) then hidden = region break end
+  end
   if had_focus then
     core.set_active_view(core.root_view:get_last_used_node().active_view)
   end
@@ -218,13 +237,16 @@ function panel.has_hidden()
   return hidden ~= nil
 end
 
----Hides the panel, or shows it again as hide() left it.
+---Hides the panel, or shows it again as hide() left it; with nothing to
+---show, shows it empty (for tabs dragged to it), the focus staying.
 ---@param opts? { focus?: boolean } as for show()
 function panel.toggle(opts)
   if panel.is_shown() then
     panel.hide()
   elseif hidden then
     panel.show(last_used_leaf(hidden).active_view, opts)
+  else
+    create()
   end
 end
 
