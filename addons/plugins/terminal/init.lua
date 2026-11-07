@@ -359,6 +359,10 @@ function TerminalView:get_workspace_state()
   local cwd = self.cwd ~= pwd and self.cwd or nil
   if self.options.profile or cwd then return { profile = self.options.profile, cwd = cwd } end
 end
+-- the panel's terminal isn't: the next alt+t makes one
+function TerminalView:is_transient()
+  return core.terminal_view == self and panel.contains(self) or TerminalView.super.is_transient(self)
+end
 function TerminalView:from_workspace_state(state)
   local info = state.cwd and system.get_file_info(state.cwd)
   local environment = info and info.type == "dir" and { PWD = state.cwd } or nil

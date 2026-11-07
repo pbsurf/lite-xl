@@ -3,6 +3,7 @@ local core = require "core"
 local common = require "core.common"
 local DocView = require "core.docview"
 local LogView = require "core.logview"
+local panel = require "core.panel"
 
 
 local function workspace_files_for(project_dir)
@@ -133,13 +134,17 @@ local function load_view(t)
 end
 
 
+-- in the panel, only views that can be restored (with what they need for it):
+-- a tool view of no state would come back empty
 local function save_node(node)
   local res = {}
   res.type = node.type
   if node.type == "leaf" then
     res.views = {}
     for _, view in ipairs(node.views) do
-      local t = not view:is_transient() and save_view(view)
+      local t = not view:is_transient()
+        and (not node.is_panel or view.get_workspace_state)
+        and save_view(view)
       if t then
         table.insert(res.views, t)
         if node.active_view == view then
@@ -147,9 +152,10 @@ local function save_node(node)
         end
       end
     end
-  elseif node.a.is_panel or node.b.is_panel then
-    -- the bottom panel's tool views aren't restored: just the editor area
-    return save_node(node.a.is_panel and node.b or node.a)
+  elseif panel.is_region(node.a) ~= panel.is_region(node.b) then
+    -- the bottom panel (a split of the editor area from it) is saved by
+    -- itself (save_panel)
+    return save_node(panel.is_region(node.a) and node.b or node.a)
   else
     res.divider = node.divider
     res.a = save_node(node.a)
@@ -190,6 +196,14 @@ local function load_node(node, t)
 end
 
 
+-- the bottom panel, shown or hidden: restored hidden
+local function save_panel()
+  local region = panel.get_region() or panel.get_hidden()
+  if not region then return end
+  return { height = panel.get_height(), node = save_node(region) }
+end
+
+
 local function save_directories()
   local project_dir = core.project_dir
   local dir_list = {}
@@ -207,7 +221,9 @@ local function save_workspace()
   if fp then
     local node_text = common.serialize(save_node(root))
     local dir_text = common.serialize(save_directories())
-    fp:write(string.format("return { path = %q, documents = %s, directories = %s }\n", core.project_dir, node_text, dir_text))
+    local panel_text = common.serialize(save_panel())
+    fp:write(string.format("return { path = %q, documents = %s, directories = %s, panel = %s }\n",
+      core.project_dir, node_text, dir_text, panel_text))
     fp:close()
   end
 end
@@ -216,10 +232,20 @@ end
 local function load_workspace()
   local workspace = consume_workspace_file(core.project_dir)
   if workspace then
+    -- the panel first, the editor's views taking the focus after; not into a
+    -- panel there already (entering another project)
+    if workspace.panel and not (panel.is_shown() or panel.has_hidden()) then
+      local region = panel.new_region()
+      load_node(region, workspace.panel.node)
+      panel.restore(region, workspace.panel.height)
+    end
     local root = core.root_view:get_unlocked_root()
     local active_view = load_node(root, workspace.documents)
     if active_view then
       core.set_active_view(active_view)
+    end
+    if not core.root_view.root_node:get_node_for_view(core.active_view) then
+      core.set_active_view(core.root_view:get_last_used_node().active_view)
     end
     for i, dir_name in ipairs(workspace.directories) do
       core.add_project_directory(system.absolute_path(dir_name))

@@ -19,8 +19,9 @@ local hover = require "plugins.debug.hover"
 ---Debugger: runs the program under gdb, in a terminal tab of its own, with
 ---breakpoints in the gutter, the line it stopped at marked, and its call stack
 ---and variables in tabs. Those are ordinary tabs: in the bottom panel at
----first, and kept where they're dragged (the workspace restores those in the
----editor area); a closed one stays closed until shown with its command.
+---first, and kept where they're dragged, the panel's split too (the workspace
+---restores them, the panel hidden until a session shows it); a closed one stays
+---closed until shown with its command.
 ---
 ---Scripting (lxeval): `local debug = require "plugins.debug"`; `debug.start()`,
 ---then `debug.session` (plugins.debug.session) has the state and actions.

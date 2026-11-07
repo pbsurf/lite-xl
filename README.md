@@ -42,10 +42,11 @@ upstream's `release/v2.1.x`. Additions to the editor:
   (`Search "foo": 42`, `Build lite-xl: failed, 3 errors` in red), with progress
   drawn behind it and details in its tooltip. A new search reuses its kind's
   italic tab; double-clicking that tab keeps it. Files never open there, and its
-  tabs can be dragged or moved (tab menu) to the editor and back. ctrl+j
-  (`root:toggle-panel`; join lines moves to ctrl+shift+j), or the icon at the
-  right end of the status bar, hides it with all its tabs, their programs running
-  on, and shows it again.
+  tabs can be dragged or moved (tab menu) to the editor and back. It can be split
+  like the editor. ctrl+j (`root:toggle-panel`; join lines moves to
+  ctrl+shift+j), or the icon at the right end of the status bar, hides it with all
+  its tabs, their programs running on, and shows it again. The workspace saves it
+  (the tabs that can be restored, like the debugger's) and restores it hidden.
 * **Preview tabs** (`core.reusable`, from the ephemeral_tabs plugin, which this
   replaces): a file opened while browsing (a click in the tree, go to definition,
   a search result, ...; callers pass `{ preview = true }` to `RootView:open_doc`)
