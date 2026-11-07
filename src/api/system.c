@@ -487,10 +487,13 @@ top:
       }
 
     case SDL_EVENT_FINGER_UP:
+    // taken by the system (a drag on the title bar moving the window): ends
+    // the touch, without its tap
+    case SDL_EVENT_FINGER_CANCELED:
       {
         SDL_GetWindowSize(window_renderer.window, &w, &h);
 
-        lua_pushstring(L, "touchreleased");
+        lua_pushstring(L, e.type == SDL_EVENT_FINGER_UP ? "touchreleased" : "touchcanceled");
         lua_pushnumber(L, e.tfinger.x * w * window_renderer.scale_x);
         lua_pushnumber(L, e.tfinger.y * h * window_renderer.scale_y);
         lua_pushinteger(L, e.tfinger.fingerID);

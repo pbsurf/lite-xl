@@ -610,6 +610,12 @@ function RootView:on_touch_released(x, y, id)
 end
 
 
+-- a touch the system took (no release comes): it ends, no tap
+function RootView:on_touch_canceled(x, y, id)
+  if self.touch and self.touch.id == id then self.touch = nil end
+end
+
+
 function RootView:on_mouse_wheel(dy, dx)
   local x, y = self.mouse.x, self.mouse.y
   -- the command view's suggestions are drawn over the node above it
