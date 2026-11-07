@@ -91,12 +91,25 @@ local function on_collapse(node)
   end
 end
 
+-- an empty panel leaf lists what opens in it, not the editor's start screen
+-- (lines of commands without a key binding, from plugins not loaded, left out)
+local empty_lines = {
+  { fmt = "%s for a terminal", cmd = "terminal:swap-focus" },
+  { fmt = "%s to build", cmd = "build:build" },
+  { fmt = "%s to search the project", cmd = "project-search:find" },
+  { fmt = "%s to debug", cmd = "debug:start-or-continue" },
+  { fmt = "Tabs can be dragged here" },
+}
+
 ---Makes a leaf the panel's (the workspace restoring it).
 ---@param node core.node
 function panel.init_leaf(node)
   node.is_panel = true
   node.on_collapse = on_collapse
   node.fit_tab_width, node.max_tab_width = true, 640
+  for _, view in ipairs(node.views) do
+    if view:is(EmptyView) then view.lines, view.show_title = empty_lines, false end
+  end
 end
 
 -- a panel leaf's split makes another
@@ -137,16 +150,6 @@ local function create()
   panel.init_leaf(region)
   attach(region)
   return region
-end
-
--- an empty panel leaf says what it's for, not the editor's start screen
-local empty_draw = EmptyView.draw
-function EmptyView:draw()
-  local node = core.root_view.root_node:get_node_for_view(self)
-  if not (node and node.is_panel) then return empty_draw(self) end
-  self:draw_background(style.background)
-  common.draw_text(style.font, style.dim, "Drag tabs here", "center",
-    self.position.x, self.position.y, self.size.x, self.size.y)
 end
 
 ---Whether a view is in the panel (shown or hidden).
