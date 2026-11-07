@@ -478,12 +478,15 @@ static int terminal_escape_sequence(terminal_t* terminal, terminal_escape_type_e
               int w = y == view->cursor_y ? (view->cursor_x+1) : terminal->columns;
               memset(&view->buffer[terminal->columns * y], 0, sizeof(buffer_char_t) * w);
             }
+            // an erased line end doesn't wrap: copied text gets its newline back
+            memset(view->overflows, 0, sizeof(int) * view->cursor_y);
           break;
           case '3':
             terminal_clear_scrollback_buffer(terminal);
             // intentional fallthrough
           case '2':
             memset(view->buffer, 0, sizeof(buffer_char_t) * (terminal->columns * terminal->lines));
+            memset(view->overflows, 0, sizeof(int) * terminal->lines);
             view->cursor_x = 0;
             view->cursor_y = 0;
           break;
@@ -491,6 +494,7 @@ static int terminal_escape_sequence(terminal_t* terminal, terminal_escape_type_e
             for (int y = view->cursor_y; y < terminal->lines; ++y) {
               int x = y == view->cursor_y ? view->cursor_x : 0;
               memset(&view->buffer[terminal->columns * y + x], 0, sizeof(buffer_char_t) * (terminal->columns - x));
+              view->overflows[y] = 0;
             }
           break;
         }
@@ -504,6 +508,8 @@ static int terminal_escape_sequence(terminal_t* terminal, terminal_escape_type_e
         }
         for (int i = s; i < e; ++i)
           view->buffer[view->cursor_y * terminal->columns + i] = (buffer_char_t){ view->cursor_styling, ' ' };
+        if (e == terminal->columns)
+          view->overflows[view->cursor_y] = 0;
       } break;
       // insert / delete lines at the cursor, within the scrolling region
       case 'L':
