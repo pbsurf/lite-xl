@@ -251,8 +251,10 @@ end
 ---The cursor's line and column, counting a tab as `indent_size` columns.
 ---@param dv core.docview
 ---@return integer line, integer col
-local function get_position(dv)
-  local line, col = dv.doc:get_selection()
+---The line and column (counting a tab as indent_size columns) of a position in
+---the view's doc, by default its cursor.
+local function get_position(dv, line, col)
+  if not line then line, col = dv.doc:get_selection() end
   local _, indent_size = dv.doc:get_indent_info()
   -- Calculating tabs when the doc is using the "hard" indent type.
   local ntabs = 0
@@ -287,11 +289,30 @@ function StatusView:register_docview_items()
       }
     end,
     command = "doc:go-to-line",
+    -- with a selection, a second line: where it starts and ends and its
+    -- length in characters; with several, how many and their total length
     tooltip = function()
       local dv = core.active_view
+      local doc = dv.doc
       local line, col = get_position(dv)
-      return string.format("Line %d of %d (%.f%%), column %d",
-        line, #dv.doc.lines, line / #dv.doc.lines * 100, col)
+      local text = string.format("Line %d of %d (%.f%%), column %d",
+        line, #doc.lines, line / #doc.lines * 100, col)
+      local n, chars, sel = 0, 0, nil
+      for _, l1, c1, l2, c2 in doc:get_selections(true) do
+        if l1 ~= l2 or c1 ~= c2 then
+          local t = doc:get_text(l1, c1, l2, c2)
+          n, chars, sel = n + 1, chars + (utf8.len(t) or #t), { l1, c1, l2, c2 }
+        end
+      end
+      if n == 1 then
+        local l1, c1 = get_position(dv, sel[1], sel[2])
+        local l2, c2 = get_position(dv, sel[3], sel[4])
+        text = text .. string.format("\nSelection %d:%d to %d:%d, %d character%s",
+          l1, c1, l2, c2, chars, chars == 1 and "" or "s")
+      elseif n > 1 then
+        text = text .. string.format("\n%d selections, %d characters", n, chars)
+      end
+      return text
     end
   })
 
