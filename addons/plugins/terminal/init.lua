@@ -450,6 +450,9 @@ function TerminalView:on_output(shifts)
       self.selection = nil
     end
   end
+  if type(self.pressing) == "table" then
+    self.pressing[2] = self.pressing[2] - shifts
+  end
 end
 
 
@@ -810,7 +813,7 @@ function TerminalView:on_mouse_pressed(button, x, y, clicks)
     return true
   end
   if button == "left" then
-    local col, row = self:convert_coordinates(x, y)
+    local col, row, col_approx = self:convert_coordinates(x, y)
     local inverted = config.plugins.terminal.inversion_key and keymap.modkeys[config.plugins.terminal.inversion_key]
     if not inverted and self.terminal:mouse_tracking_mode() == "x10" then
       self.terminal:input("\x1B[M" .. string.char(32) .. string.char(32 + col + 1) .. string.char(32 + row + 1) )
@@ -821,7 +824,9 @@ function TerminalView:on_mouse_pressed(button, x, y, clicks)
     else
       if clicks % 4 == 1 then
         self.selection = nil
-        self.pressing = true
+        -- a drag selects from here: by the first move (moves are merged into
+        -- one a frame), the mouse may be several characters on
+        self.pressing = { col_approx, row - self.terminal:scrollback() }
       elseif clicks % 4 == 2 then
         self.word_selecting = { self:get_word_boundaries(col, row) }
         self.selection = { table.unpack(self.word_selecting) }
@@ -855,7 +860,10 @@ function TerminalView:on_mouse_moved(x, y, dx, dy)
     end
     local col, line, col_approx = self:convert_coordinates(x, y)
     local scrollback = self.terminal:scrollback()
-    if not self.selection then self.selection = { col_approx, line - scrollback } end
+    if not self.selection then
+      local start = type(self.pressing) == "table" and self.pressing or { col_approx, line - scrollback }
+      self.selection = { start[1], start[2] }
+    end
     if not self.word_selecting and not self.row_selecting then
       self.selection[3] = col_approx
       self.selection[4] = line - scrollback
