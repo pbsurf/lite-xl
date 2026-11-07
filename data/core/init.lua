@@ -1918,6 +1918,8 @@ function core.on_event(type, ...)
     if callback then callback(status, result) end
   elseif type == "focuslost" then
     core.root_view:on_focus_lost(...)
+  elseif type == "keyboardgrabbed" then
+    core.root_view:on_keyboard_grabbed()
   elseif type == "quit" then
     core.quit()
   end

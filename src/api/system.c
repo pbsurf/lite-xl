@@ -256,6 +256,10 @@ static int push_dialog_event(lua_State *L, SDL_Event *e) {
   }
 }
 
+#if defined(__linux__) && __has_include(<X11/Xlib.h>)
+static unsigned int KEYBOARD_GRAB_EVENT_TYPE = 0;
+#endif
+
 static int f_poll_event(lua_State *L) {
   char buf[16];
   float mx, my;
@@ -282,6 +286,12 @@ top:
   }
   if (DIALOG_EVENT_TYPE && e.type == DIALOG_EVENT_TYPE)
     return push_dialog_event(L, &e);
+#if defined(__linux__) && __has_include(<X11/Xlib.h>)
+  if (KEYBOARD_GRAB_EVENT_TYPE && e.type == KEYBOARD_GRAB_EVENT_TYPE) {
+    lua_pushstring(L, "keyboardgrabbed");
+    return 1;
+  }
+#endif
 
   switch (e.type) {
     case SDL_EVENT_QUIT:
@@ -954,7 +964,12 @@ static int f_get_clipboard(lua_State *L) {
 ** VMware's guest tools copy the clipboard to the host only when it answers
 ** (otherwise they read PRIMARY, which we don't own). We answer for SDL, with the
 ** time of the last input event before the copy, as ICCCM asks. We use the libX11
-** SDL loaded rather than linking it. */
+** SDL loaded rather than linking it.
+**
+** We also report when another client grabs the keyboard from us (the window
+** manager's Alt+Tab), which SDL ignores: the keys held then are released
+** elsewhere, and SDL reports the release when the grab ends, sometimes before
+** the focus loss that follows (which SDL delays), so it looks like a key tap. */
 static struct {
   Atom (*InternAtom)(Display*, const char*, Bool);
   int (*ChangeProperty)(Display*, Window, Atom, Atom, int, int, const unsigned char*, int);
@@ -971,6 +986,13 @@ static bool x11_event_hook(void *userdata, XEvent *e) {
   switch (e->type) {
     case KeyPress: case KeyRelease: x11clip.last_event = e->xkey.time; break;
     case ButtonPress: case ButtonRelease: x11clip.last_event = e->xbutton.time; break;
+    case FocusOut:
+      if (e->xfocus.mode == NotifyGrab && e->xfocus.detail != NotifyInferior
+          && e->xfocus.detail != NotifyPointer) {
+        SDL_Event event = { .type = KEYBOARD_GRAB_EVENT_TYPE };
+        SDL_PushEvent(&event);
+      }
+      break;
     case SelectionRequest: {
       XSelectionRequestEvent *req = &e->xselectionrequest;
       if (req->selection != x11clip.clipboard || req->target != x11clip.timestamp)
@@ -988,11 +1010,12 @@ static bool x11_event_hook(void *userdata, XEvent *e) {
   return true;
 }
 
-static void x11_clipboard_init(void) {
+static void x11_events_init(void) {
   if (x11clip.InternAtom) { return; }
   const char *driver = SDL_GetCurrentVideoDriver();
   void *lib = dlopen("libX11.so.6", RTLD_NOW | RTLD_NOLOAD);
   if (!driver || strcmp(driver, "x11") || !lib) { return; }
+  KEYBOARD_GRAB_EVENT_TYPE = SDL_RegisterEvents(1);
   x11clip.InternAtom = dlsym(lib, "XInternAtom");
   x11clip.ChangeProperty = dlsym(lib, "XChangeProperty");
   x11clip.SendEvent = dlsym(lib, "XSendEvent");
@@ -1479,7 +1502,7 @@ static const luaL_Reg lib[] = {
 int luaopen_system(lua_State *L) {
   DIALOG_EVENT_TYPE = SDL_RegisterEvents(1);
 #if defined(__linux__) && __has_include(<X11/Xlib.h>)
-  x11_clipboard_init();
+  x11_events_init();
 #endif
   luaL_newmetatable(L, API_TYPE_NATIVE_PLUGIN); 
   lua_pushcfunction(L, f_library_gc);

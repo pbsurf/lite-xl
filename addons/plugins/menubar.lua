@@ -911,6 +911,7 @@ function keymap.on_key_released(k, ...)
     alt_down = false
     -- Alt+Tab: losing focus, SDL releases the keys held before telling us
     -- (focuslost, below), so this release comes first; but focus is gone
+    -- (or, on X11, going: on_keyboard_grabbed, below)
     if not alt_used and system.window_has_focus() then
       if state.active then menubar.hide() else menubar.show(true) end
     end
@@ -924,6 +925,14 @@ function RootView:on_focus_lost(...)
   alt_used = true
   if state.active then menubar.hide() end
   return root_on_focus_lost(self, ...)
+end
+
+-- X11: the window manager's Alt+Tab grabs the keyboard; Alt's release can come
+-- while we still have focus
+local root_on_keyboard_grabbed = RootView.on_keyboard_grabbed
+function RootView:on_keyboard_grabbed(...)
+  alt_used = true
+  return root_on_keyboard_grabbed(self, ...)
 end
 
 command.add(nil, {

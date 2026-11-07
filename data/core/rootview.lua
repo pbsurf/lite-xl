@@ -627,6 +627,12 @@ function RootView:on_focus_lost(...)
 end
 
 
+---Another program took the keyboard while the window has focus (X11: the
+---window manager's Alt+Tab): keys held now are released elsewhere, and their
+---releases reported to us late, so a held key's release isn't a tap.
+function RootView:on_keyboard_grabbed() end
+
+
 function RootView:interpolate_drag_overlay(overlay)
   self:move_towards(overlay, "x", overlay.to.x, nil, "tab_drag")
   self:move_towards(overlay, "y", overlay.to.y, nil, "tab_drag")
