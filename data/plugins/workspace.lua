@@ -134,13 +134,15 @@ local function load_view(t)
 end
 
 
--- in the panel, only views that can be restored (with what they need for it):
--- a tool view of no state would come back empty
+-- in the bottom panel (core.panel), only views that can be restored (with what
+-- they need for it): a tool view of no state would come back empty; a panel leaf
+-- with none isn't saved
 local function save_node(node)
   local res = {}
   res.type = node.type
   if node.type == "leaf" then
     res.views = {}
+    res.is_panel = node.is_panel
     for _, view in ipairs(node.views) do
       local t = not view:is_transient()
         and (not node.is_panel or view.get_workspace_state)
@@ -152,21 +154,27 @@ local function save_node(node)
         end
       end
     end
-  elseif panel.is_region(node.a) ~= panel.is_region(node.b) then
-    -- the bottom panel (a split of the editor area from it) is saved by
-    -- itself (save_panel)
-    return save_node(panel.is_region(node.a) and node.b or node.a)
+    if node.is_panel and #res.views == 0 then return end
   else
     res.divider = node.divider
     res.a = save_node(node.a)
     res.b = save_node(node.b)
+    if not (res.a and res.b) then return res.a or res.b end
   end
   return res
 end
 
 
-local function load_node(node, t)
+-- a saved node that's (all) the panel's
+local function is_panel(t)
+  if t.type == "leaf" then return t.is_panel end
+  return is_panel(t.a) and is_panel(t.b)
+end
+
+
+local function load_node(node, t, skip_panel)
   if t.type == "leaf" then
+    if t.is_panel then panel.init_leaf(node) end
     local res
     local active_view
     for i, v in ipairs(t.views) do
@@ -186,21 +194,15 @@ local function load_node(node, t)
       node:set_active_view(active_view)
     end
     return res
+  elseif skip_panel and (is_panel(t.a) or is_panel(t.b)) then
+    return load_node(node, is_panel(t.a) and t.b or t.a)
   else
     node:split(t.type == "hsplit" and "right" or "down")
     node.divider = t.divider
-    local res1 = load_node(node.a, t.a)
-    local res2 = load_node(node.b, t.b)
+    local res1 = load_node(node.a, t.a, skip_panel)
+    local res2 = load_node(node.b, t.b, skip_panel)
     return res1 or res2
   end
-end
-
-
--- the bottom panel, shown or hidden: restored hidden
-local function save_panel()
-  local region = panel.get_region() or panel.get_hidden()
-  if not region then return end
-  return { height = panel.get_height(), node = save_node(region) }
 end
 
 
@@ -215,38 +217,35 @@ end
 
 
 local function save_workspace()
+  -- the bottom panel too if it's hidden (restored hidden anyway)
+  local hidden = panel.has_hidden()
+  if hidden then panel.toggle({ focus = false }) end
   local root = core.root_view:get_unlocked_root()
   local workspace_filename = get_workspace_filename(core.project_dir)
   local fp = io.open(workspace_filename, "w")
   if fp then
     local node_text = common.serialize(save_node(root))
     local dir_text = common.serialize(save_directories())
-    local panel_text = common.serialize(save_panel())
-    fp:write(string.format("return { path = %q, documents = %s, directories = %s, panel = %s }\n",
-      core.project_dir, node_text, dir_text, panel_text))
+    fp:write(string.format("return { path = %q, documents = %s, directories = %s }\n", core.project_dir, node_text, dir_text))
     fp:close()
   end
+  if hidden then panel.hide() end
 end
 
 
 local function load_workspace()
   local workspace = consume_workspace_file(core.project_dir)
   if workspace then
-    -- the panel first, the editor's views taking the focus after; not into a
-    -- panel there already (entering another project)
-    if workspace.panel and not (panel.is_shown() or panel.has_hidden()) then
-      local region = panel.new_region()
-      load_node(region, workspace.panel.node)
-      panel.restore(region, workspace.panel.height)
-    end
+    -- the bottom panel restored hidden; one there already (entering another
+    -- project) is kept, rather than this one's
+    local keep_panel = panel.is_shown() or panel.has_hidden()
+    panel.hide()
     local root = core.root_view:get_unlocked_root()
-    local active_view = load_node(root, workspace.documents)
+    local active_view = load_node(root, workspace.documents, keep_panel)
     if active_view then
       core.set_active_view(active_view)
     end
-    if not core.root_view.root_node:get_node_for_view(core.active_view) then
-      core.set_active_view(core.root_view:get_last_used_node().active_view)
-    end
+    panel.hide()
     for i, dir_name in ipairs(workspace.directories) do
       core.add_project_directory(system.absolute_path(dir_name))
     end

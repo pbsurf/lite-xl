@@ -2,7 +2,6 @@ local core = require "core"
 local common = require "core.common"
 local style = require "core.style"
 local Node = require "core.node"
-local EmptyView = require "core.emptyview"
 local reusable = require "core.reusable"
 
 ---The bottom panel: a region below the editor area, split from it, holding
@@ -13,10 +12,10 @@ local reusable = require "core.reusable"
 ---in it and goes away with its last tab, keeping its height for next time; hide()
 ---takes it out as it is, splits and all, and show() puts it back. Files don't
 ---open in it (RootView:get_active_node_default) and it never becomes the
----primary node. The workspace saves it, with the views that can be restored, and
----restores it hidden. The divider above it is thicker than an editor split's, in
----a muted accent color (style.panel_divider_size, style.panel_divider), telling
----the two apart.
+---primary node. The workspace saves it as any split (its leaves the views that
+---can be restored) and restores it hidden. The divider above it is thicker than
+---an editor split's, in a muted accent color (style.panel_divider_size,
+---style.panel_divider), telling the two apart.
 ---
 ---Each kind of view (its class) can have a current view (core.reusable), which
 ---the kind's next search or run reuses rather than opening another tab. Moving
@@ -32,6 +31,9 @@ panel.height = nil
 ---The panel's region hide() took out, until the next show()
 ---@type core.node?
 local hidden
+-- its divider when hide() took it out before it was laid out (restored by the
+-- workspace): its height then, panel.height not known
+local hidden_divider
 
 ---Whether a node is (all) the panel's: its leaves are.
 ---@param node core.node
@@ -46,27 +48,13 @@ local function find_region(node)
   if node.type ~= "leaf" then return find_region(node.a) or find_region(node.b) end
 end
 
-local function get_leaves(node, t)
-  t = t or {}
-  if node.type == "leaf" then
-    table.insert(t, node)
-  else
-    get_leaves(node.a, t)
-    get_leaves(node.b, t)
-  end
-  return t
-end
-
--- the region's leaf whose active view was visited last: where views are added
+-- the region's leaf used last, else its first: where views are added
 local function last_used_leaf(region)
-  local best, best_visit
-  for _, node in ipairs(get_leaves(region)) do
-    local visit = node.active_view and core.view_visit_order[node.active_view]
-    if not best or (visit and (not best_visit or visit > best_visit)) then
-      best, best_visit = node, visit
-    end
-  end
-  return best
+  local node = core.root_view:get_last_visited_node(region, true)
+  if node then return node end
+  node = region
+  while node.type ~= "leaf" do node = node.a end
+  return node
 end
 
 ---The panel's node (its root: a leaf, or a split of its leaves), nil while
@@ -82,20 +70,6 @@ end
 function panel.get_node()
   local region = panel.get_region()
   return region and last_used_leaf(region)
-end
-
----The region hide() took out, nil if none.
----@return core.node?
-function panel.get_hidden()
-  return hidden
-end
-
----The panel's height: as it is, or as it was last shown.
----@return number?
-function panel.get_height()
-  local region = panel.get_region()
-  if region and region.size.y > 0 then return region.size.y end
-  return panel.height
 end
 
 -- the panel's split's divider, as the color scheme is now
@@ -116,7 +90,9 @@ local function on_collapse(node)
   end
 end
 
-local function init_leaf(node)
+---Makes a leaf the panel's (the workspace restoring it).
+---@param node core.node
+function panel.init_leaf(node)
   node.is_panel = true
   node.on_collapse = on_collapse
   node.fit_tab_width, node.max_tab_width = true, 640
@@ -127,16 +103,7 @@ local node_split = Node.split
 function Node:split(...)
   local is_panel = self.is_panel
   local node = node_split(self, ...)
-  if is_panel then init_leaf(node) end
-  return node
-end
-
----A new, empty panel leaf, not shown: the workspace restores the panel into it
----(splitting it), and gives it to restore().
----@return core.node
-function panel.new_region()
-  local node = Node()
-  init_leaf(node)
+  if is_panel then panel.init_leaf(node) end
   return node
 end
 
@@ -151,16 +118,12 @@ local function attach(region)
   local active = core.active_view
   local root = core.root_view:get_unlocked_root()
   local area_h = root.size.y
-  local editor = Node()
-  editor:consume(root)
-  root:consume(Node("vsplit"))
+  root:split("down"):consume(region)
   root.get_divider_size, root.get_divider_color = divider_size, divider_color
-  root.a, root.b = editor, region
-  if area_h > 0 then
-    local h = common.clamp(panel.height or area_h / 3, area_h * 0.1, area_h * 0.9)
-    root.divider = 1 - h / area_h
+  if area_h > 0 and panel.height then
+    root.divider = 1 - common.clamp(panel.height, area_h * 0.1, area_h * 0.9) / area_h
   else
-    root.divider = 2 / 3
+    root.divider = hidden_divider or 2 / 3
   end
   core.set_active_view(active)
 end
@@ -191,7 +154,8 @@ function panel.show(view, opts)
   if not node then
     local region = panel.get_region()
     if not region then
-      region = panel.new_region()
+      region = Node()
+      panel.init_leaf(region)
       attach(region)
     end
     node = last_used_leaf(region)
@@ -199,23 +163,6 @@ function panel.show(view, opts)
   end
   node:set_active_view(view)
   if opts and opts.focus == false and active then core.set_active_view(active) end
-end
-
--- takes a view out of the hidden region, which has no focus to move
-local function take_out_hidden(node, view)
-  local idx = node:get_view_idx(view)
-  table.remove(node.views, idx)
-  node.tab_widths[view] = nil
-  if #node.views > 0 then
-    if node.active_view == view then
-      node.active_view = node:get_most_recent_view() or node.views[math.min(idx, #node.views)]
-    end
-  elseif node == hidden then
-    hidden = nil
-  else
-    local parent = node:get_parent_node(hidden)
-    parent:consume(parent.a == node and parent.b or parent.a)
-  end
 end
 
 ---Takes a view out of its node without closing it (a build or shell keeps
@@ -228,7 +175,15 @@ function panel.remove(view)
     node:remove_view(root, view)
   else
     node = hidden and hidden:get_node_for_view(view)
-    if node then take_out_hidden(node, view) end
+    if node == hidden and #node.views == 1 then
+      hidden = nil
+    elseif node then
+      -- the hidden region has no focus to move
+      local active, last_active = core.active_view, core.last_active_view
+      node:remove_view(hidden, view)
+      core.set_active_view(active)
+      core.last_active_view = last_active
+    end
   end
 end
 
@@ -245,13 +200,12 @@ function panel.hide()
   if not region then return end
   local root = core.root_view.root_node
   local had_focus = region:get_node_for_view(core.active_view) ~= nil
-  if region.size.y > 0 then panel.height = region.size.y end
   local split = region:get_parent_node(root)
+  if region.size.y > 0 then panel.height = region.size.y end
+  hidden_divider = region.size.y <= 0 and split.divider or nil
   split:consume(split.a == region and split.b or split.a)
   hidden = region
-  for _, node in ipairs(get_leaves(region)) do
-    if node.active_view then node.active_view:on_mouse_left() end
-  end
+  for _, view in ipairs(region:get_children()) do view:on_mouse_left() end
   if had_focus then
     core.set_active_view(core.root_view:get_last_used_node().active_view)
   end
@@ -265,35 +219,13 @@ function panel.has_hidden()
 end
 
 ---Hides the panel, or shows it again as hide() left it.
-function panel.toggle()
+---@param opts? { focus?: boolean } as for show()
+function panel.toggle(opts)
   if panel.is_shown() then
     panel.hide()
   elseif hidden then
-    panel.show(last_used_leaf(hidden).active_view)
+    panel.show(last_used_leaf(hidden).active_view, opts)
   end
-end
-
----Makes a region (from new_region(), restored by the workspace) the panel,
----hidden, unless there's a panel already (shown or hidden).
----@param region core.node
----@param height? number
-function panel.restore(region, height)
-  if hidden or panel.is_shown() then return end
-  -- without the leaves left empty (views that couldn't be restored)
-  local function prune(node)
-    if node.type == "leaf" then
-      init_leaf(node)
-      return #node.views > 0 and not node.views[1]:is(EmptyView) and node or nil
-    end
-    local a, b = prune(node.a), prune(node.b)
-    if a and b then
-      node.a, node.b = a, b
-      return node
-    end
-    return a or b
-  end
-  hidden = prune(region)
-  panel.height = height or panel.height
 end
 
 ---Moves a view from wherever it is into the panel.

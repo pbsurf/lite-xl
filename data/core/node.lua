@@ -104,8 +104,8 @@ local type_map = { up="vsplit", down="vsplit", left="hsplit", right="hsplit" }
 -- The "resizable" flag indicates if, along the "locked" axis the node can be resized
 -- by the user. If the node is marked as resizable their view should provide a
 -- set_target_size method.
+-- A split node can be split too: it goes into the new split's first half, as is.
 function Node:split(dir, view, locked, resizable)
-  assert(self.type == "leaf", "Tried to split non-leaf node")
   local node_type = assert(type_map[dir], "Invalid direction")
   local last_active = core.active_view
   local child = Node()

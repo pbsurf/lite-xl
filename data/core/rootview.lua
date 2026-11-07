@@ -70,17 +70,19 @@ local function get_primary_node(node)
 end
 
 
----The unlocked node whose active view was visited last, preferring one showing
----a session's doc (not a help or a results split, say); nil if none was.
+---The unlocked node in `node` whose active view was visited last, preferring
+---one showing a session's doc (not a help or a results split, say): of the
+---editor's, or with `panel`, of the bottom panel's (core.panel); nil if none was.
 ---@param node core.node
+---@param panel? boolean
 ---@return core.node?
-local function get_last_visited_node(node)
+function RootView:get_last_visited_node(node, panel)
   local best, best_visit, best_doc
   local function visit(n)
     if n.type ~= "leaf" then
       visit(n.a)
       visit(n.b)
-    elseif not n.locked and not n.is_panel and n.active_view then
+    elseif not n.locked and not n.is_panel == not panel and n.active_view then
       local v = core.view_visit_order[n.active_view]
       local doc = n.active_view:is(DocView) and n.active_view.context == "session"
       if v and (not best or (doc and not best_doc)
@@ -98,7 +100,7 @@ end
 ---primary node: where a doc picked from a panel opens. Doesn't change focus.
 ---@return core.node
 function RootView:get_last_used_node()
-  return get_last_visited_node(self.root_node) or self:get_primary_node()
+  return self:get_last_visited_node(self.root_node) or self:get_primary_node()
 end
 
 
