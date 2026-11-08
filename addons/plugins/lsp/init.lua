@@ -2836,6 +2836,9 @@ end
 -- the word at ctrl+hover in dv on its line, as col1, col2 (exclusive), if ctrl+click
 -- there would go to its definition
 local function ctrl_hover_symbol(dv, line)
+  -- only a doc the servers know: not, e.g., the text box of a hover popup
+  -- (no filename), which ctrl+hover reaches too
+  if not dv.doc.lsp_open then return end
   local x, y = dv:get_ctrl_hover()
   if not x then return end
   local hline, col = dv:resolve_screen_position(x, y)
