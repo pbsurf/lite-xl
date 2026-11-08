@@ -93,6 +93,13 @@
       "path": "addons/plugins/autoinsert.lua"
     },
     {
+      "id": "unsaved_lines",
+      "description": "Marks the lines changed since the file was saved with a red bar at the right edge of the gutter.",
+      "version": "0.1",
+      "mod_version": "3",
+      "path": "addons/plugins/unsaved_lines.lua"
+    },
+    {
       "id": "highlight_selection",
       "description": "Marks the other occurrences of the selected text (whole words when a word is selected).",
       "version": "0.1",

@@ -150,6 +150,9 @@ another repository's version, uninstalls removing dependents under `--assume-yes
   `config.borderless`, the title and the window controls.
 * **highlight_selection:** marks the other occurrences of the selected text (whole
   words only when a whole word is selected), in `style.selection_match`.
+* **unsaved_lines:** a red bar in the gutter beside lines changed since the file
+  was saved (`style.unsaved_line`); lines edited or undone back to how they were
+  aren't marked.
 * **search_ui** (imported, with our changes): a "Highlight All" option marking every
   match in `style.search_match`; the replace row shows only when wanted (ctrl+r,
   or the chevron left of the search box).
