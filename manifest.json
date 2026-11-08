@@ -87,7 +87,7 @@
     },
     {
       "id": "autoinsert",
-      "description": "Automatically inserts closing brackets and quotes (lite-xl-plugins 6e4aa64).",
+      "description": "Automatically inserts closing brackets and quotes (lite-xl-plugins 6e4aa64); typing over a selection replaces it instead of wrapping it.",
       "version": "0.2",
       "mod_version": "3",
       "path": "addons/plugins/autoinsert.lua"

@@ -49,13 +49,10 @@ function DocView:on_text_input(text)
     return on_text_input(self, text)
   end
 
-  -- wrap selection if we have a selection
-  if mapping and self.doc:has_selection() then
-    local l1, c1, l2, c2, swap = self.doc:get_selection(true)
-    self.doc:insert(l2, c2, mapping)
-    self.doc:insert(l1, c1, text)
-    self.doc:set_selection(l1, c1, l2, c2 + 2, swap)
-    return
+  -- typing over a selection replaces it, as without the plugin: no wrapping
+  -- in brackets or quotes
+  if self.doc:has_selection() then
+    return on_text_input(self, text)
   end
 
   -- skip inserting closing text
