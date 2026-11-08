@@ -664,6 +664,8 @@ function lsp.goto_location(location)
     location.range or location.targetRange, doc_view.doc
   )
   doc_view.doc:set_selection(line1, col1, line1, col1)
+  -- centered if off-screen, rather than just brought into view at an edge
+  doc_view:scroll_to_line(line1, true)
 end
 
 lsp.get_location_preview = get_location_preview
@@ -1944,6 +1946,8 @@ function lsp.request_document_symbols(doc)
                   if not symbol.uri then
                     local line1, col1 = util.toselection(symbol.range, doc)
                     doc:set_selection(line1, col1, line1, col1)
+                    local dv = get_active_docview()
+                    if dv and dv.doc == doc then dv:scroll_to_line(line1, true) end
                   else
                     lsp.goto_location(symbol)
                   end
