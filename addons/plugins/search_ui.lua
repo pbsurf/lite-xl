@@ -499,6 +499,23 @@ local function project_search()
 end
 
 local find_enabled = true
+
+-- The view a find or replace is for, if not the target already: the active view
+-- if it can be searched (F3 in a doc), else the one active before (from the
+-- pane's boxes), if the pane is under it as for a view focused while it's shown.
+-- (Not the one before when a doc is active: that's the tab switched from.)
+local function view_to_search()
+  for _, view in ipairs({ core.active_view, core.last_active_view }) do
+    if view and view ~= findtext.textview and view ~= replacetext.textview
+      and not view:is(CommandView) and (view:is(DocView) or view.get_search_doc)
+    then
+      if core.root_view.root_node:get_node_for_view(view) == host_node() then
+        return view
+      end
+      return
+    end
+  end
+end
 ---@param reverse? boolean
 ---@param typing? boolean the search text changed: a backward search should
 ---still find the current match as it grows
@@ -510,13 +527,8 @@ local function find(reverse, typing)
     return
   end
 
-  local last = core.last_active_view
-  -- (one the pane is under, as for a view focused while it's shown)
-  if last and (last:is(DocView) or last.get_search_doc)
-    and core.root_view.root_node:get_node_for_view(last) == host_node()
-  then
-    set_target(last)
-  end
+  local view = view_to_search()
+  if view then set_target(view) end
 
   local doc = target_doc(doc_view)
   if not doc then return end
@@ -583,9 +595,8 @@ local function find(reverse, typing)
 end
 
 local function find_replace()
-  if core.last_active_view:is(DocView) then
-    set_target(core.last_active_view)
-  end
+  local view = view_to_search()
+  if view then set_target(view) end
   local doc = target_doc(doc_view)
   if doc.read_only then
     status:set_label("Read only")
