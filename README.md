@@ -150,6 +150,10 @@ another repository's version, uninstalls removing dependents under `--assume-yes
   `config.borderless`, the title and the window controls.
 * **highlight_selection:** marks the other occurrences of the selected text (whole
   words only when a whole word is selected), in `style.selection_match`.
+* **paste_indent:** pasting several lines re-indents them as a block to where they
+  go (one level deeper after an opening bracket or colon), converting their
+  indentation levels to the file's tabs or spaces; ctrl+shift+v pastes them as
+  they are.
 * **unsaved_lines:** a red bar in the gutter beside lines changed since the file
   was saved (`style.unsaved_line`); lines edited or undone back to how they were
   aren't marked.

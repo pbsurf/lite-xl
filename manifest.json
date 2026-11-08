@@ -93,6 +93,13 @@
       "path": "addons/plugins/autoinsert.lua"
     },
     {
+      "id": "paste_indent",
+      "description": "Pasting several lines re-indents them as a block to where they go, in the doc's tabs or spaces; ctrl+shift+v pastes them as they are.",
+      "version": "0.1",
+      "mod_version": "3",
+      "path": "addons/plugins/paste_indent.lua"
+    },
+    {
       "id": "unsaved_lines",
       "description": "Marks the lines changed since the file was saved with a red bar at the right edge of the gutter.",
       "version": "0.1",
