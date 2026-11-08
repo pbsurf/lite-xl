@@ -1851,6 +1851,81 @@ function core.try(fn, ...)
   return false, err
 end
 
+
+-- the backup file of each doc file that core.write_backups wrote this session
+local backup_paths = {}
+
+---Writes a copy of each unsaved doc that has a file next to it, leaving the docs
+---as they are (`doc:save` would rename them). The copy is `<file>~`, or if that
+---exists and wasn't written this session (a backup not yet recovered, another
+---editor's), the first free `<file>.~N~`; later calls overwrite that copy.
+---@return string[] paths the copies written
+function core.write_backups()
+  local written = {}
+  for _, doc in ipairs(core.docs) do
+    if doc:is_dirty() and doc.abs_filename then
+      local path = backup_paths[doc.abs_filename]
+      if not path then
+        path = doc.abs_filename .. "~"
+        local n = 0
+        while system.get_file_info(path) do
+          n = n + 1
+          path = string.format("%s.~%d~", doc.abs_filename, n)
+        end
+      end
+      local fp = io.open(path, "wb")
+      if fp then
+        for i, line in ipairs(doc.lines) do
+          if i == #doc.lines then line = line:sub(1, -2) end
+          if doc.crlf then line = line:gsub("\n", "\r\n") end
+          fp:write(line)
+        end
+        fp:close()
+        backup_paths[doc.abs_filename] = path
+        table.insert(written, path)
+      end
+    end
+  end
+  return written
+end
+
+
+-- The add-on whose code raised an error, from an error handler: the name of the
+-- innermost function's plugins/ or libraries/ entry, from `level` outwards.
+local function blame_addon(level)
+  while true do
+    local info = debug.getinfo(level, "S")
+    if not info then return end
+    local name = info.source:match("[/\\]plugins[/\\]([^/\\]+)")
+      or info.source:match("[/\\]libraries[/\\]([^/\\]+)")
+    if name then return (name:gsub("%.lua$", "")) end
+    level = level + 1
+  end
+end
+
+-- errors of core.step's update and draw already reported
+local step_errors = {}
+
+-- Runs a part of core.step that isn't allowed to end the editor: an error (in an
+-- add-on's hook, typically) is logged once, with the add-on it came from, and the
+-- unsaved docs are backed up in case the editor is unusable from then on.
+local function step_try(what, fn, ...)
+  return xpcall(fn, function(msg)
+    local key = what .. ":" .. tostring(msg)
+    if step_errors[key] then return end
+    step_errors[key] = true
+    local addon = blame_addon(2)
+    local backups = core.write_backups()
+    local names = {}
+    for i, path in ipairs(backups) do names[i] = common.basename(path) end
+    local item = core.error("Error in %s%s: %s%s", what,
+      addon and (" (" .. addon .. ")") or "", tostring(msg),
+      #names > 0 and "; unsaved docs backed up as " .. table.concat(names, ", ") or "")
+    item.info = (#backups > 0 and "Backups:\n" .. table.concat(backups, "\n") .. "\n\n" or "")
+      .. debug.traceback("", 2):gsub("\t", "")
+  end, ...)
+end
+
 -- the open file dialogs' callbacks, by id (see core.open_file_dialog)
 local file_dialogs = {}
 
@@ -1988,7 +2063,7 @@ function core.step()
 
   -- update
   core.root_view.size.x, core.root_view.size.y = width, height
-  core.root_view:update()
+  step_try("update", core.root_view.update, core.root_view)
   if not core.redraw then return false end
   core.redraw = false
 
@@ -2008,9 +2083,16 @@ function core.step()
 
   -- draw
   renderer.begin_frame()
-  core.clip_rect_stack[1] = { 0, 0, width, height }
+  -- reset whole: a draw that failed may have left clip rects pushed
+  core.clip_rect_stack = {{ 0, 0, width, height }}
   renderer.set_clip_rect(table.unpack(core.clip_rect_stack[1]))
-  core.root_view:draw()
+  if not step_try("draw", core.root_view.draw, core.root_view) then
+    -- the frame keeps what was drawn before the error; what was deferred to after
+    -- it is dropped, not left to pile up. No redraw is forced: the next event's
+    -- frame tries again, and an idle editor stays idle.
+    core.root_view.deferred_draws = {}
+    core.clip_rect_stack = {{ 0, 0, width, height }}
+  end
   renderer.end_frame()
   return true
 end
@@ -2168,11 +2250,7 @@ function core.on_error(err)
   fp:write(debug.traceback("", 4) .. "\n")
   fp:close()
   -- save copy of all unsaved documents
-  for _, doc in ipairs(core.docs) do
-    if doc:is_dirty() and doc.filename then
-      doc:save(doc.filename .. "~")
-    end
-  end
+  core.write_backups()
 end
 
 

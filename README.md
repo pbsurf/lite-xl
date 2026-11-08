@@ -107,6 +107,10 @@ upstream's `release/v2.1.x`. Additions to the editor:
   empty last line, where the cursor can go, and files are saved byte for byte.
   Saving adds a missing final newline unless `config.insert_final_newline` is
   false.
+* **Errors don't end the editor:** an error while updating or drawing (an
+  add-on's hook, typically) is logged once, naming the add-on, rather than
+  exiting; unsaved files are backed up as `<file>~` (`<file>.~N~` if that
+  exists) and can still be saved.
 * **For plugins:** antialiased vector drawing (`renderer.draw_path`,
   `renderer.draw_glyph`), per-font letter spacing (`font:set_letter_spacing`),
   background marks on lines
