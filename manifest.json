@@ -86,6 +86,13 @@
       "dependencies": { "menubar": {}, "navigate": { "optional": true } }
     },
     {
+      "id": "autoinsert",
+      "description": "Automatically inserts closing brackets and quotes (lite-xl-plugins 6e4aa64).",
+      "version": "0.2",
+      "mod_version": "3",
+      "path": "addons/plugins/autoinsert.lua"
+    },
+    {
       "id": "highlight_selection",
       "description": "Marks the other occurrences of the selected text (whole words when a word is selected).",
       "version": "0.1",
