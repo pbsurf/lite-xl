@@ -436,7 +436,12 @@ local function push_undo(undo_stack, time, type, ...)
 end
 
 
-local function pop_undo(self, undo_stack, redo_stack, modified)
+-- Undoing restores the selection from before each change. Redoing puts the cursor
+-- at each change instead (after the text inserted, where text was removed), and so
+-- the selections recorded while undoing (where the cursor was then, maybe far
+-- away) are skipped; it's at the change before it too (text to be removed
+-- selected), so that undoing again comes back there.
+local function pop_undo(self, undo_stack, redo_stack, modified, redoing)
   -- pop command
   local cmd = undo_stack[undo_stack.idx - 1]
   if not cmd then return end
@@ -445,11 +450,16 @@ local function pop_undo(self, undo_stack, redo_stack, modified)
   -- handle command
   if cmd.type == "insert" then
     local line, col, text = table.unpack(cmd)
+    if redoing then self:set_selection(line, col) end
     self:raw_insert(line, col, text, redo_stack, cmd.time)
+    if redoing then self:set_selection(self:position_offset(line, col, #text)) end
   elseif cmd.type == "remove" then
     local line1, col1, line2, col2 = table.unpack(cmd)
+    -- the text selected: undoing again selects it, as the first undo did; removing
+    -- it leaves the cursor where it was
+    if redoing then self:set_selection(line1, col1, line2, col2) end
     self:raw_remove(line1, col1, line2, col2, redo_stack, cmd.time)
-  elseif cmd.type == "selection" then
+  elseif cmd.type == "selection" and not redoing then
     self.selections = { table.unpack(cmd) }
     self:sanitize_selection()
   end
@@ -460,7 +470,7 @@ local function pop_undo(self, undo_stack, redo_stack, modified)
   -- command and continue to execute it
   local next = undo_stack[undo_stack.idx - 1]
   if next and math.abs(cmd.time - next.time) < config.undo_merge_timeout then
-    return pop_undo(self, undo_stack, redo_stack, modified)
+    return pop_undo(self, undo_stack, redo_stack, modified, redoing)
   end
 
   if modified then
@@ -594,7 +604,7 @@ end
 
 
 function Doc:redo()
-  pop_undo(self, self.redo_stack, self.undo_stack, false)
+  pop_undo(self, self.redo_stack, self.undo_stack, false, true)
 end
 
 
