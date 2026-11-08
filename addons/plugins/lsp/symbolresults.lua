@@ -246,16 +246,12 @@ end
 function ReferenceResults:add_result(location)
   local filename = common.home_expand(util.tofilename(location.uri))
   if self.file ~= filename then
-    self.file, self.file_lines = filename, {}
-    local fp = io.open(filename, "rb")
-    if fp then
-      for line in fp:lines() do table.insert(self.file_lines, line) end
-      fp:close()
-    end
+    -- an open doc's lines, unsaved edits included: the server's positions are in it
+    self.file, self.file_lines = filename, util.get_file_lines(filename) or {}
   end
   local range = location.range
   local line = range.start.line + 1
-  local text = (self.file_lines[line] or ""):gsub("\r$", "")
+  local text = self.file_lines[line] or ""
   -- the range's UTF-16 columns, in a doc of that line (with its newline, for
   -- the column after its end); one over several lines is its start
   local doc = { lines = { [line] = text .. "\n" } }

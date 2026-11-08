@@ -25,6 +25,27 @@ function util.doc_is_open(abs_filename)
   return false
 end
 
+---The lines of a file, without their line endings: an open doc's, unsaved edits
+---included, as the servers see it (their positions are in it), else the file's
+---on disk; nil if it can't be read.
+---@param abs_filename string
+---@return string[]?
+function util.get_file_lines(abs_filename)
+  abs_filename = common.normalize_path(abs_filename) or abs_filename
+  local lines = {}
+  for _, doc in ipairs(core.docs) do
+    if doc.abs_filename == abs_filename then
+      for i, line in ipairs(doc.lines) do lines[i] = line:sub(1, -2) end
+      return lines
+    end
+  end
+  local fp = io.open(abs_filename, "rb")
+  if not fp then return end
+  for line in fp:lines() do lines[#lines + 1] = line:gsub("\r$", "") end
+  fp:close()
+  return lines
+end
+
 ---Converts a utf-8 column position into the equivalent utf-16 position.
 ---@param doc core.doc
 ---@param line integer

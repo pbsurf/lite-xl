@@ -415,9 +415,10 @@ local function get_location_preview(location)
   )
   local abs_filename = core.project_absolute_path(filename)
 
-  local file = io.open(abs_filename)
+  -- an open doc's lines, unsaved edits included: the server's positions are in it
+  local lines = util.get_file_lines(abs_filename)
 
-  if not file then
+  if not lines then
     return "", filename .. ":" .. tostring(line1) .. ":" .. tostring(col1)
   end
 
@@ -426,28 +427,22 @@ local function get_location_preview(location)
   -- sometimes the lsp can send the location of a definition where the
   -- doc comments should be written but if no docs are written the line
   -- is empty and subsequent line is the one we are interested in.
-  local line_count = 1
-  for line in file:lines() do
-    if line_count >= line1 then
-      preview = line:gsub("^%s+", "")
-        :gsub("%s+$", "")
+  for line_count = line1, #lines do
+    preview = lines[line_count]:gsub("^%s+", ""):gsub("%s+$", "")
 
-      if preview ~= "" then
-        break
-      else
-        -- change also the location table
-        if location.range then
-          location.range.start.line = location.range.start.line + 1
-          location.range['end'].line = location.range['end'].line + 1
-        elseif location.targetRange then
-          location.targetRange.start.line = location.targetRange.start.line + 1
-          location.targetRange['end'].line = location.targetRange['end'].line + 1
-        end
+    if preview ~= "" then
+      break
+    else
+      -- change also the location table
+      if location.range then
+        location.range.start.line = location.range.start.line + 1
+        location.range['end'].line = location.range['end'].line + 1
+      elseif location.targetRange then
+        location.targetRange.start.line = location.targetRange.start.line + 1
+        location.targetRange['end'].line = location.targetRange['end'].line + 1
       end
     end
-    line_count = line_count + 1
   end
-  file:close()
 
   local position = filename .. ":" .. tostring(line1) .. ":" .. tostring(col1)
 
