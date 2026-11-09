@@ -512,18 +512,18 @@ local commands = {
   end,
 
   ["doc:go-to-line"] = function(dv)
-    local items
-    local function init_items()
-      if items then return end
-      items = {}
-      local mt = { __tostring = function(x) return x.text end }
-      for i, line in ipairs(dv.doc.lines) do
-        local item = { text = line:sub(1, -2), line = i, info = "line: " .. i }
-        table.insert(items, setmetatable(item, mt))
-      end
+    -- lines in the code font, without their indentation, by number on the right
+    local trimmed = setmetatable({}, { __index = function(t, i)
+      local line = dv.doc.lines[i]
+      t[i] = line and line:match("^%s*(.-)%s*$")
+      return t[i]
+    end })
+    local function item(i)
+      return { text = trimmed[i], line = i, info = tostring(i), font = style.code_font }
     end
-
     core.command_view:enter("Go To Line", {
+      -- not completing to a whole line (message) as one is typed
+      typeahead = false,
       submit = function(text, item)
         local line = item and item.line or tonumber(text)
         if not line then
@@ -534,10 +534,24 @@ local commands = {
         dv:scroll_to_line(line, true)
       end,
       suggest = function(text)
-        if not text:find("^%d*$") then
-          init_items()
-          return common.fuzzy_match(items, text)
+        if text == "" then return end
+        -- a number: that line, to see where it goes
+        if text:find("^%d+$") then
+          return dv.doc.lines[tonumber(text)] and { item(tonumber(text)) }
         end
+        -- matching lines, the best first, ties in the file's order
+        local scored = {}
+        for i = 1, #dv.doc.lines do
+          local score = trimmed[i] ~= "" and system.fuzzy_match(trimmed[i], text)
+          if score then table.insert(scored, { line = i, score = score }) end
+        end
+        table.sort(scored, function(a, b)
+          if a.score ~= b.score then return a.score > b.score end
+          return a.line < b.line
+        end)
+        local res = {}
+        for i, m in ipairs(scored) do res[i] = item(m.line) end
+        return res
       end
     })
   end,
