@@ -2122,38 +2122,77 @@ function lsp.view_document_diagnostics(doc)
     return
   end
 
-  local diagnostic_labels = { "Error", "Warning", "Info", "Hint" }
-
-  local indexes, captions = {}, {}
-  for index, diagnostic in pairs(diagnostic_messages) do
-    local line1, col1 = util.toselection(diagnostic.range)
-    local label = diagnostic_labels[diagnostic.severity or diagnostics.severity.ERROR]
-      .. ": " .. diagnostic.message .. " "
-      .. tostring(line1) .. ":" .. tostring(col1)
-    captions[index] = label
-    indexes[label] = index
+  -- in document order, kept apart even where messages and positions repeat
+  local list = {}
+  for _, diagnostic in ipairs(diagnostic_messages) do
+    local line, col = util.toselection(diagnostic.range, doc)
+    local kind = diagnostics.lintplus_kinds[diagnostic.severity or diagnostics.severity.ERROR]
+    table.insert(list, {
+      line = line,
+      col = col,
+      kind = kind,
+      -- clangd's have notes on lines of their own
+      message = diagnostic.message:gsub("%s*\n%s*", "  "),
+    })
+  end
+  table.sort(list, function(a, b)
+    if a.line ~= b.line then return a.line < b.line end
+    return a.col < b.col
+  end)
+  for i, d in ipairs(list) do d.rank = i end
+  -- the first at or after the cursor's line, else the last
+  local cursor_line = doc:get_selection()
+  local at_cursor = #list
+  for i = #list, 1, -1 do
+    if list[i].line >= cursor_line then at_cursor = i end
+  end
+  -- lintplus's colors for each kind
+  local fallback = {
+    info = style.syntax["normal"], hint = style.syntax["function"],
+    warning = style.syntax["number"], error = style.syntax["keyword2"],
+  }
+  local function item(d)
+    return {
+      text = d.message,
+      info = d.kind .. "  " .. d.line .. ":" .. d.col,
+      info_color = style.lint and style.lint[d.kind] or fallback[d.kind],
+      font = style.code_font,
+      diagnostic = d,
+    }
   end
 
   core.command_view:enter("Filter Diagnostics", {
+    -- not completing to a whole line (message) as one is typed
+    typeahead = false,
     submit = function(text, item)
       if item then
-        local diagnostic = diagnostic_messages[item.index]
-        local line1, col1 = util.toselection(diagnostic.range, doc)
-        doc:set_selection(line1, col1, line1, col1)
+        local d = item.diagnostic
+        doc:set_selection(d.line, d.col, d.line, d.col)
+        local dv = get_active_docview()
+        if dv and dv.doc == doc then dv:scroll_to_line(d.line, true) end
       end
     end,
     suggest = function(text)
-      local res = common.fuzzy_match(captions, text)
-      for i, name in ipairs(res) do
-        local diagnostic = diagnostic_messages[indexes[name]]
-        local line1, col1 = util.toselection(diagnostic.range)
-        res[i] = {
-          text = diagnostics.lintplus_kinds[diagnostic.severity or diagnostics.severity.ERROR]
-            .. ": " .. diagnostic.message,
-          info = tostring(line1) .. ":" .. tostring(col1),
-          index = indexes[name]
-        }
+      local res = {}
+      if text == "" then
+        -- reversed, as the first item is the one at the bottom: they read down
+        -- the file, and Up goes up
+        for i = #list, 1, -1 do
+          table.insert(res, item(list[i]))
+          if i == at_cursor then res.selected = #res end
+        end
+        return res
       end
+      local scored = {}
+      for _, d in ipairs(list) do
+        local score = system.fuzzy_match(d.kind .. " " .. d.message, text)
+        if score then table.insert(scored, { d = d, score = score }) end
+      end
+      table.sort(scored, function(a, b)
+        if a.score ~= b.score then return a.score > b.score end
+        return a.d.rank < b.d.rank
+      end)
+      for i, m in ipairs(scored) do res[i] = item(m.d) end
       return res
     end
   })
