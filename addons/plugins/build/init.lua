@@ -1473,23 +1473,53 @@ end
 
 local function select_target_commandview(submit, target, condition)
   if target then submit(target) end
-  local target_names = {}
-  for i,v in ipairs(build.targets) do if (not condition or condition(v)) then table.insert(target_names, v.name) end end
-  if #target_names == 0 then
+  local targets = {}
+  for i, v in ipairs(build.targets) do
+    if not condition or condition(v) then table.insert(targets, { target = v, index = i }) end
+  end
+  if #targets == 0 then
     core.log("No targets found")
     return
   end
+  local root = core.root_project().path
+  local function shown_path(path)
+    return common.path_belongs_to(path, root) and common.relative_path(root, path)
+      or common.home_encode(path)
+  end
+  -- what it runs, dim after its name; its kind (launch, task) on the right
+  local function item(t)
+    local run = t.target.binary and shown_path(t.target.binary) or t.target.command
+    return { text = t.target.name, detail = run, info = t.target.info, t = t }
+  end
   core.command_view:enter("Select Target", {
-    submit = function(text)
-      for i,v in ipairs(build.targets) do if v.name == text then submit(v, i) end end
+    submit = function(text, item)
+      if item then submit(item.t.target, item.t.index) end
     end,
     suggest = function(text)
-      return common.fuzzy_match(target_names, text)
+      local res = {}
+      -- in the configured order, from the current target; reversed, as the
+      -- first item is the one at the bottom, so that they read down
+      if text == "" then
+        for i = #targets, 1, -1 do
+          table.insert(res, item(targets[i]))
+          if targets[i].index == build.state.target then res.selected = #res end
+        end
+        res.selected = res.selected or #res
+        return res
+      end
+      local scored = {}
+      for i, t in ipairs(targets) do
+        local score = system.fuzzy_match(t.target.name, text)
+        if score then table.insert(scored, { t = t, score = score, order = i }) end
+      end
+      table.sort(scored, function(a, b)
+        if a.score ~= b.score then return a.score > b.score end
+        return a.order < b.order
+      end)
+      for i, m in ipairs(scored) do res[i] = item(m.t) end
+      return res
     end,
-    validate = function(text)
-      for i,v in ipairs(target_names) do if v == text then return true end end
-      return false
-    end
+    validate = function(text, item) return item ~= nil end
   })
 end
 
