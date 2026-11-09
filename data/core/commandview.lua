@@ -32,7 +32,8 @@ local noop = function() end
 
 ---@class core.commandview.state
 ---@field submit function
----@field suggest function
+---@field suggest function returns the items (strings, or core.commandview.item);
+---the list may set `selected` to the index of the item to select first
 ---@field cancel function
 ---@field validate function
 ---@field text string
@@ -58,8 +59,18 @@ local default_state = {
 ---with the view it was entered from as the active view, and the state it enters
 ---replaces the view's own (`prefix` stays in the input but isn't part of the
 ---text the state sees). Removing the prefix returns to the view's own state.
+---Of several modes whose prefixes match, the longest wins (e.g. "@@" over "@").
 ---A command that enters asynchronously (e.g. after a server's reply) should
 ---check that `core.command_view.mode_request` is still what it was when it ran.
+---An item of the suggestions.
+---@class core.commandview.item
+---@field text string what's listed, and what completing it puts in the input
+---@field info string? dim, right-aligned, in the UI font
+---@field info_color renderer.color? for the info, in place of dim
+---@field detail string? dim, after the text, in its font
+---@field font renderer.font? for the text (and detail); the UI font if nil
+---@field indent integer? levels of indentation of the text, two spaces each
+
 ---@class core.commandview.mode
 ---@field prefix string
 ---@field command string
@@ -336,8 +347,12 @@ function CommandView:update_suggestions()
     res[i] = item
   end
   self.suggestions = res
-  self.suggestion_idx = 1
-  self.suggestions_offset = 1
+  -- the selected item in the middle when it can be, so that what's around it
+  -- shows
+  self.suggestion_idx = common.clamp(t.selected or 1, 1, math.max(#res, 1))
+  self.suggestions_offset = common.clamp(
+    self.suggestion_idx - (max_suggestions - 1) // 2, 1,
+    math.max(1, #res - max_suggestions + 1))
 end
 
 
@@ -351,14 +366,16 @@ function CommandView:update()
   -- update suggestions if text has changed
   if self.last_change_id ~= self.doc:get_change_id() then
     local raw = self.doc:get_text(1, 1, 1, math.huge)
-    if self.mode and raw:sub(1, #self.mode.prefix) ~= self.mode.prefix then
-      self:leave_mode()
-    end
-    for _, mode in ipairs(not self.mode and self.state.modes or {}) do
-      if raw:sub(1, #mode.prefix) == mode.prefix then
-        self:enter_mode(mode)
-        break
+    local best
+    for _, mode in ipairs((self.mode and self.base_state or self.state).modes or {}) do
+      if raw:sub(1, #mode.prefix) == mode.prefix
+        and (not best or #mode.prefix > #best.prefix) then
+        best = mode
       end
+    end
+    if best ~= self.mode then
+      if self.mode then self:leave_mode() end
+      if best then self:enter_mode(best) end
     end
     self:update_suggestions()
     if self.state.typeahead and self.suggestions[self.suggestion_idx] then
@@ -558,18 +575,28 @@ local function draw_suggestions_box(self)
     local color = (i == self.suggestion_idx) and style.accent or style.text
     local y = self.position.y - (i - first + 1) * lh - dh
     local font = item.font or self:get_font()
-    local w = self.size.x - x - style.padding.x
-    local text = item.text
+    local indent = (item.indent or 0) * font:get_width("  ")
+    local tx, w = x + indent, self.size.x - x - indent - style.padding.x
+    local text, detail = item.text, item.detail and " " .. item.detail
+    local text_w = w
     if item.info then
       -- too long for both: the info (often what tells items apart, as file:line
       -- does) takes up to half the row, cut at its start; the text the rest
-      local info_w = math.max(w / 2, w - font:get_width(text) - style.padding.x)
+      local full_w = font:get_width(text) + (detail and font:get_width(detail) or 0)
+      local info_w = math.max(w / 2, w - full_w - style.padding.x)
       local info = common.truncate_text(self:get_font(), item.info, info_w, true)
-      local text_w = w - self:get_font():get_width(info) - style.padding.x
-      text = common.truncate_text(font, text, text_w)
-      common.draw_text(self:get_font(), style.dim, info, "right", x, y, w, lh)
+      text_w = w - self:get_font():get_width(info) - style.padding.x
+      common.draw_text(self:get_font(), item.info_color or style.dim, info, "right",
+        tx, y, w, lh)
     end
-    common.draw_text(font, color, text, nil, x, y, 0, lh)
+    -- the detail is cut first
+    text = common.truncate_text(font, text, text_w)
+    local dx = common.draw_text(font, color, text, nil, tx, y, 0, lh)
+    local detail_w = text_w - (dx - tx)
+    if detail and detail_w > font:get_width("…") then
+      detail = common.truncate_text(font, detail, detail_w)
+      common.draw_text(font, style.dim, detail, nil, dx, y, 0, lh)
+    end
   end
   core.pop_clip_rect()
 end
