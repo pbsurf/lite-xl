@@ -322,50 +322,84 @@ local function get_buffer_position_params(doc, line, col)
   }
 end
 
----Recursive function to generate a list of symbols ready
----to use for the lsp.request_document_symbols() action.
----@param list table<integer, table>
----@param parent? string
-local function get_symbol_lists(list, parent)
-  local symbols = {}
-  local symbol_names = {}
-  parent = parent or ""
-  parent = #parent > 0 and (parent .. "/") or parent
-
-  for _, symbol in pairs(list) do
-    -- Include symbol kind to be able to filter by it
-    local symbol_name = parent
-      .. symbol.name
-      .. "||" .. Server.get_symbol_kind(symbol.kind)
-
-    table.insert(symbol_names, symbol_name)
-
-    symbols[symbol_name] = { kind = symbol.kind }
-
-    if symbol.location then
-      symbols[symbol_name].location = symbol.location
-    else
-      if symbol.range then
-        symbols[symbol_name].range = symbol.range
-      end
-      if symbol.uri then
-        symbols[symbol_name].uri = symbol.uri
-      end
-    end
-
-    if symbol.children and #symbol.children > 0 then
-      local child_symbols, child_names = get_symbol_lists(
-        symbol.children, parent .. symbol.name
-      )
-
-      for _, name in pairs(child_names) do
-        table.insert(symbol_names, name)
-        symbols[name] = child_symbols[name]
+---The symbols of a textDocument/documentSymbol reply, in document order, each
+---with its depth and parent: from DocumentSymbol trees, or SymbolInformation
+---lists (flat, each with a location, which may be in another file).
+---@param result table[]
+---@param doc core.doc
+---@return table[]
+local function document_symbol_list(result, doc)
+  local syntax = doc.syntax and doc.syntax.name
+  local sep = (syntax == "C" or syntax == "C++") and "::" or "."
+  local list = {}
+  local doc_uri = util.touri(core.project_absolute_path(doc.filename))
+  -- where the name is (where to go): DocumentSymbol has selectionRange
+  local function name_range(s) return s.selectionRange or s.range or s.location.range end
+  local function add(symbols, depth, parent)
+    symbols = { table.unpack(symbols) }
+    table.sort(symbols, function(a, b)
+      local ra, rb = name_range(a).start, name_range(b).start
+      return ra.line < rb.line or ra.line == rb.line and ra.character < rb.character
+    end)
+    for _, s in ipairs(symbols) do
+      local range = name_range(s)
+      table.insert(list, {
+        name = s.name,
+        kind = s.kind,
+        detail = s.detail ~= "" and s.detail or nil,
+        depth = depth,
+        parent = parent or (s.containerName ~= "" and s.containerName or nil),
+        line = range.start.line + 1,
+        name_range = range,
+        range = s.range or s.location.range,
+        -- another file's
+        uri = s.location and s.location.uri ~= doc_uri and s.location.uri or nil,
+      })
+      if s.children then
+        add(s.children, depth + 1, (parent and parent .. sep or "") .. s.name)
       end
     end
   end
+  add(result, 0)
+  -- a flat list: nested where a symbol's range is inside another's
+  if result[1] and result[1].location then
+    local stack = {}
+    local function before(a, b)
+      return a.line < b.line or a.line == b.line and a.character <= b.character
+    end
+    for _, s in ipairs(list) do
+      while #stack > 0 and not (s.uri == stack[#stack].uri
+        and before(stack[#stack].range.start, s.range.start)
+        and before(s.range["end"], stack[#stack].range["end"])) do
+        table.remove(stack)
+      end
+      local parent = stack[#stack]
+      if parent then
+        s.depth = parent.depth + 1
+        s.parent = s.parent or (parent.parent and parent.parent .. sep or "") .. parent.name
+      end
+      table.insert(stack, s)
+    end
+  end
+  return list
+end
 
-  return symbols, symbol_names
+---The index in `list` of the innermost symbol of doc around its cursor, else
+---of the last one before it, else the first.
+local function document_symbol_at_cursor(list, doc)
+  local line, col = doc:get_selection()
+  local found, before = nil, 1
+  for i, s in ipairs(list) do
+    if not s.uri and s.line <= line then before = i end
+    if not s.uri then
+      local l1, c1, l2, c2 = util.toselection(s.range, doc)
+      if (line > l1 or line == l1 and col >= c1) and (line < l2 or line == l2 and col <= c2)
+        and (not found or s.depth >= list[found].depth) then
+        found = i
+      end
+    end
+  end
+  return found or before
 end
 
 local function log(server, message, ...)
@@ -1906,7 +1940,9 @@ end
 
 --- Request a list of symbols for the given document for easy document
 -- navigation and displays them using core.command_view:enter()
-function lsp.request_document_symbols(doc)
+---@param doc core.doc
+---@param alphabetical? boolean listed by name rather than in document order
+function lsp.request_document_symbols(doc, alphabetical)
   if not doc.lsp_open then return end
 
   local servers_found = false
@@ -1929,34 +1965,70 @@ function lsp.request_document_symbols(doc)
             return
           end
           if response.result and response.result and #response.result > 0 then
-            local symbols, symbol_names = get_symbol_lists(response.result)
-            core.command_view:enter("Find Symbol", {
+            local list = document_symbol_list(response.result, doc)
+            local order = list
+            if alphabetical then
+              order = { table.unpack(list) }
+              for i, s in ipairs(list) do s.index = i end
+              -- by the name without its qualifier: clangd's out-of-line
+              -- "Widget::draw" by "draw"
+              local function key(s) return s.name:gsub("^.*::", ""):lower() end
+              table.sort(order, function(a, b)
+                local na, nb = key(a), key(b)
+                if na ~= nb then return na < nb end
+                return a.index < b.index
+              end)
+            end
+            for i, s in ipairs(order) do s.rank = i end
+            local cursor_symbol = document_symbol_at_cursor(list, doc)
+            local function item(s, indent)
+              local line = tostring(s.line)
+              return {
+                text = s.name,
+                detail = s.detail,
+                -- nested ones listed apart from their parent say which it is
+                info = not indent and s.parent and s.parent .. " · " .. line or line,
+                font = style.code_font,
+                indent = indent and s.depth or nil,
+                symbol = s,
+              }
+            end
+            core.command_view:enter(alphabetical and "Find Symbol A–Z" or "Find Symbol", {
               submit = function(text, item)
-                if item then
-                  local symbol = symbols[item.name]
-                  -- The lsp may return a location object with range
-                  -- and uri inside of it or just range as part of
-                  -- the symbol it self.
-                  symbol = symbol.location and symbol.location or symbol
-                  if not symbol.uri then
-                    local line1, col1 = util.toselection(symbol.range, doc)
-                    doc:set_selection(line1, col1, line1, col1)
-                    local dv = get_active_docview()
-                    if dv and dv.doc == doc then dv:scroll_to_line(line1, true) end
-                  else
-                    lsp.goto_location(symbol)
-                  end
+                if not item then return end
+                local symbol = item.symbol
+                if symbol.uri then
+                  lsp.goto_location({ uri = symbol.uri, range = symbol.name_range })
+                else
+                  local line1, col1 = util.toselection(symbol.name_range, doc)
+                  doc:set_selection(line1, col1, line1, col1)
+                  local dv = get_active_docview()
+                  if dv and dv.doc == doc then dv:scroll_to_line(line1, true) end
                 end
               end,
               suggest = function(text)
-                local res = common.fuzzy_match(symbol_names, text)
-                for i, name in ipairs(res) do
-                  res[i] = {
-                    text = util.split(name, "||")[1],
-                    info = Server.get_symbol_kind(symbols[name].kind),
-                    name = name
-                  }
+                local res = {}
+                if text == "" then
+                  -- all of them, nested ones indented in document order;
+                  -- reversed, as the first item is the one at the bottom, so
+                  -- that they read down the file (or alphabet), and Up goes up
+                  for i = #order, 1, -1 do
+                    local s = order[i]
+                    table.insert(res, item(s, not alphabetical))
+                    if s == list[cursor_symbol] then res.selected = #res end
+                  end
+                  return res
                 end
+                local scored = {}
+                for _, s in ipairs(order) do
+                  local score = system.fuzzy_match(s.name, text)
+                  if score then table.insert(scored, { s = s, score = score }) end
+                end
+                table.sort(scored, function(a, b)
+                  if a.score ~= b.score then return a.score > b.score end
+                  return a.s.rank < b.s.rank
+                end)
+                for i, m in ipairs(scored) do res[i] = item(m.s) end
                 return res
               end
             })
@@ -2707,6 +2779,10 @@ command.add(
     lsp.request_document_symbols(doc)
   end,
 
+  ["lsp:view-document-symbols-alphabetically"] = function(doc)
+    lsp.request_document_symbols(doc, true)
+  end,
+
   ["lsp:format-document"] = function(doc)
     lsp.request_document_format(doc)
   end,
@@ -2880,10 +2956,12 @@ function DocView:draw_line_text(line, x, y)
   return lh
 end
 
--- Ctrl+P: "@" for the document's symbols, "#" for the workspace's
+-- Ctrl+P: "@" for the document's symbols ("@@" by name), "#" for the workspace's
 table.insert(command.find_file_modes, 2,
   { prefix = "@", command = "lsp:view-document-symbols", text = "symbol" })
 table.insert(command.find_file_modes, 3,
+  { prefix = "@@", command = "lsp:view-document-symbols-alphabetically", text = "symbol A–Z" })
+table.insert(command.find_file_modes, 4,
   { prefix = "#", command = "lsp:find-workspace-symbol", text = "workspace symbol" })
 
 --

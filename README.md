@@ -79,8 +79,9 @@ upstream's `release/v2.1.x`. Additions to the editor:
   of a plugin's bindings to keep (`{ build = { "f6" }, debug = false }`);
   `keymap.origin` records which plugin added each.
 * **Ctrl+P modes**, as in VS Code: `>` runs a command, `:` goes to a line, and
-  with lsp `@` finds a symbol in the file and `#` one in the workspace
-  (`command.find_file_modes`). The empty box lists them.
+  with lsp `@` finds a symbol in the file (listed in document order, nested,
+  with signatures, from the one at the cursor; `@@` A–Z) and `#` one in the
+  workspace (`command.find_file_modes`). The empty box lists them.
 * **Touch:** tap to click, drag to scroll.
 * **Borderless window** (`config.borderless`): the title strip moves the window
   (but not the buttons on it, `system.set_window_hit_test`'s rects), a double-click
