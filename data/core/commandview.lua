@@ -70,6 +70,8 @@ local default_state = {
 ---@field detail string? dim, after the text, in its font
 ---@field font renderer.font? for the text (and detail); the UI font if nil
 ---@field indent integer? levels of indentation of the text, two spaces each
+---@field icon table? { glyph, font, color? }: drawn before the text (after the
+---indent), in its color or dim
 
 ---@class core.commandview.mode
 ---@field prefix string
@@ -577,6 +579,11 @@ local function draw_suggestions_box(self)
     local font = item.font or self:get_font()
     local indent = (item.indent or 0) * font:get_width("  ")
     local tx, w = x + indent, self.size.x - x - indent - style.padding.x
+    if item.icon then
+      local icon_w = item.icon[2]:get_width(item.icon[1]) + math.floor(style.padding.x / 2)
+      common.draw_text(item.icon[2], item.icon[3] or style.dim, item.icon[1], nil, tx, y, 0, lh)
+      tx, w = tx + icon_w, w - icon_w
+    end
     local text, detail = item.text, item.detail and " " .. item.detail
     local text_w = w
     if item.info then

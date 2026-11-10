@@ -106,6 +106,7 @@ function autocomplete.add(t, manually_triggered)
           {
             text = text,
             info = info.info,
+            icon = info.icon,          -- { glyph, font, color? }, before the text
             desc = info.desc,          -- Description shown on item selected
             onhover = info.onhover,    -- A callback called once when item is hovered
             onselect = info.onselect,  -- A callback called when item is selected
@@ -288,6 +289,7 @@ local function update_suggestions()
     suggestions[i] = items[j]
     while items[j] and items[i].text == items[j].text do
       items[i].info = items[i].info or items[j].info
+      items[i].icon = items[i].icon or items[j].icon
       j = j + 1
     end
   end
@@ -307,6 +309,12 @@ local function get_active_view()
   if core.active_view:is(DocView) and not core.active_view.doc.read_only then
     return core.active_view
   end
+end
+
+---The width of a suggestion's icon (`icon`: { glyph, font, color? }) and the
+---gap after it.
+local function icon_width(s)
+  return s.icon and s.icon[2]:get_width(s.icon[1]) + math.floor(style.padding.x / 2) or 0
 end
 
 local last_max_width = 0
@@ -332,7 +340,7 @@ local function get_suggestions_rect(av)
   local max_width = 0
   for i = start_index, start_index + show_count - 1 do
     local s = suggestions[i]
-    local w = font:get_width(s.text)
+    local w = font:get_width(s.text) + icon_width(s)
     if s.info then
       w = w + style.font:get_width(s.info) + style.padding.x
     end
@@ -519,9 +527,14 @@ local function draw_suggestions_box(av)
     local info_size = s.info and (style.font:get_width(s.info) + style.padding.x) or style.padding.x
 
     local color = (i == suggestions_idx) and style.accent or style.text
+    local tx = rx + style.padding.x
+    if s.icon then
+      common.draw_text(s.icon[2], s.icon[3] or style.dim, s.icon[1], "left", tx, y, 0, lh)
+      tx = tx + icon_width(s)
+    end
     -- Push clip to avoid that the suggestion text gets drawn over suggestion type/icon
-    core.push_clip_rect(rx + style.padding.x, y, rw - info_size - style.padding.x, lh)
-    local x_adv = common.draw_text(font, color, s.text, "left", rx + style.padding.x, y, rw, lh)
+    core.push_clip_rect(tx, y, rx + rw - info_size - tx, lh)
+    local x_adv = common.draw_text(font, color, s.text, "left", tx, y, rw, lh)
     core.pop_clip_rect()
     -- If the text wasn't fully visible, draw an ellipsis
     if x_adv > rx + rw - info_size then
