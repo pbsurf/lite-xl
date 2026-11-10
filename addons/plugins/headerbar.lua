@@ -331,6 +331,12 @@ end
 
 function HeaderBar:draw()
   self:draw_background(style.background2)
+  -- a line along its bottom, apart from the tabs below (the same background):
+  -- the dim text's color, faint (style.divider is often too faint on it)
+  local c = style.dim
+  local t = math.max(1, math.floor(SCALE))
+  renderer.draw_rect(self.position.x, self.position.y + self.size.y - t, self.size.x, t,
+    { c[1], c[2], c[3], (c[4] or 255) * 0.35 })
   local text = text_color()
   for _, b in ipairs(self.buttons) do self:draw_button(b, text) end
   if self.hovered and self.hovered.tooltip and tooltip.shown(self, self.hovered) then self:draw_tooltip(self.hovered) end
