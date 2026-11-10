@@ -1938,6 +1938,47 @@ function lsp.request_workspace_symbol(doc, symbol)
   end
 end
 
+---Requests the document's symbols from its first server providing them, for
+---other plugins (e.g. breadcrumbs): `callback(list)` gets them in document
+---order, each { name, kind, detail?, depth, parent?, line, name_range, range,
+---uri? (another file's) }, ranges as the server's (see util.toselection); or
+---nil if the request failed or timed out. Returns whether it was requested
+---(false while the document isn't open on a server providing symbols).
+---@param doc core.doc
+---@param callback fun(list: table[]|nil)
+---@return boolean
+function lsp.get_document_symbols(doc, callback)
+  if not doc.lsp_open then return false end
+  for _, name in pairs(lsp.get_active_servers(doc.filename, true)) do
+    local server = lsp.servers_running[name]
+    if server.capabilities.documentSymbolProvider then
+      lsp.update_document(doc)
+      local done = false
+      local function finish(list)
+        if done then return end
+        done = true
+        callback(list)
+      end
+      server:push_request('textDocument/documentSymbol', {
+        params = {
+          textDocument = {
+            uri = util.touri(core.project_absolute_path(doc.filename)),
+          }
+        },
+        timeout = 10,
+        timeout_callback = function() finish(nil) end,
+        callback = function(_, response)
+          local result = response.result
+          finish(type(result) == "table" and document_symbol_list(result, doc)
+            or not response.error and {} or nil)
+        end
+      })
+      return true
+    end
+  end
+  return false
+end
+
 --- Request a list of symbols for the given document for easy document
 -- navigation and displays them using core.command_view:enter()
 ---@param doc core.doc
