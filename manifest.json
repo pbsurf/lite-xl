@@ -122,6 +122,14 @@
       "dependencies": { "widget": {} }
     },
     {
+      "id": "breadcrumbs",
+      "description": "A bar at the top of each editor with the file's path and, from lsp, the symbols around the cursor; each part drops down its siblings (files to open, symbols to jump to), filtered by typing.",
+      "version": "0.1",
+      "mod_version": "3",
+      "path": "addons/plugins/breadcrumbs.lua",
+      "dependencies": { "lsp": { "optional": true }, "nerdicons": { "optional": true } }
+    },
+    {
       "id": "navigate",
       "description": "Back and forward between document positions (lite-xl-plugins 6e4aa64), rewritten: records jumps (doc changes, moves over jump_threshold lines) on cursor change instead of polling, keeps history across closed files, alt+shift+left/right within the current doc.",
       "version": "0.2",
@@ -130,7 +138,7 @@
     },
     {
       "id": "nerdicons",
-      "description": "File icons for TreeView and tabs from Nerd Font symbols (lite-xl-plugins 6e4aa64); tab icons no longer cover truncated titles; icon colors adjusted for contrast; a terminal icon for terminal tabs; icon badges in tabs; a hexagon H icon for headers, like the C icons (icons.ttf, made by make_icons.py).",
+      "description": "File icons for TreeView and tabs from Nerd Font symbols (lite-xl-plugins 6e4aa64); tab icons no longer cover truncated titles; icon colors adjusted for contrast; a terminal icon for terminal tabs; icon badges in tabs; a hexagon H icon for headers, like the C icons (icons.ttf, made by make_icons.py); nerdicons.file_icon and nerdicons.symbol_icon (LSP symbol kinds, as VS Code's) for other plugins.",
       "version": "1.2.4",
       "mod_version": "3",
       "path": "addons/plugins/nerdicons",

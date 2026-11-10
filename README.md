@@ -149,6 +149,11 @@ another repository's version, uninstalls removing dependents under `--assume-yes
   menu button (menubar's menus as one dropdown), a file browser toggle,
   back/forward (navigate, dimmed when there's nowhere to go) and, with
   `config.borderless`, the title and the window controls.
+* **breadcrumbs:** a bar at the top of each editor with the file's path and, from
+  lsp, the symbols around the cursor (`proj > src > widget.cpp > Widget > draw`).
+  Each part drops down its siblings, filtered by typing: files to open (directories
+  as submenus), symbols to jump to (members as submenus). ctrl+shift+. opens the
+  last part's from the keyboard.
 * **highlight_selection:** marks the other occurrences of the selected text (whole
   words only when a whole word is selected), in `style.selection_match`.
 * **paste_indent:** pasting several lines re-indents them as a block to where they
