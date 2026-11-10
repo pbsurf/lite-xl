@@ -40,6 +40,8 @@ local ContextMenu = Object:extend()
 
 ---A modal menu takes the keyboard while shown (see ContextMenu:on_key_pressed).
 ---Menus that are part of something handling keys itself (the menubar's) aren't.
+---Typing goes to `core.context_menu:on_text_input(text)` if it has one, else
+---nowhere.
 ContextMenu.modal = true
 
 function ContextMenu:__tostring() return "ContextMenu" end

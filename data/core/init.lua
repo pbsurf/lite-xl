@@ -1938,7 +1938,13 @@ function core.on_event(type, ...)
     if core.status_view then core.status_view:hide_message() end
   end
   if type == "textinput" then
-    if not core.context_menu then core.root_view:on_text_input(...) end
+    -- an open context menu takes typing too, if it wants it (e.g. to filter)
+    local menu = core.context_menu
+    if not menu then
+      core.root_view:on_text_input(...)
+    elseif menu.on_text_input then
+      menu:on_text_input(...)
+    end
   elseif type == "textediting" then
     ime.on_text_editing(...)
   elseif type == "keypressed" then
