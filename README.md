@@ -148,7 +148,9 @@ another repository's version, uninstalls removing dependents under `--assume-yes
 * **headerbar:** one strip at the top in place of the title bar and toolbars: a
   menu button (menubar's menus as one dropdown), a file browser toggle,
   back/forward (navigate, dimmed when there's nowhere to go) and, with
-  `config.borderless`, the title and the window controls.
+  `config.borderless`, the title and the window controls. Its colors
+  (`style.headerbar`, `_text`, `_dim`, `_inactive`, `_inactive_text`) can match
+  the OS's title bars, focused and not.
 * **breadcrumbs:** a bar at the top of each editor with the file's path and, from
   lsp, the symbols around the cursor (`proj > src > widget.cpp > Widget > draw`).
   Each part drops down its siblings, filtered by typing: files to open (directories

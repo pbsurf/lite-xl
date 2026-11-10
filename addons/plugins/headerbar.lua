@@ -6,7 +6,8 @@
 -- is the window's title bar: dragging the strip moves the window,
 -- double-clicking it maximizes or restores, and the window's edges resize.
 -- Without borderless it sits under the OS title bar. While the window is
--- unfocused, its title and icons are dimmed.
+-- unfocused, its title and icons are dimmed. Its colors can be set apart, e.g.
+-- to match the OS's title bars (style.headerbar*, see colors() below).
 --
 -- In a narrow window the title goes first, then back/forward, the file browser
 -- toggle and the menu button.
@@ -286,18 +287,30 @@ function HeaderBar:on_mouse_pressed(button, x, y, clicks)
 end
 
 
--- the color of text and icons: dimmed halfway while the window is unfocused
-local function text_color()
-  if system.window_has_focus() then return style.text end
-  local c = {}
-  for i = 1, 4 do c[i] = (style.text[i] + style.dim[i]) / 2 end
-  return c
+-- Colors, from the theme (e.g. to match the OS's title bars), else the panels':
+-- style.headerbar, style.headerbar_text and style.headerbar_dim (disabled
+-- icons, the title's path) while the window is focused; style.headerbar_inactive
+-- and style.headerbar_inactive_text while it isn't (by default, the text dimmed
+-- halfway).
+
+---The background, text and dim colors, for whether the window is focused.
+local function colors()
+  if system.window_has_focus() then
+    return style.headerbar or style.background2, style.headerbar_text or style.text,
+      style.headerbar_dim or style.dim
+  end
+  local text = style.headerbar_inactive_text
+  if not text then
+    text = {}
+    for i = 1, 4 do text[i] = (style.text[i] + style.dim[i]) / 2 end
+  end
+  return style.headerbar_inactive or style.background2, text, style.dim
 end
 
-function HeaderBar:draw_button(b, text)
+function HeaderBar:draw_button(b, text, dim)
   local on = enabled(b)
-  local color = on and text or style.dim
-  local hover = { style.text[1], style.text[2], style.text[3], 0x20 }
+  local color = on and text or dim
+  local hover = { text[1], text[2], text[3], 0x20 }
   if b.close and b == self.hovered then
     renderer.draw_rect(b.x, b.y, b.w, b.h, close_hover)
     color = close_hover_text
@@ -330,20 +343,21 @@ function HeaderBar:draw_tooltip(b)
 end
 
 function HeaderBar:draw()
-  self:draw_background(style.background2)
-  -- a line along its bottom, apart from the tabs below (the same background):
-  -- the dim text's color, faint (style.divider is often too faint on it)
-  local c = style.dim
+  local background, text, dim = colors()
+  self:draw_background(background)
+  -- a line along its bottom, apart from the tabs below (the same background
+  -- by default): the dim text's color, faint (style.divider is often too
+  -- faint on it)
+  local c = dim
   local t = math.max(1, math.floor(SCALE))
   renderer.draw_rect(self.position.x, self.position.y + self.size.y - t, self.size.x, t,
     { c[1], c[2], c[3], (c[4] or 255) * 0.35 })
-  local text = text_color()
-  for _, b in ipairs(self.buttons) do self:draw_button(b, text) end
+  for _, b in ipairs(self.buttons) do self:draw_button(b, text, dim) end
   if self.hovered and self.hovered.tooltip and tooltip.shown(self, self.hovered) then self:draw_tooltip(self.hovered) end
   if self.title_x then
     local y, h = self.position.y, self.size.y
     local x = common.draw_text(style.font, text, self.title[1], "left", self.title_x, y, 0, h)
-    common.draw_text(style.font, style.dim, self.title[2], "left", x, y, 0, h)
+    common.draw_text(style.font, dim, self.title[2], "left", x, y, 0, h)
   end
 end
 
