@@ -18,8 +18,8 @@ config.plugins.highlight_selection = common.merge({
   enabled = true,
   -- a selection that is a whole word only matches whole words
   whole_word = true,
-  -- shorter selections aren't looked for
-  min_length = 1,
+  -- selections of fewer characters aren't looked for
+  min_length = 2,
   config_spec = {
     name = "Highlight Selection",
     {
@@ -38,10 +38,10 @@ config.plugins.highlight_selection = common.merge({
     },
     {
       label = "Minimum Length",
-      description = "Shorter selections aren't looked for.",
+      description = "Selections of fewer characters aren't looked for.",
       path = "min_length",
       type = "number",
-      default = 1,
+      default = 2,
       min = 1
     }
   }
@@ -84,10 +84,11 @@ local function get_needle(doc)
   if cached and cached.key == key then return cached.needle end
 
   local needle
-  if line1 == line2 and col2 - col1 >= conf.min_length then
+  if line1 == line2 and col2 > col1 then
     local line_text = doc.lines[line1]
     local text = line_text:sub(col1, col2 - 1)
-    if text:find("%S") and same_text(doc, text) then
+    if (utf8.len(text) or #text) >= conf.min_length and text:find("%S")
+        and same_text(doc, text) then
       needle = {
         text = text,
         whole_word = conf.whole_word and is_whole_word(line_text, col1, col2)
