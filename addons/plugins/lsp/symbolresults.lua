@@ -129,6 +129,20 @@ function SymbolResults:is_transient()
   return true
 end
 
+---A row element drawing the kind's icon (an empty string without one): as
+---high as the text, so the row isn't taller for the icon font.
+local function kind_icon(kind)
+  local icon = require("plugins.lsp").symbol_icon(kind)
+  if not icon then return "" end
+  return function(_, _, x, y, font, _, only_calc)
+    local w = icon[2]:get_width(icon[1]) + math.floor(style.padding.x / 2)
+    if not only_calc then
+      common.draw_text(icon[2], icon[3] or style.dim, icon[1], "left", x, y, 0, font:get_height())
+    end
+    return w, font:get_height()
+  end
+end
+
 function SymbolResults:add_result(result)
   local preview, position = require("plugins.lsp").get_location_preview(result.location)
   local container_name = result.containerName and
@@ -141,6 +155,7 @@ function SymbolResults:add_result(result)
     ListBox.COLEND,
     code_font, style.syntax.keyword, container_name .. result.name,
     ListBox.COLEND,
+    kind_icon(result.kind),
     style.syntax.literal, Server.get_symbol_kind(result.kind),
     ListBox.COLEND,
     style.text, position, ListBox.NEWLINE,

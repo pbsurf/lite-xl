@@ -86,6 +86,11 @@ local HelpDoc = require "plugins.lsp.helpdoc"
 ---Yield when reading from LSP which may give you better UI responsiveness
 ---when receiving large responses, but will affect LSP performance.
 ---@field more_yielding boolean
+---Kind icons (with the nerdicons plugin) on completion suggestions.
+---@field completion_icons boolean
+---Kind icons (with the nerdicons plugin) on symbol lists: Find Symbol and
+---Symbols Search.
+---@field symbol_icons boolean
 config.plugins.lsp = common.merge({
   mouse_hover = true,
   mouse_hover_delay = 300,
@@ -101,6 +106,8 @@ config.plugins.lsp = common.merge({
   force_verbosity_off = false,
   more_yielding = false,
   autostart_server = true,
+  completion_icons = true,
+  symbol_icons = true,
   -- The config specification used by the settings gui
   config_spec = {
     name = "Language Server Protocol",
@@ -108,6 +115,20 @@ config.plugins.lsp = common.merge({
       label = "Mouse Hover",
       description = "Show a symbol hover information when mouse cursor is on top.",
       path = "mouse_hover",
+      type = "TOGGLE",
+      default = true
+    },
+    {
+      label = "Completion Icons",
+      description = "Show kind icons (methods, classes, ...) on completion suggestions; needs nerdicons.",
+      path = "completion_icons",
+      type = "TOGGLE",
+      default = true
+    },
+    {
+      label = "Symbol Icons",
+      description = "Show kind icons on symbol lists (Find Symbol, Symbols Search); needs nerdicons.",
+      path = "symbol_icons",
       type = "TOGGLE",
       default = true
     },
@@ -1535,6 +1556,7 @@ function lsp.request_completion(doc, line, col, forced)
 
             symbols.items[label] = {
               info = info,
+              icon = lsp.completion_icon(symbol.kind),
               desc = desc,
               data = {
                 server = server, completion_item = symbol
@@ -1938,6 +1960,33 @@ function lsp.request_workspace_symbol(doc, symbol)
   end
 end
 
+local function nerdicons()
+  local n = package.loaded["plugins.nerdicons"]
+  return type(n) == "table" and n or nil
+end
+
+---A completion item kind's icon, { glyph, font, color? } (see nerdicons), if
+---config.plugins.lsp.completion_icons and nerdicons is installed.
+---@param kind? integer LSP CompletionItemKind
+---@return table?
+function lsp.completion_icon(kind)
+  local n = nerdicons()
+  if kind and n and n.completion_icon and config.plugins.lsp.completion_icons then
+    return { n.completion_icon(kind) }
+  end
+end
+
+---A symbol kind's icon, { glyph, font, color? } (see nerdicons), if
+---config.plugins.lsp.symbol_icons and nerdicons is installed.
+---@param kind? integer LSP SymbolKind
+---@return table?
+function lsp.symbol_icon(kind)
+  local n = nerdicons()
+  if kind and n and n.symbol_icon and config.plugins.lsp.symbol_icons then
+    return { n.symbol_icon(kind) }
+  end
+end
+
 ---Requests the document's symbols from its first server providing them, for
 ---other plugins (e.g. breadcrumbs): `callback(list)` gets them in document
 ---order, each { name, kind, detail?, depth, parent?, line, name_range, range,
@@ -2031,6 +2080,7 @@ function lsp.request_document_symbols(doc, alphabetical)
                 info = not indent and s.parent and s.parent .. " · " .. line or line,
                 font = style.code_font,
                 indent = indent and s.depth or nil,
+                icon = lsp.symbol_icon(s.kind),
                 symbol = s,
               }
             end

@@ -245,7 +245,8 @@ another repository's version, uninstalls removing dependents under `--assume-yes
 * **qtcreator:** a light color theme matching Qt Creator's.
 
 Also imported with changes: lsp and lintplus (squiggly diagnostics, diagnostics in
-hover popups), tab_switcher, tab_overflow, minimap, nerdicons, language_yaml, the
+hover popups; kind icons in completions, Find Symbol and Symbols Search, as VS
+Code's, from nerdicons), tab_switcher, tab_overflow, minimap, nerdicons, language_yaml, the
 widget library, and repl (evaluates Lua in a running editor).
 
 ## Overview
