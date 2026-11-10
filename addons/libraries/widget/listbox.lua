@@ -620,7 +620,7 @@ function ListBox:draw_row_range(ridx, row, start_idx, end_idx, x, y, only_calc)
       new_line = true
     elseif ele_type == "function" then
       local w, h = element(self, ridx, nx, y, font, color, only_calc)
-      nx = nx + width
+      nx = nx + w
       height = math.max(height, h)
       width = width + w
     elseif ele_type == "string" then
