@@ -208,10 +208,12 @@ end
 
 
 ---@param doc core.doc
----@param opts? { preview?: boolean } preview: opened while browsing (following a
----link, jumping to a location) rather than chosen by the user: shown in a preview
----tab (core.reusable), which the node's next preview replaces, unless
----config.preview_tabs is false. Opening the doc otherwise keeps its preview.
+---@param opts? { preview?: boolean, beside?: boolean } preview: opened while
+---browsing (following a link, jumping to a location) rather than chosen by the
+---user: shown in a preview tab (core.reusable), which the node's next preview
+---replaces, unless config.preview_tabs is false. Opening the doc otherwise keeps
+---its preview. beside: a new tab goes right after the active one (a file's
+---counterpart, e.g. its header), rather than last.
 ---@return core.docview
 function RootView:open_doc(doc, opts)
   local preview = opts and opts.preview and config.preview_tabs
@@ -228,7 +230,9 @@ function RootView:open_doc(doc, opts)
   -- marked before it's added, which makes it active: a preview's file isn't
   -- recent (core.set_active_view skips transient views) until it's kept
   if preview then reusable.set_current(view, node) end
-  node:add_view(view)
+  local idx = opts and opts.beside
+    and (node:get_view_idx(core.active_view) or node:get_view_idx(node.active_view))
+  node:add_view(view, idx and idx + 1)
   -- closed after: the node would go away with its last view
   if old and node:get_view_idx(old) then node:close_view(self.root_node, old) end
   self.root_node:update_layout()
