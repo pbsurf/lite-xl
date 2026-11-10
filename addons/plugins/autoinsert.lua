@@ -26,6 +26,23 @@ local function is_closer(chr)
   end
 end
 
+---The syntax type of the token holding the character at line, col.
+local function token_type_at(doc, line, col)
+  local pos = 1
+  for _, type, text in doc.highlighter:each_token(line) do
+    pos = pos + #text
+    if col < pos then return type end
+  end
+end
+
+---Whether the cursor at line, col is inside a comment: the characters both
+---before and after it are (a line comment's newline is part of it; after a
+---block comment's end, or before its start, it isn't).
+local function in_comment(doc, line, col)
+  return col > 1 and token_type_at(doc, line, col - 1) == "comment"
+    and token_type_at(doc, line, col) == "comment"
+end
+
 local function count_char(text, chr)
   local count = 0
   for _ in text:gmatch(chr) do
@@ -62,8 +79,13 @@ function DocView:on_text_input(text)
     return
   end
 
+  -- in a comment, text is prose: nothing is closed for it
+  local line, col = self.doc:get_selection()
+  if mapping and in_comment(self.doc, line, col) then
+    return on_text_input(self, text)
+  end
+
   -- don't insert closing quote if we have a non-even number on this line
-  local line = self.doc:get_selection()
   if text == mapping and count_char(self.doc.lines[line], text) % 2 == 1 then
     return on_text_input(self, text)
   end
