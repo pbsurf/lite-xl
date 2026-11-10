@@ -2436,7 +2436,9 @@ function lsp.switch_source_header(doc)
   local filename = core.project_absolute_path(doc.filename)
   local function open(path)
     if path then
-      core.root_view:open_doc(core.open_doc(common.home_expand(path)), { preview = true })
+      -- beside this file's tab, its counterpart
+      core.root_view:open_doc(core.open_doc(common.home_expand(path)),
+        { preview = true, beside = true })
     else
       core.log("[LSP] No header or source found for %s", common.basename(filename))
     end
