@@ -190,18 +190,103 @@ local function readable(color)
   return result
 end
 
--- Override function to change default icons for dirs, special extensions and names
-local TreeView_get_item_icon = TreeView.get_item_icon
-function TreeView:get_item_icon(item, active, hovered)
-  local icon, font, color = TreeView_get_item_icon(self, item, active, hovered)
+local nerdicons = {}
+
+-- the fonts follow the scale
+local function update_scale()
   if previous_scale ~= SCALE then
-    icon_font:set_size(
-      icon_font:get_size() * (SCALE / previous_scale)
-    )
+    icon_font:set_size(icon_font:get_size() * (SCALE / previous_scale))
     own_font:set_size(own_font:get_size() * (SCALE / previous_scale))
     chevron_width = icon_font:get_width(map["oct-chevron_down"])
     previous_scale = SCALE
   end
+end
+
+---A file's icon, font and color (its type's, made readable on the theme's
+---backgrounds; nil for files of no known type: the text's color), by its name;
+---a directory's (`type` "dir") is a folder, open if `expanded`.
+---@param name string
+---@param type? "file"|"dir"
+---@param expanded? boolean
+---@return string icon, renderer.font font, renderer.color|nil color
+function nerdicons.file_icon(name, type, expanded)
+  update_scale()
+  if type == "dir" then
+    return expanded and map["fa-folder_open"] or map["fa-folder"], icon_font, nil
+  end
+  local custom = known_filenames_icons[name:lower()] or extension_icons[name:match("^.+(%..+)$")]
+  if custom then
+    local own = own_icons[custom[2]]
+    return own or map[custom[2]], own and own_font or icon_font, readable(custom[1])
+  end
+  return map["cod-file"], icon_font, nil
+end
+
+-- LSP kinds, by name -> Codicon, as VS Code shows them, and color: methods
+-- and functions purple, types orange, variables and members blue
+local purple, orange, blue = { common.color "#b180d7" }, { common.color "#ee9d28" },
+  { common.color "#75beff" }
+local kind_icons = {
+  File = { "cod-symbol_file" }, Module = { "cod-symbol_namespace" },
+  Namespace = { "cod-symbol_namespace" }, Package = { "cod-package" },
+  Class = { "cod-symbol_class", orange }, Method = { "cod-symbol_method", purple },
+  Property = { "cod-symbol_property" }, Field = { "cod-symbol_field", blue },
+  Constructor = { "cod-symbol_method", purple }, Enum = { "cod-symbol_enum", orange },
+  Interface = { "cod-symbol_interface", blue }, Function = { "cod-symbol_method", purple },
+  Variable = { "cod-symbol_variable", blue }, Constant = { "cod-symbol_constant" },
+  String = { "cod-symbol_string" }, Number = { "cod-symbol_numeric" },
+  Boolean = { "cod-symbol_boolean" }, Array = { "cod-symbol_array" },
+  Object = { "cod-symbol_namespace" }, Key = { "cod-symbol_key" },
+  Null = { "cod-symbol_misc" }, EnumMember = { "cod-symbol_enum_member", blue },
+  Struct = { "cod-symbol_structure", orange }, Event = { "cod-symbol_event", orange },
+  Operator = { "cod-symbol_operator", purple }, TypeParameter = { "cod-symbol_parameter", blue },
+  -- completions'
+  Text = { "cod-symbol_key" }, Unit = { "cod-symbol_ruler" },
+  Value = { "cod-symbol_enum", orange }, Keyword = { "cod-symbol_keyword" },
+  Snippet = { "cod-symbol_snippet" }, Color = { "cod-symbol_color" },
+  Reference = { "cod-references" }, Folder = { "cod-folder" },
+}
+
+-- LSP SymbolKind and CompletionItemKind, numbered from 1
+local symbol_kinds = {
+  "File", "Module", "Namespace", "Package", "Class", "Method", "Property",
+  "Field", "Constructor", "Enum", "Interface", "Function", "Variable",
+  "Constant", "String", "Number", "Boolean", "Array", "Object", "Key",
+  "Null", "EnumMember", "Struct", "Event", "Operator", "TypeParameter",
+}
+local completion_kinds = {
+  "Text", "Method", "Function", "Constructor", "Field", "Variable", "Class",
+  "Interface", "Module", "Property", "Unit", "Value", "Enum", "Keyword",
+  "Snippet", "Color", "File", "Reference", "Folder", "EnumMember",
+  "Constant", "Struct", "Event", "Operator", "TypeParameter",
+}
+
+local function kind_icon(name)
+  update_scale()
+  local entry = kind_icons[name] or { "cod-symbol_misc" }
+  return map[entry[1]], icon_font, entry[2] and readable(entry[2])
+end
+
+---A symbol kind's icon, font and color (nil: the text's color), as VS Code
+---shows them.
+---@param kind integer LSP SymbolKind
+---@return string icon, renderer.font font, renderer.color|nil color
+function nerdicons.symbol_icon(kind)
+  return kind_icon(symbol_kinds[kind])
+end
+
+---A completion item kind's icon, font and color (nil: the text's color).
+---@param kind integer LSP CompletionItemKind
+---@return string icon, renderer.font font, renderer.color|nil color
+function nerdicons.completion_icon(kind)
+  return kind_icon(completion_kinds[kind])
+end
+
+-- Override function to change default icons for dirs, special extensions and names
+local TreeView_get_item_icon = TreeView.get_item_icon
+function TreeView:get_item_icon(item, active, hovered)
+  local icon, font, color = TreeView_get_item_icon(self, item, active, hovered)
+  update_scale()
   if not config.plugins.nerdicons.use_default_dir_icons then
     icon = map["cod-file"] -- hex ea7b
     font = icon_font
@@ -210,19 +295,14 @@ function TreeView:get_item_icon(item, active, hovered)
       icon = item.expanded and map["fa-folder_open"] or map["fa-folder"] -- hex f07c and f07b
     end
   end
-  if config.plugins.nerdicons.draw_treeview_icons then
-    local custom_icon = known_filenames_icons[item.name:lower()]
-    if custom_icon == nil then
-      custom_icon = extension_icons[item.name:match("^.+(%..+)$")]
+  if config.plugins.nerdicons.draw_treeview_icons and item.type ~= "dir" then
+    local custom_icon, custom_font, custom_color = nerdicons.file_icon(item.name, item.type)
+    if custom_color then
+      icon, font, color = custom_icon, custom_font, custom_color
     end
-    if custom_icon ~= nil then
-      color = readable(custom_icon[1])
-      icon = own_icons[custom_icon[2]] or map[custom_icon[2]]
-      font = own_icons[custom_icon[2]] and own_font or icon_font
-    end
-    if active or hovered then
-      color = style.accent
-    end
+  end
+  if config.plugins.nerdicons.draw_treeview_icons and (active or hovered) then
+    color = style.accent
   end
   return icon, font, color
 end
@@ -345,3 +425,5 @@ function Node:get_tab_title_width(view, font)
   end
   return w
 end
+
+return nerdicons
