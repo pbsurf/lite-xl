@@ -1955,7 +1955,9 @@ function core.on_event(type, ...)
     -- keymap, which tracks them)
     if core.context_menu and not keymap.is_modifier((...)) then
       core.context_menu:on_key_pressed(...)
-      did_keymap = true
+      -- the key's text follows (core.step drops it after a handled key), for
+      -- a menu that takes typing
+      did_keymap = not core.context_menu or not core.context_menu.on_text_input
     else
       did_keymap = keymap.on_key_pressed(...)
     end
