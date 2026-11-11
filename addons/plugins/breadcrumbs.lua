@@ -12,6 +12,8 @@
 -- symbol is jumped to. Typing filters the deepest dropdown (Backspace and
 -- Escape undo it); Up/Down/PageUp/PageDown/Home/End select, Return chooses,
 -- Left/Right at the first level move to the neighbouring part, Escape closes.
+-- Symbols are listed in document order, or by name with Shift+click (the
+-- other way round with sort_symbols); Tab switches between them while open.
 -- When the cursor is outside every symbol, a "…" part lists the top-level ones.
 --
 -- breadcrumbs:focus (ctrl+shift+.) drops down the last part from the keyboard.
@@ -37,6 +39,9 @@ config.plugins.breadcrumbs = common.merge({
   symbol_delay = 0.4,
   -- rows a dropdown shows before it scrolls
   max_rows = 20,
+  -- symbol dropdowns sorted by name, not in document order (Shift+click and
+  -- Tab give the other order)
+  sort_symbols = false,
   -- icons for files, folders and symbol kinds (nerdicons')
   icons = true,
   -- between the bar and the text: "shadow" (cast on the text), "line" or "none"
@@ -56,6 +61,14 @@ config.plugins.breadcrumbs = common.merge({
       path = "symbols",
       type = "toggle",
       default = true,
+    },
+    {
+      label = "Sort Symbols",
+      description = "List symbols by name rather than in document order "
+        .. "(Shift+click or Tab in the list gives the other order).",
+      path = "sort_symbols",
+      type = "toggle",
+      default = false,
     },
     {
       label = "Divider",
@@ -429,10 +442,12 @@ end
 
 local function symbol_rows(view, symbols)
   local rows = {}
-  for _, s in ipairs(symbols) do
+  for i, s in ipairs(symbols) do
     local children = s.children
     table.insert(rows, {
       text = s.name, detail = s.detail, key = s, icon = symbol_icon(s.kind),
+      -- sortable by name (see Dropdown:set_sorted)
+      order = i, sort_name = s.name:lower(),
       action = function() jump_to_symbol(view, s) end,
       children = children and function() return symbol_rows(view, children) end,
     })
@@ -681,7 +696,11 @@ local Dropdown = Object:extend()
 ---`current`: the keys of the rows on the bar's path (shown in the accent
 ---color, the first one selected).
 function Dropdown:new(rows, current)
+  -- in their given order; all_rows, maybe sorted, is what the filter filters
+  self.base_rows = rows
   self.all_rows = rows
+  self.sortable = rows[1] ~= nil and rows[1].order ~= nil
+  self.sorted = false
   self.filter = ""
   self.rows = rows
   self.selected = nil
@@ -711,8 +730,9 @@ function Dropdown:visible_rows()
   return math.min(math.max(#self.rows, 1), max)
 end
 
+---The header row: the filter, and whether the rows are sorted.
 function Dropdown:filter_height()
-  return self.filter ~= "" and row_height() or 0
+  return (self.filter ~= "" or self.sorted) and row_height() or 0
 end
 
 function Dropdown:height()
@@ -760,7 +780,35 @@ function Dropdown:set_filter(text)
     for i, m in ipairs(scored) do self.rows[i] = m.r end
   end
   self.selected, self.scroll = 1, 0
-  self:place(self.x, self.y)
+  if self.x then self:place(self.x, self.y) end
+end
+
+---Lists sortable rows (symbols) by name, case aside, or in their given
+---order; the selected row stays selected.
+function Dropdown:set_sorted(sorted)
+  sorted = self.sortable and sorted or false
+  if sorted == self.sorted then return end
+  self.sorted = sorted
+  local selected = self.rows[self.selected]
+  if sorted then
+    self.all_rows = table.move(self.base_rows, 1, #self.base_rows, 1, {})
+    table.sort(self.all_rows, function(a, b)
+      if a.sort_name ~= b.sort_name then return a.sort_name < b.sort_name end
+      return a.order < b.order
+    end)
+  else
+    self.all_rows = self.base_rows
+  end
+  local none = self.selected == 0
+  self:set_filter(self.filter)
+  if none then
+    self.selected = 0
+  elseif selected then
+    for i, r in ipairs(self.rows) do
+      if r == selected then self.selected = i break end
+    end
+  end
+  self:scroll_to_selected()
 end
 
 function Dropdown:contains(x, y)
@@ -785,9 +833,12 @@ function Dropdown:draw()
   core.push_clip_rect(x, y, w, h)
   local font, rh = style.font, row_height()
   local pad = style.padding.x
-  if self.filter ~= "" then
+  if self:filter_height() > 0 then
     renderer.draw_rect(x, y, w, rh, style.line_highlight)
     common.draw_text(font, style.accent, self.filter, "left", x + pad, y, w - pad * 2, rh)
+    if self.sorted then
+      common.draw_text(font, style.dim, "A–Z", "right", x + pad, y, w - pad * 2, rh)
+    end
   end
   if #self.rows == 0 then
     common.draw_text(font, style.dim, "No matches", "left", x + pad, self:row_y(1), w, rh)
@@ -850,8 +901,11 @@ end)
 
 local function deepest() return open and open.stack[#open.stack] end
 
----Opens the dropdown of part `index` of the node's bar.
-local function open_part(node, index, keyboard)
+---Opens the dropdown of part `index` of the node's bar; `sorted`: symbols by
+---name (by default, as the open dropdown, else config's sort_symbols).
+local function open_part(node, index, keyboard, sorted)
+  if sorted == nil then sorted = open and open.sorted end
+  if sorted == nil then sorted = config.plugins.breadcrumbs.sort_symbols end
   local bar = node.breadcrumbs
   local p = bar and bar.parts and bar.parts[index]
   if not (p and p.rows) then return false end
@@ -865,12 +919,15 @@ local function open_part(node, index, keyboard)
   local d = Dropdown(rows, current)
   d.selected = d.selected or 1
   d:place(p.x, bar.y + bar.h, true)
+  d:set_sorted(sorted)
   d:scroll_to_selected()
   if open then
     open.node, open.index, open.stack = node, index, { d }
   else
     open = { node = node, index = index, stack = { d } }
   end
+  -- the order for every level, until the dropdowns close
+  open.sorted = sorted
   open.keyboard = keyboard
   if core.context_menu and core.context_menu ~= menu then core.context_menu:hide() end
   core.context_menu = menu
@@ -903,6 +960,7 @@ local function open_submenu(level)
   sub.max_rows = math.max(3, math.min(config.plugins.breadcrumbs.max_rows,
     math.floor((core.root_view.size.y - top) / row_height()) - 1))
   sub:place(x, d:row_y(d.selected))
+  sub:set_sorted(open.sorted)
   sub:scroll_to_selected()
   open.stack[level + 1] = sub
   core.redraw = true
@@ -974,6 +1032,18 @@ function menu:on_key_pressed(key)
     else
       step_part(-1)
     end
+  elseif key == "tab" then
+    -- symbols by name, or in document order, at every level
+    if d.sortable then
+      open.sorted = not open.sorted
+      for j, dj in ipairs(open.stack) do
+        dj:set_sorted(open.sorted)
+        -- a submenu beside its row, where that moved to
+        local parent = open.stack[j - 1]
+        if parent then dj:place(dj.x, parent:row_y(parent.selected)) end
+      end
+      core.redraw = true
+    end
   elseif key == "return" or key == "keypad enter" then
     choose()
   elseif key == "backspace" then
@@ -1013,6 +1083,11 @@ end
 
 local mouse_down = false
 
+---The order a click opens a dropdown in: Shift gives the other one.
+local function click_sorted()
+  return config.plugins.breadcrumbs.sort_symbols ~= (keymap.modkeys["shift"] == true)
+end
+
 local root_view_on_mouse_pressed = RootView.on_mouse_pressed
 function RootView:on_mouse_pressed(button, x, y, clicks)
   if open then
@@ -1028,14 +1103,16 @@ function RootView:on_mouse_pressed(button, x, y, clicks)
     local node, index = bar_at(x, y)
     local same = node == open.node and index == open.index
     close_all()
-    if node and index and not same and button == "left" then open_part(node, index) end
+    if node and index and not same and button == "left" then
+      open_part(node, index, false, click_sorted())
+    end
     return true
   end
   local node, index = bar_at(x, y)
   if node then
     if index and button == "left" then
       core.set_active_view(node.breadcrumbs.view)
-      open_part(node, index)
+      open_part(node, index, false, click_sorted())
     end
     return true
   end
