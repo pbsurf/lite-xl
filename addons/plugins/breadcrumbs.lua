@@ -2,7 +2,9 @@
 -- Breadcrumbs: a bar at the top of each editor (between its node's tabs and
 -- the text) with the file's path, from its project directory (or ~, or the
 -- root), then, with the lsp plugin, the symbols around the cursor: e.g.
--- project > src > widget.cpp > Widget > draw.
+-- project > src > widget.cpp > Widget > draw. Markdown files without a
+-- language server get their sections from the headings
+-- (breadcrumbs.symbol_providers, by syntax name, can add other formats).
 --
 -- Clicking a part drops down its siblings: the files and directories beside
 -- it, or the symbols beside it in their parent. A file opens; a directory, or
@@ -195,9 +197,97 @@ end
 
 
 ------------------------------------------------------------------------------
--- Document symbols, from the lsp plugin, per doc: { list, top (the top-level
--- ones, each with `children`), change_id (of the doc when last asked),
--- pending (asking) }
+-- Symbol providers, for files without a language server: by syntax name, a
+-- function(doc) returning a list as lsp.get_document_symbols's (name, kind,
+-- depth, name_range, range; ranges 0-based, as LSP's, end inclusive).
+
+breadcrumbs.symbol_providers = {}
+
+local HEADING_KIND = 15 -- LSP SymbolKind String, as marksman and VS Code give headings
+
+local function thematic_break(text)
+  if text:match("^    ") then return false end
+  local t = text:gsub("%s", "")
+  return t:match("^%*%*%*+$") or t:match("^%-%-%-+$") or t:match("^___+$")
+end
+
+---Markdown's sections: ATX (# Title) and setext (Title, then === or ---)
+---headings, outside fenced code blocks and front matter, nested by level.
+function breadcrumbs.symbol_providers.Markdown(doc)
+  local lines = doc.lines
+  local list, stack = {}, {}
+  local function close(level, last)
+    while #stack > 0 and stack[#stack].level >= level do
+      local s = table.remove(stack)
+      s.range["end"] = { line = last - 1, character = #lines[last] }
+    end
+  end
+  local function add(level, name, line)
+    close(level, line - 1)
+    local s = {
+      name = name, kind = HEADING_KIND, depth = #stack, level = level, line = line,
+      name_range = { start = { line = line - 1, character = 0 },
+                     ["end"] = { line = line - 1, character = #lines[line] } },
+      range = { start = { line = line - 1, character = 0 } },
+    }
+    table.insert(list, s)
+    table.insert(stack, s)
+  end
+  local fence -- the open code fence's char and length
+  local paragraph -- the line where the current paragraph starts
+  local i = 1
+  -- front matter
+  if lines[1] and lines[1]:match("^%-%-%-%s*$") then
+    for j = 2, #lines do
+      if lines[j]:match("^%-%-%-%s*$") or lines[j]:match("^%.%.%.%s*$") then i = j + 1 break end
+    end
+  end
+  while i <= #lines do
+    local text = lines[i]:gsub("\n$", "")
+    local indent, run = text:match("^( *)(```+)")
+    if not run then indent, run = text:match("^( *)(~~~+)") end
+    if fence then
+      if run and #indent <= 3 and run:sub(1, 1) == fence.char and #run >= fence.len
+        and text:match("^ *[`~]+%s*$") then
+        fence = nil
+      end
+    elseif run and #indent <= 3
+      and not (run:sub(1, 1) == "`" and text:sub(#indent + #run + 1):find("`", 1, true)) then
+      fence = { char = run:sub(1, 1), len = #run }
+      paragraph = nil
+    else
+      local hashes, rest = text:match("^ ? ? ?(#+)(.*)$")
+      if hashes and #hashes <= 6 and (rest == "" or rest:match("^[ \t]")) then
+        rest = rest:gsub("^%s+", ""):gsub("%s+#+%s*$", ""):gsub("^#+%s*$", ""):gsub("%s+$", "")
+        if rest ~= "" then add(#hashes, rest, i) end
+        paragraph = nil
+      elseif paragraph and (text:match("^ ? ? ?=+%s*$") or text:match("^ ? ? ?%-+%s*$")) then
+        local name = lines[paragraph]:gsub("^%s+", ""):gsub("%s+$", "")
+        add(text:match("=") and 1 or 2, name, paragraph)
+        paragraph = nil
+      elseif text:match("^%s*$") then
+        paragraph = nil
+      elseif text:match("^ ? ? ?[>|<]") or text:match("^ ? ? ?[%-%*%+]%s")
+        or text:match("^ ? ? ?%d+[.)]%s") or thematic_break(text) then
+        -- a quote, table, HTML, list item or thematic break: no setext heading
+        paragraph = nil
+      elseif not paragraph and not text:match("^    ") then
+        paragraph = i
+      end
+    end
+    i = i + 1
+  end
+  close(1, #lines)
+  for _, s in ipairs(list) do s.level = nil end
+  return list
+end
+
+
+------------------------------------------------------------------------------
+-- Document symbols, from the lsp plugin or, for a file no configured server
+-- handles, a provider of breadcrumbs.symbol_providers, per doc: { list, top
+-- (the top-level ones, each with `children`), change_id (of the doc when last
+-- asked), pending (asking) }
 
 local symbol_state = setmetatable({}, { __mode = "k" })
 
@@ -224,6 +314,7 @@ end
 ---Whether a configured server handles the doc's file (it may still be starting).
 local function has_server(doc)
   local l = lsp()
+  if not l then return false end
   for _, server in pairs(l.servers or {}) do
     if server.file_patterns and common.match_pattern(doc.filename, server.file_patterns) then
       return true
@@ -237,18 +328,31 @@ local function doc_is_open(doc)
   return false
 end
 
+---The doc's symbol provider, for a file no configured server handles.
+local function symbol_provider(doc)
+  local provider = doc.syntax and breadcrumbs.symbol_providers[doc.syntax.name]
+  if provider and not has_server(doc) then return provider end
+end
+
 ---Asks for the doc's symbols if it changed since they were last asked for:
 ---once edits pause (config.plugins.breadcrumbs.symbol_delay), and while its
 ---server starts, every second for a while.
 local function refresh_symbols(doc)
+  if not (config.plugins.breadcrumbs.symbols and doc.filename) then return end
   local l = lsp()
-  if not (l and l.get_document_symbols and config.plugins.breadcrumbs.symbols and doc.filename) then
-    return
-  end
+  local provider = symbol_provider(doc)
+  if not provider and not (l and l.get_document_symbols) then return end
   local st = symbol_state[doc]
   if not st then st = {}; symbol_state[doc] = st end
   if st.pending or st.change_id == doc:get_change_id() then return end
   st.pending = true
+  local function got(id, list)
+    st.pending = false
+    st.change_id = id
+    if list then st.list, st.top = list, symbol_tree(list) end
+    st.chain_key = nil
+    core.redraw = true
+  end
   core.add_thread(function()
     if st.list then
       repeat
@@ -256,16 +360,18 @@ local function refresh_symbols(doc)
         coroutine.yield(config.plugins.breadcrumbs.symbol_delay)
       until id == doc:get_change_id()
     end
+    if provider then
+      if not doc_is_open(doc) then st.pending = false return end
+      local id = doc:get_change_id()
+      local ok, list = pcall(provider, doc)
+      if not ok then core.error("breadcrumbs: symbols of %s: %s", doc.filename, list) end
+      got(id, ok and list or {})
+      return
+    end
     for _ = 1, 30 do
       if not doc_is_open(doc) then st.pending = false return end
       local id = doc:get_change_id()
-      local asked = l.get_document_symbols(doc, function(list)
-        st.pending = false
-        st.change_id = id
-        if list then st.list, st.top = list, symbol_tree(list) end
-        st.chain_key = nil
-        core.redraw = true
-      end)
+      local asked = l.get_document_symbols(doc, function(list) got(id, list) end)
       if asked then return end
       if not has_server(doc) then break end
       coroutine.yield(1)

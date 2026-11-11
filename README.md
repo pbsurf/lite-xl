@@ -152,7 +152,8 @@ another repository's version, uninstalls removing dependents under `--assume-yes
   (`style.headerbar`, `_text`, `_dim`, `_inactive`, `_inactive_text`) can match
   the OS's title bars, focused and not.
 * **breadcrumbs:** a bar at the top of each editor with the file's path and, from
-  lsp, the symbols around the cursor (`proj > src > widget.cpp > Widget > draw`).
+  lsp, the symbols around the cursor (`proj > src > widget.cpp > Widget > draw`);
+  in Markdown, the sections around it, from the headings.
   Each part drops down its siblings, filtered by typing: files to open (directories
   as submenus), symbols to jump to (members as submenus). ctrl+shift+. opens the
   last part's from the keyboard.
