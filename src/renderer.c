@@ -21,8 +21,6 @@
 RenWindow window_renderer = {0};
 static FT_Library library;
 
-// draw_rect_surface is used as a 1x1 surface to simplify ren_draw_rect with blending
-static SDL_Surface *draw_rect_surface = NULL;
 static FT_Library library = NULL;
 
 #define check_alloc(P) _check_alloc(P, __FILE__, __LINE__)
@@ -749,15 +747,27 @@ void ren_draw_rect(RenSurface *rs, RenRect rect, RenColor color) {
     uint32_t translated = SDL_MapSurfaceRGB(surface, color.r, color.g, color.b);
     SDL_FillSurfaceRect(surface, &dest_rect, translated);
   } else {
-    // Seems like SDL doesn't handle clipping as we expect when using
-    // scaled blitting, so we "clip" manually.
+    // Blended here: SDL's scaled blit of a 1x1 surface (as upstream does) first
+    // stretches it into a temporary surface the size of the rect, allocated and
+    // freed on every draw (36 MB for NagView's full-window dim at 4K).
     SDL_Rect clip;
     SDL_GetSurfaceClipRect(surface, &clip);
     if (!SDL_GetRectIntersection(&clip, &dest_rect, &dest_rect)) return;
 
-    uint32_t *pixel = (uint32_t *)draw_rect_surface->pixels;
-    *pixel = SDL_MapSurfaceRGBA(draw_rect_surface, color.r, color.g, color.b, color.a);
-    SDL_BlitSurfaceScaled(draw_rect_surface, NULL, surface, &dest_rect, SDL_SCALEMODE_LINEAR);
+    const SDL_PixelFormatDetails *f = SDL_GetPixelFormatDetails(surface->format);
+    if (!f) return;
+    const unsigned ia = 0xff - color.a;
+    const unsigned r0 = color.r * color.a + 127, g0 = color.g * color.a + 127, b0 = color.b * color.a + 127;
+    for (int y = 0; y < dest_rect.h; y++) {
+      uint32_t *p = (uint32_t *)((uint8_t *)surface->pixels + (size_t) (dest_rect.y + y) * surface->pitch) + dest_rect.x;
+      for (int x = 0; x < dest_rect.w; x++, p++) {
+        uint32_t d = *p;
+        unsigned r = (((d & f->Rmask) >> f->Rshift) * ia + r0) / 255;
+        unsigned g = (((d & f->Gmask) >> f->Gshift) * ia + g0) / 255;
+        unsigned b = (((d & f->Bmask) >> f->Bshift) * ia + b0) / 255;
+        *p = (d & f->Amask) | r << f->Rshift | g << f->Gshift | b << f->Bshift;
+      }
+    }
   }
 }
 
@@ -1022,7 +1032,6 @@ void ren_draw_glyph(RenSurface *rs, RenFont **fonts, unsigned codepoint, float x
 /*************** Window Management ****************/
 void ren_free_window_resources(RenWindow *window_renderer) {
   renwin_free(window_renderer);
-  SDL_DestroySurface(draw_rect_surface);
   if (stroker) { FT_Stroker_Done(stroker); stroker = NULL; }
   SDL_free(window_renderer->command_buf);
   window_renderer->command_buf = NULL;
@@ -1034,11 +1043,6 @@ int ren_init(SDL_Window *win) {
   FT_Error err;
   SDL_ClearError();
   assert(win);
-
-  draw_rect_surface = SDL_CreateSurface(1, 1, SDL_PIXELFORMAT_RGBA32);
-
-  if (!draw_rect_surface)
-    return -1; // error set by SDL_CreateRGBSurface
 
   if ((err = FT_Init_FreeType(&library)) != 0)
     return SDL_SetError("%s", get_ft_error(err));
