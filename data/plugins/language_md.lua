@@ -141,28 +141,29 @@ syntax.add {
     { pattern = "^%*%*%*+\n",               type = "comment" },
     { pattern = "^___+\n",                  type = "comment" },
     { pattern = "^===+\n",                  type = "comment" },
-    -- strike
-    { pattern = { "~~", "~~" },             type = "keyword2" },
-    -- highlight
-    { pattern = { "==", "==" },             type = "literal" },
+    -- strike and highlight: closed on the same line, as bold and italic below
+    { pattern = "%f[\\~]~~[^%s~]~~%f[^~]",            type = "keyword2" },
+    { pattern = "%f[\\~]~~[^%s~].-[^%s~\\]~~%f[^~]", type = "keyword2" },
+    { pattern = "%f[\\=]==[^%s=]==%f[^=]",            type = "literal" },
+    { pattern = "%f[\\=]==[^%s=].-[^%s=\\]==%f[^=]", type = "literal" },
     -- bold and italic: only with a closing delimiter on the same line, so a
     -- stray * stays plain rather than emphasizing everything up to the next
     -- one (as VS Code's grammar; the tokenizer can't look ahead to find whether
     -- one closes it later in the paragraph). Opened by a delimiter followed by
     -- a non-space, closed by one preceded by a non-space (CommonMark's flanking).
-    { pattern = "%f[\\%*]%*%*%*[^%s%*].-[^%s\\]%*%*%*%f[^%*]", type = "markdown_bold_italic" },
     { pattern = "%f[\\%*]%*%*%*[^%s%*]%*%*%*%f[^%*]",            type = "markdown_bold_italic" },
-    { pattern = "%f[\\%*]%*%*[^%s%*].-[^%s\\]%*%*%f[^%*]",     type = "markdown_bold" },
+    { pattern = "%f[\\%*]%*%*%*[^%s%*].-[^%s\\]%*%*%*%f[^%*]", type = "markdown_bold_italic" },
     { pattern = "%f[\\%*]%*%*[^%s%*]%*%*%f[^%*]",                type = "markdown_bold" },
-    { pattern = "%f[\\%*]%*[^%s%*][^%*\n]-[^%s%*\\]%*%f[^%*]", type = "markdown_italic" },
+    { pattern = "%f[\\%*]%*%*[^%s%*].-[^%s\\]%*%*%f[^%*]",     type = "markdown_bold" },
     { pattern = "%f[\\%*]%*[^%s%*]%*%f[^%*]",                    type = "markdown_italic" },
+    { pattern = "%f[\\%*]%*[^%s%*][^%*\n]-[^%s%*\\]%*%f[^%*]", type = "markdown_italic" },
     -- alternative bold italic formats at the start of a line
-    { pattern = "^___[^%s_].-[^%s\\]___%f[^%w_]",  type = "markdown_bold_italic" },
     { pattern = "^___[^%s_]___%f[^%w_]",             type = "markdown_bold_italic" },
-    { pattern = "^__[^%s_].-[^%s\\]__%f[^%w_]",    type = "markdown_bold" },
+    { pattern = "^___[^%s_].-[^%s\\]___%f[^%w_]",  type = "markdown_bold_italic" },
     { pattern = "^__[^%s_]__%f[^%w_]",               type = "markdown_bold" },
-    { pattern = "^_[^%s_][^_\n]-[^%s_\\]_%f[^%w_]", type = "markdown_italic" },
+    { pattern = "^__[^%s_].-[^%s\\]__%f[^%w_]",    type = "markdown_bold" },
     { pattern = "^_[^%s_]_%f[^%w_]",                 type = "markdown_italic" },
+    { pattern = "^_[^%s_][^_\n]-[^%s_\\]_%f[^%w_]", type = "markdown_italic" },
     -- heading with custom id
     {
       pattern = "^#+%s[%w%s%p]+(){()#[%w%-]+()}",
