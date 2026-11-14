@@ -2077,8 +2077,12 @@ function core.step()
 
   close_unreferenced_docs()
 
-  -- update window title
-  local current_title = get_title_filename(core.active_view)
+  -- update window title: only from views in the editor area (documents, the
+  -- bottom panel's tabs), not the command view, the treeview or other locked
+  -- panels, or views outside the node tree (a plugin's text field)
+  local av = core.active_view
+  local current_title = core.root_view:get_unlocked_root():get_node_for_view(av)
+    and get_title_filename(av)
   if current_title ~= nil then
     -- composed each time: it changes with the project too
     local title = core.compose_window_title(current_title)
