@@ -837,9 +837,10 @@ function DocView:draw()
   self:draw_scrollbar()
 
   -- set here, as ctrl and replies from add-ons' servers change it without the
-  -- mouse moving
+  -- mouse moving; not over the gutter, whose cursor on_mouse_moved sets (and
+  -- add-ons with clickable parts there)
   local cursor = self.ctrl_hover_shown and "hand" or "ibeam"
-  if self.mouse_position and self.cursor ~= cursor
+  if self.mouse_position and not self.hovering_gutter and self.cursor ~= cursor
     and (self.cursor == "ibeam" or self.cursor == "hand") then
     self.cursor = cursor
     core.request_cursor(cursor)
