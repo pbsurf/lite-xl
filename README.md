@@ -195,9 +195,8 @@ another repository's version, uninstalls removing dependents under `--assume-yes
   project search) are those git doesn't ignore, hidden ones included, rather than
   what `config.ignore_files` lets through; untracked files are green in the tree
   view. "Show All Files" in the tree view's context menu shows everything but
-  `.git` (ignored files dimmed), per project. With the tree view focused, the
-  status bar shows the branch, ahead/behind and counts of changed and untracked
-  files; tooltips show a file's git state. Submodules and a project folder at the
+  `.git` (ignored files dimmed), per project. Tooltips show a file's git
+  state. Submodules and a project folder at the
   top of a repository have a git badge on their folder icon; a submodule's
   tooltip shows its branch (or commit) and origin URL.
 * **gitkit:** git history. "Git: Log" and "Git: File History" (also in the tree
@@ -212,7 +211,11 @@ another repository's version, uninstalls removing dependents under `--assume-yes
   "Git: Toggle Blame" shows, as GitHub's blame page does, the commit that last
   changed each line in a column left of the line numbers, following unsaved
   edits; a click shows the commit, and its context menu blames the file as it
-  was before that commit.
+  was before that commit. The status bar shows the current file's branch: its
+  tooltip has the upstream, ahead/behind, counts of changes, the file's state
+  and last commit; its menu, blame, the file's and repository's history and
+  uncommitted changes (`status_colors` colors its icon by the repository's
+  state).
 * **navigate** (imported, rewritten): alt+left / alt+right go back and forward
   through the places the cursor jumped from (another file, or a move that took
   the view away from where it was, other than with the cursor keys),

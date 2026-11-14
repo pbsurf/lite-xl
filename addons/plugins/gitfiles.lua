@@ -12,10 +12,9 @@
 -- submodules asked about right after), and again a moment after a change in
 -- the project or its git directory (index, HEAD).
 --
--- While the treeview is focused, the status bar shows the selected entry's
--- repository: branch, commits ahead of/behind its upstream (as of the last
--- fetch), and how many files are changed or untracked in the project directory.
--- The treeview's and tabs' tooltips show an entry's or file's git state.
+-- The treeview's and tabs' tooltips show an entry's or file's git state;
+-- gitfiles.get_status gives it, with the repository's branch and counts of
+-- changes, to other add-ons (gitkit's status bar item).
 --
 -- Folders at the top of a repository (submodules, other repositories nested in
 -- the project, project directories) have a git badge on their icon
@@ -30,7 +29,6 @@ local style = require "core.style"
 local storage = require "core.storage"
 local dirwatch = require "core.dirwatch"
 local ContextMenu = require "core.contextmenu"
-local StatusView = require "core.statusview"
 local RootView = require "core.rootview"
 local TreeView = require "plugins.treeview"
 local nerdfonts_symbols = require "libraries.font_symbols_nerdfont_mono_regular"
@@ -44,6 +42,8 @@ config.plugins.gitfiles = common.merge({
   -- of changes runs it once
   delay = 0.3,
 }, config.plugins.gitfiles)
+
+local gitfiles = {}
 
 local DEFAULT_UNTRACKED = { common.color "#2e9e44" }
 local DEFAULT_BADGE = { common.color "#b8735a" }
@@ -543,60 +543,31 @@ end, function()
 end)
 
 
--- the repository of the treeview's selected entry, else of the first project
--- directory in one
-local function treeview_repo()
-  local item = TreeView.selected_item
-  if item then return repos[item.dir_name] or nil end
+---What git says about `path`, an absolute path in a project directory that's
+---in a repository, once git has answered (nil otherwise; nil too for paths in
+---no project directory): the project directory, the repository's top, the
+---summary (see parse_status: branch, upstream, ahead, behind, and the counts
+---of changed and untracked entries in the project directory), and the path's
+---state ("modified", "untracked"..., see git_state; nil if unchanged).
+---@param path string
+---@return { dir: string, root: string, summary: table, state: string? }?
+function gitfiles.get_status(path)
+  local dir_name
   for _, dir in ipairs(core.project_directories) do
-    if repos[dir.name] then return repos[dir.name] end
+    if repos[dir.name] and (path == dir.name or common.path_belongs_to(path, dir.name))
+      and (not dir_name or #dir.name > #dir_name) then
+      dir_name = dir.name
+    end
   end
+  if not dir_name then return end
+  local repo = repos[dir_name]
+  local root = dir_name
+  for _ in repo.prefix:gmatch("[^/]+") do root = common.dirname(root) end
+  local rel = path == dir_name and "" or path:sub(#dir_name + 2)
+  local info = system.get_file_info(path)
+  return { dir = dir_name, root = root, summary = repo.summary,
+           state = git_state(repo, rel, info and info.type == "dir") }
 end
 
-core.status_view:add_item({
-  predicate = function()
-    return core.active_view == TreeView and treeview_repo() ~= nil
-  end,
-  name = "gitfiles:status",
-  alignment = StatusView.Item.RIGHT,
-  get_item = function()
-    local sum = treeview_repo().summary
-    local t = { style.text, sum.detached and "(detached)" or sum.branch or "?" }
-    if sum.ahead > 0 or sum.behind > 0 then
-      local s = ""
-      if sum.ahead > 0 then s = s .. " ↑" .. sum.ahead end
-      if sum.behind > 0 then s = s .. " ↓" .. sum.behind end
-      table.insert(t, style.accent)
-      table.insert(t, s)
-    end
-    if sum.staged + sum.unstaged > 0 then
-      table.insert(t, style.dim)
-      table.insert(t, "  ·  ")
-      table.insert(t, style.warn)
-      table.insert(t, sum.staged > 0 and sum.unstaged > 0
-        and string.format("%d staged, %d changed", sum.staged, sum.unstaged)
-        or sum.staged > 0 and sum.staged .. " staged" or sum.unstaged .. " changed")
-    end
-    if sum.untracked > 0 then
-      table.insert(t, style.dim)
-      table.insert(t, "  ·  ")
-      table.insert(t, style.git_untracked or DEFAULT_UNTRACKED)
-      table.insert(t, sum.untracked .. " untracked")
-    end
-    return t
-  end,
-  tooltip = function()
-    local sum = treeview_repo().summary
-    local lines = { sum.detached and "Detached HEAD" or (sum.branch or "?")
-      .. (sum.upstream and " → " .. sum.upstream or " (no upstream)") }
-    if sum.upstream_gone then
-      table.insert(lines, "Upstream is gone")
-    elseif sum.upstream then
-      table.insert(lines, string.format("%d ahead, %d behind (as of last fetch)",
-        sum.ahead, sum.behind))
-    end
-    table.insert(lines, string.format("In this folder: %d staged, %d changed, %d untracked",
-      sum.staged, sum.unstaged, sum.untracked))
-    return table.concat(lines, "\n")
-  end,
-})
+
+return gitfiles

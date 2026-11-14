@@ -29,6 +29,9 @@
 --   commit that last changed each line, as GitHub's blame page does: a click
 --   shows the commit; the column's context menu blames the file as it was
 --   before it, among others. See blame.lua.
+-- * The status bar shows the branch of the file's repository; its tooltip,
+--   the repository's and the file's state, and its menu, their history and
+--   changes. See status.lua.
 local core = require "core"
 local common = require "core.common"
 local config = require "core.config"
@@ -57,6 +60,10 @@ config.plugins.gitkit = common.merge({
   blame_width = 300,
   -- seconds after the last edit before blame is asked for again
   blame_delay = 1,
+  -- the status bar's git icon colored by the repository's state: the warning
+  -- color with uncommitted changes, the accent color when ahead of or behind
+  -- its upstream, dim otherwise
+  status_colors = false,
 }, config.plugins.gitkit)
 
 local git = require "plugins.gitkit.git"
@@ -442,6 +449,9 @@ if tv_found then
     }
   end)
 end
+
+
+require("plugins.gitkit.status").setup(gitkit)
 
 
 return gitkit
