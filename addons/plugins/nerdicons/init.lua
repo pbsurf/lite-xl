@@ -202,6 +202,14 @@ local function update_scale()
   end
 end
 
+---A Nerd Font icon by its name in the symbols library ("dev-git_branch"), and
+---the font to draw it with; nil if there's none by that name.
+---@param name string
+---@return string? icon, renderer.font font
+function nerdicons.icon(name)
+  return map[name], icon_font
+end
+
 ---A file's icon, font and color (its type's, made readable on the theme's
 ---backgrounds; nil for files of no known type: the text's color), by its name;
 ---a directory's (`type` "dir") is a folder, open if `expanded`.
