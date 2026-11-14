@@ -386,7 +386,10 @@ function DocView:on_mouse_moved(x, y, ...)
     if was then core.redraw = true end
     return true
   end
-  if x >= self.position.x and x < self.position.x + column_hit_width(self)
+  -- the column starts where draw_line_gutter last drew it: add-ons may put
+  -- columns of their own before it
+  local cx = self.position.x + (self.debug_column_x or 0)
+  if x >= cx and x < cx + column_hit_width(self)
      and not self:scrollbar_overlaps_point(x, y) then
     self.debug_hovered_line = self:resolve_screen_position(x, y)
     self.cursor = "arrow"
@@ -427,6 +430,7 @@ end
 local draw_line_gutter = DocView.draw_line_gutter
 function DocView:draw_line_gutter(vline, x, y, width)
   local bw = column_width(self)
+  self.debug_column_x = x - self.position.x
   if bw > 0 then
     local line = self.get_dline and self:get_dline(vline) or vline
     local lh = self:get_line_height()
