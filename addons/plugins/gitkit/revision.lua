@@ -57,11 +57,15 @@ end
 ---@param path string
 ---@param line? integer
 ---@param col? integer
-function revision.open(root, rev, path, line, col)
+---@param on_open? fun(doc: core.doc) Called with the doc once it's shown
+function revision.open(root, rev, path, line, col, on_open)
   local abs = git.absolute_path(root, path)
   local function open_working_copy()
     local ok, doc = core.try(core.open_doc, abs)
-    if ok and doc then show(doc, line, col) end
+    if ok and doc then
+      show(doc, line, col)
+      if on_open then on_open(doc) end
+    end
   end
   if not rev then return open_working_copy() end
   local key = root .. "\0" .. rev .. "\0" .. path
@@ -88,6 +92,7 @@ function revision.open(root, rev, path, line, col)
       docs[key] = doc
     end
     show(doc, line, col)
+    if on_open then on_open(doc) end
   end)
 end
 

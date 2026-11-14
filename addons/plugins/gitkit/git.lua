@@ -27,6 +27,8 @@ end
 ---@field on_data? fun(chunk: string) Gets stdout as it comes (then not returned)
 ---@field cancelled? fun(): boolean Checked between reads: true kills git
 ---@field max_bytes? integer Stops reading stdout after this much (git is killed)
+---@field input? string Written to git's stdin, which is then closed (git must
+---read all of it before it writes much, as `--contents -` does)
 
 ---Runs git with `args` in `dir`, in a core thread. Returns its output (all of
 ---stdout, unless options.on_data takes it), or nil and an error message: git's
@@ -39,6 +41,22 @@ function git.run(dir, args, options)
   options = options or {}
   local ok, proc = pcall(process.start, git.command(dir, args))
   if not ok then return nil, tostring(proc) end
+  if options.input then
+    -- the pipe is non-blocking and can't be watched for room: a full one is
+    -- retried shortly (while git reads it, so not for long)
+    local input, pos = options.input, 1
+    while pos <= #input do
+      if options.cancelled and options.cancelled() then
+        proc:kill()
+        return nil, "cancelled"
+      end
+      local wrote, n = pcall(proc.write, proc, input:sub(pos, pos + 65535))
+      if not wrote then break end -- git exited: its status says why
+      pos = pos + n
+      if n == 0 then coroutine.yield(0.01) end
+    end
+    proc:close_stream(process.STREAM_STDIN)
+  end
   local out, err, size = {}, {}, 0
   local truncated = false
   while true do

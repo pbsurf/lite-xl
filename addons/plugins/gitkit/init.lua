@@ -25,6 +25,10 @@
 --   view's (its commit, the file at the caret), and the command palette.
 --   Both menus also copy the commit's short hash; the commit view's opens
 --   the file at the caret, or its history.
+-- * "Git: Toggle Blame" shows, in a column at the left of the gutter, the
+--   commit that last changed each line, as GitHub's blame page does: a click
+--   shows the commit; the column's context menu blames the file as it was
+--   before it, among others. See blame.lua.
 local core = require "core"
 local common = require "core.common"
 local config = require "core.config"
@@ -49,6 +53,10 @@ config.plugins.gitkit = common.merge({
   -- a file opened from a commit is the working copy (editable, with lsp and
   -- the rest) when it's the same as it was then, rather than a read-only copy
   open_working_copy = true,
+  -- the blame column's width, in pixels at scale 1
+  blame_width = 300,
+  -- seconds after the last edit before blame is asked for again
+  blame_delay = 1,
 }, config.plugins.gitkit)
 
 local git = require "plugins.gitkit.git"
@@ -56,10 +64,12 @@ local CommitList = require "plugins.gitkit.commitlist"
 local CommitView = require "plugins.gitkit.commitview"
 local revision = require "plugins.gitkit.revision"
 local diff = require "plugins.gitkit.diff"
+local blame = require "plugins.gitkit.blame"
 
 local gitkit = {
   CommitList = CommitList,
   CommitView = CommitView,
+  blame = blame,
 }
 
 ---Shows the commits of the repository `path` (a file or directory) is in, or
@@ -157,6 +167,16 @@ keymap.add {
   ["alt+pageup"] = "gitkit:previous-commit",
   ["alt+pagedown"] = "gitkit:next-commit",
 }
+
+
+-- Blame ------------------------------------------------------------------------
+
+command.add(function()
+  local view = core.active_view
+  return view:extends(DocView) and not view:is(CommitView) and blame.can_blame(view.doc), view
+end, {
+  ["gitkit:toggle-blame"] = function(view) blame.toggle(view.doc) end,
+})
 
 
 -- Comparisons ----------------------------------------------------------------
@@ -333,6 +353,37 @@ if config.plugins.contextmenu ~= false then
     end })
     return items
   end)
+
+  -- The blame column's own menu, in place of the editor's: the group
+  -- right-clicked
+  menu:register(function()
+    local view = core.active_view
+    return view:extends(DocView) and blame.hovered(view) ~= nil
+  end, function()
+    local dv = core.active_view
+    local group = blame.hovered(dv)
+    local _, commit = blame.group_commit(dv, group)
+    local items = {}
+    if commit then
+      table.insert(items, { text = "Show Commit", command = function() blame.show_commit(dv, group) end })
+      if commit.previous then
+        table.insert(items, { text = "Blame Before This Commit", command = function()
+          blame.show_previous(dv, group)
+        end })
+      end
+      table.insert(items, ContextMenu.DIVIDER)
+      table.insert(items, { text = "Copy Short Hash", command = function()
+        system.set_clipboard(revision.short(commit.hash))
+      end })
+    else
+      table.insert(items, { text = "Show Uncommitted Changes", command = function()
+        blame.show_commit(dv, group)
+      end })
+    end
+    table.insert(items, ContextMenu.DIVIDER)
+    table.insert(items, { text = "Hide Git Blame", command = function() blame.hide(dv.doc) end })
+    return items
+  end, true)
 
   -- In the commit view, after the core menu's Copy and Find: the file at the
   -- caret (where the right-click put it), then its commit

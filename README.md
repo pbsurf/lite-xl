@@ -209,6 +209,10 @@ another repository's version, uninstalls removing dependents under `--assume-yes
   commit compares it with the working tree (or just the file) or with the
   selected commit; the commit view's menu does the same for its commit. The
   commit view is reused like a preview tab; double-click its tab to keep it.
+  "Git: Toggle Blame" shows, as GitHub's blame page does, the commit that last
+  changed each line in a column left of the line numbers, following unsaved
+  edits; a click shows the commit, and its context menu blames the file as it
+  was before that commit.
 * **navigate** (imported, rewritten): alt+left / alt+right go back and forward
   through the places the cursor jumped from (another file, or a move that took
   the view away from where it was, other than with the cursor keys),
