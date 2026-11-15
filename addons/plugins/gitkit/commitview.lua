@@ -618,11 +618,16 @@ function CommitView:show_submodule_commit(path, hash)
   cv:show_diff(root, { rev = hash, title = revision.short(hash) })
 end
 
----Scrolls to the patch of the file at `path` (either side), if it's in the commit.
+---Scrolls to the patch of the file at `path` (either side), if it's in the
+---commit; for a directory (ending in "/"), to the first file in it.
 ---@param path string
 function CommitView:scroll_to_file(path)
+  local function matches(p)
+    if path:sub(-1) == "/" then return p ~= nil and p:sub(1, #path) == path end
+    return p == path
+  end
   for _, file in ipairs(self.result.files) do
-    if file.new_path == path or file.old_path == path then
+    if matches(file.new_path) or matches(file.old_path) then
       self:open_target({ view_line = file.line })
       self.scroll.y = self.scroll.to.y
       return

@@ -4,7 +4,8 @@
 -- * "Git: Log" lists the repository's commits (of the active file's
 --   repository, else the project's) in a bottom panel tab, uncommitted
 --   changes above them; "Git: File History" the active file's (following
---   renames), also from the treeview's context menu. Stepping through them
+--   renames), also from the treeview's context menu, where a folder's
+--   "Git History" lists the commits that changed files in it. Stepping through them
 --   with the arrow keys shows each in a commit view, as `git show` would:
 --   message, stat, patch with colored lines and the old and new line numbers.
 -- * In the commit view, Enter or ctrl+click on a patch line opens the file as
@@ -80,18 +81,25 @@ local gitkit = {
 }
 
 ---Shows the commits of the repository `path` (a file or directory) is in, or
----only those of the file `path` with `file_history`, in the panel's commit
----list (reused).
+---with `history` only those that changed `path` (a file, following renames,
+---or the files in a directory), in the panel's commit list (reused).
 ---@param path string
----@param file_history? boolean
-function gitkit.show_log(path, file_history)
+---@param history? boolean
+function gitkit.show_log(path, history)
   core.add_thread(function()
     local root, err = git.get_root(path)
     if not root then
       core.error("Not in a git repository: %s (%s)", common.home_encode(path), err or "")
       return
     end
-    local rel = file_history and git.relative_path(root, path) or nil
+    local rel = history and git.relative_path(root, path) or nil
+    -- a directory's, as a path ending in "/"; the top one's is the whole log
+    if rel == "" then
+      rel = nil
+    elseif rel then
+      local info = system.get_file_info(path)
+      if info and info.type == "dir" then rel = rel .. "/" end
+    end
     local view = reusable.current(CommitList)
     if view then
       view:load(root, rel)
@@ -202,7 +210,8 @@ end
 ---@return gitkit.diffspec
 function gitkit.working_tree_spec(hash, paths)
   local title = revision.short(hash) .. diff.RENAME_ARROW .. "Working Tree"
-  if paths then title = common.basename(paths[#paths]) .. ": " .. title end
+  -- paths as git names them; a directory's keeps its "/"
+  if paths then title = paths[#paths]:match("[^/]+/?$") .. ": " .. title end
   return { from = hash, paths = paths, title = title }
 end
 
@@ -265,8 +274,8 @@ end, {
   end,
 })
 
--- the file at the commit view's caret, in its commit; in a file's history,
--- the file in the selected commit
+-- the file at the commit view's caret, in its commit; in a file's or
+-- directory's history, the file or directory in the selected commit
 command.add(function()
   local c = current_commit()
   if not c then return false end
@@ -286,7 +295,8 @@ end, {
 
 command.add(function()
   local c = current_commit()
-  return c ~= nil and c.list ~= nil and c.list.path ~= nil, c
+  return c ~= nil and c.list ~= nil and c.list.path ~= nil
+    and not c.list:is_directory_history(), c
 end, {
   ["gitkit:open-file-at-commit"] = function(c)
     revision.open(c.root, c.hash, c.commit.path or c.list.path)
@@ -339,7 +349,8 @@ if config.plugins.contextmenu ~= false then
       end },
     }
     if list.path then
-      table.insert(items, { text = "Compare File with Working Tree", command = function()
+      local what = list:is_directory_history() and "Folder" or "File"
+      table.insert(items, { text = "Compare " .. what .. " with Working Tree", command = function()
         list:show_comparison(gitkit.working_tree_spec(commit.hash, file_paths(commit.path, list.path)))
       end })
     end
@@ -348,7 +359,7 @@ if config.plugins.contextmenu ~= false then
         list:show_comparison(gitkit.commits_spec(list, idx, sel))
       end })
     end
-    if list.path then
+    if list.path and not list:is_directory_history() then
       table.insert(items, ContextMenu.DIVIDER)
       table.insert(items, { text = "Open File at This Commit", command = function()
         revision.open(list.root, commit.hash, commit.path or list.path)
@@ -425,7 +436,7 @@ wrap_predicate("find-replace:find", function(predicate, ...)
   return predicate(...)
 end)
 
--- the treeview's item menus: a file's history, a folder's repository's log
+-- the treeview's item menus: a file's or folder's history
 local tv_found, TreeView = pcall(require, "plugins.treeview")
 if tv_found then
   local function item() return TreeView.hovered_item or TreeView.selected_item end
@@ -434,7 +445,7 @@ if tv_found then
     return it and it.abs_filename ~= nil, it
   end, {
     ["gitkit:treeview-history"] = function(it)
-      gitkit.show_log(it.abs_filename, it.type == "file")
+      gitkit.show_log(it.abs_filename, true)
     end,
   })
   command.hidden["gitkit:treeview-history"] = true
@@ -444,8 +455,7 @@ if tv_found then
     local it = TreeView.hovered_item
     return {
       ContextMenu.DIVIDER,
-      { text = it.type == "file" and "Git History" or "Git Log",
-        command = "gitkit:treeview-history" },
+      { text = "Git History", command = "gitkit:treeview-history" },
     }
   end)
 end

@@ -37,7 +37,8 @@ local function commit_key(commit)
 end
 
 ---@param root string The repository's top directory
----@param path? string A file (as git names it) whose history to list
+---@param path? string A file or directory (ending in "/"), as git names it,
+---whose history to list
 function CommitList:new(root, path)
   CommitList.super.new(self)
   self.scrollable = true
@@ -202,8 +203,12 @@ function CommitList:load(root, path, keep)
     -- it follows its fields (--name-only), as --follow tracks renames
     local args = { "log", "--format=%x1e%H%x1f%h%x1f%an%x1f%at%x1f%D%x1f%s%x1f",
                    "-n", tostring(config.plugins.gitkit.max_commits) }
+    local file = path and path:sub(-1) ~= "/"
+    if file then
+      for _, a in ipairs({ "--follow", "--name-only" }) do table.insert(args, a) end
+    end
     if path then
-      for _, a in ipairs({ "--follow", "--name-only", "--", path }) do table.insert(args, a) end
+      for _, a in ipairs({ "--", path }) do table.insert(args, a) end
     end
     local function add(rec)
       local hash, short, author, time, refs, subject, name =
@@ -212,7 +217,7 @@ function CommitList:load(root, path, keep)
         table.insert(commits, {
           hash = hash, short = short, author = author, time = tonumber(time),
           refs = refs ~= "" and refs or nil, subject = subject,
-          path = path and (name:match("^[^\n]+") or path) or nil,
+          path = file and (name:match("^[^\n]+") or path) or nil,
         })
       end
     end
@@ -271,6 +276,11 @@ function CommitList:replace_commits(commits)
   CommitView.reload_working_tree(self.root)
 end
 
+---Whether it's a directory's history (its path ends in "/").
+function CommitList:is_directory_history()
+  return self.path ~= nil and self.path:sub(-1) == "/"
+end
+
 ---Lists them again, keeping the selection.
 function CommitList:refresh()
   self:load(self.root, self.path, true)
@@ -278,7 +288,10 @@ end
 
 
 function CommitList:get_name()
-  if self.path then return "History: " .. common.basename(self.path) end
+  if self.path then
+    -- a directory's keeps its "/"
+    return "History: " .. self.path:match("[^/]+/?$")
+  end
   return "Git Log: " .. common.basename(self.root)
 end
 
