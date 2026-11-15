@@ -57,6 +57,8 @@ local listbox = {}
 ---@field is_list boolean
 ---@field has_fuzzy_search boolean
 ---@field above_text boolean
+---@field above boolean @This listbox is drawn above its line.
+---@field on_caret_moved fun(av: core.docview) | nil @Called instead of hiding when the caret moves.
 local settings = {
   items = {},
   shown_items = {},
@@ -72,6 +74,8 @@ local settings = {
   is_list = false,
   has_fuzzy_search = false,
   above_text = false,
+  above = false,
+  on_caret_moved = nil,
 }
 
 local mt = { __tostring = function(t) return t.text end }
@@ -121,12 +125,8 @@ local function get_suggestions_rect(active_view)
 
   local padding_x = style.padding.x
   local padding_y = style.padding.y
-
-  if settings.above_text and line > 1 then
-    y = y - active_view:get_line_height() - style.padding.y
-  else
-    y = y + active_view:get_line_height() + style.padding.y
-  end
+  local line_y = y
+  y = y + active_view:get_line_height() + style.padding.y
 
   local font = settings.is_list and active_view:get_font() or style.font
   local text_height = font:get_height()
@@ -164,6 +164,11 @@ local function get_suggestions_rect(active_view)
 
   x = x - padding_x
   y = y - padding_y
+  -- Above the line when asked to and there's room in the view
+  if settings.above then
+    local above_y = line_y - height - padding_y / 2
+    if above_y >= active_view.position.y then y = above_y end
+  end
 
   local win_w = core.root_view.size.x
   if (width/win_w*100) >= 85 and (width+style.padding.x*4) < win_w then
@@ -299,6 +304,7 @@ function listbox.append(element)
 end
 
 function listbox.hide()
+  settings.on_caret_moved = nil
   settings.active_view = nil
   settings.line = nil
   settings.col = nil
@@ -311,6 +317,8 @@ end
 ---@param position? lsp.listbox.position
 function listbox.show(is_list, position)
   set_position(position)
+  settings.on_caret_moved = nil
+  settings.above = settings.above_text
 
   local active_view = get_active_view()
   if active_view then
@@ -354,9 +362,13 @@ function listbox.show_list(items, callback, position)
   listbox.show(true, position)
 end
 
+---Shows signature help above the caret's line, out of the way of completions.
+---While it's shown, caret moves in its view call `on_caret_moved(av)` instead of
+---hiding it (it updates or hides it).
 ---@param signatures lsp.listbox.signature_list
 ---@param position? lsp.listbox.position
-function listbox.show_signatures(signatures, position)
+---@param on_caret_moved? fun(av: core.docview)
+function listbox.show_signatures(signatures, position, on_caret_moved)
   local active_parameter = nil
   local active_signature = nil
 
@@ -456,6 +468,13 @@ function listbox.show_signatures(signatures, position)
   listbox.add(items)
 
   listbox.show(false, position)
+  settings.above = true
+  settings.on_caret_moved = on_caret_moved
+end
+
+---@return boolean showing Signature help, which follows the caret, is shown.
+function listbox.showing_signatures()
+  return settings.on_caret_moved ~= nil
 end
 
 function listbox.toggle_above(enable)
@@ -481,12 +500,15 @@ RootView.update = function(...)
   if active_view then
     -- reset suggestions if caret was moved or not same active view
     local line, col = active_view.doc:get_selection()
-    if
-      settings.active_view ~= active_view
-      or
-      line ~= settings.last_line or col ~= settings.last_col
-    then
+    if settings.active_view ~= active_view then
       listbox.hide()
+    elseif line ~= settings.last_line or col ~= settings.last_col then
+      if settings.on_caret_moved then
+        settings.last_line, settings.last_col = line, col
+        settings.on_caret_moved(active_view)
+      else
+        listbox.hide()
+      end
     end
   else
     listbox.hide()

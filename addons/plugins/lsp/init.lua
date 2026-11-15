@@ -1300,6 +1300,11 @@ local function request_signature_completion(doc)
   local line1, col1, line2, col2 = doc:get_selection()
 
   if line1 == line2 and col1 == col2 then
+    -- Shown signature help follows the caret by itself
+    if listbox.showing_signatures() then
+      lsp.request_completion(doc, line1, col1)
+      return
+    end
     -- First try to display a function signatures and if not possible
     -- do normal code autocomplete
     lsp.request_signature(
@@ -1589,9 +1594,24 @@ function lsp.request_completion(doc, line, col, forced)
   end
 end
 
+---Signature help follows the caret: asks again wherever it moves (typing,
+---deleting, arrow keys), and the server's empty answer outside a call hides it.
+---@param av core.docview
+local function signature_follow_caret(av)
+  local doc = av.doc
+  local line1, col1, line2, col2 = doc:get_selection()
+  if line1 ~= line2 or col1 ~= col2 or not doc.lsp_open then
+    listbox.hide()
+    return
+  end
+  lsp.update_document(doc) -- pending changes go first
+  lsp.request_signature(doc, line1, col1, true, nil, true)
+end
+
 --- Send to applicable LSP servers a request for info about a function
 --- signatures and display them on a tooltip.
-function lsp.request_signature(doc, line, col, forced, fallback)
+---@param retrigger? boolean Update shown signature help: hide it if none.
+function lsp.request_signature(doc, line, col, forced, fallback, retrigger)
   if not doc.lsp_open then return end
 
   local char = doc:get_char(line, col-1)
@@ -1631,6 +1651,10 @@ function lsp.request_signature(doc, line, col, forced, fallback)
           if cline ~= line or cchar ~= col then
             return
           end
+          -- nor bring back one closed meanwhile (escape, a hover)
+          if retrigger and not listbox.showing_signatures() then
+            return
+          end
 
           if
             response.result
@@ -1639,9 +1663,11 @@ function lsp.request_signature(doc, line, col, forced, fallback)
             and
             #response.result.signatures > 0
           then
-            autocomplete.close()
-            listbox.show_signatures(response.result)
+            if not retrigger then autocomplete.close() end
+            listbox.show_signatures(response.result, nil, signature_follow_caret)
             lsp.user_typed  = false
+          elseif retrigger then
+            if listbox.showing_signatures() then listbox.hide() end
           elseif fallback then
             fallback(doc, line, col)
           end
