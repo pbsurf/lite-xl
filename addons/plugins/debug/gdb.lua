@@ -35,6 +35,9 @@ function Gdb:new(on_event)
   self.next_ref = 1
   -- varobjs made for the stop they belong to, deleted at the next
   self.varobjs = {}
+  -- type -> its name through the type printers (shorten_types), false if
+  -- gdb couldn't parse it
+  self.type_names = {}
   self.exited = false
 end
 
@@ -84,6 +87,20 @@ function Gdb:ask(command)
   local class, results = self:request(command)
   if class == "error" then return nil, results.msg or "error" end
   return results
+end
+
+-- sends commands together and waits for all: each { command, callback },
+-- callback(results) with nil for an error
+function Gdb:ask_all(requests)
+  local waiter = { left = #requests }
+  for _, r in ipairs(requests) do
+    self:send(r[1], function(class, results)
+      r[2](class ~= "error" and results or nil)
+      waiter.left = waiter.left - 1
+      if waiter.left == 0 then core.wake(waiter) end
+    end)
+  end
+  while waiter.left > 0 do core.wait_for({ waiter }) end
 end
 
 -- runs a CLI command
@@ -182,6 +199,15 @@ function Gdb:start(opts)
   if opts.cwd then table.insert(setup, "-environment-cd " .. mi.quote(opts.cwd)) end
   if opts.tty then table.insert(setup, "-inferior-tty-set " .. mi.quote(opts.tty)) end
   for _, command in ipairs(setup) do self:ask(command) end
+  -- `-lite-whatis X`: whatis's type (of a type or an expression), as a result
+  -- rather than console output; gdb 13+ with Python
+  local python = table.concat({
+    "class LiteWhatis(gdb.MICommand):",
+    "  def invoke(self, argv):",
+    "    return {'type': gdb.execute('whatis ' + argv[0], to_string=True).partition('= ')[2].strip()}",
+    "LiteWhatis('-lite-whatis')",
+  }, "\\n")
+  self.has_whatis = self:cli('python exec("' .. python .. '")') ~= nil
   for _, glob in ipairs(opts.skip_files or {}) do self:cli("skip -gfi " .. glob) end
   for _, command in ipairs(opts.commands or {}) do
     local ok, err = self:cli(command)
@@ -379,6 +405,31 @@ function Gdb:variable(name, v, ref_info)
   return var
 end
 
+---Shortens the variables' types to whatis's: through the type printers,
+---which libstdc++'s have give std::string for std::__cxx11::basic_string<char,
+---...>, and leave out template arguments that are the defaults. By type
+---(cached: a container's elements share one); a type gdb can't parse back (a
+---lambda's) stays as it is.
+---@param vars debug.variable[]
+function Gdb:shorten_types(vars, thread_id, level)
+  if not self.has_whatis then return end
+  local names = self.type_names
+  local requests, asked = {}, {}
+  for _, var in ipairs(vars) do
+    local t = var.type
+    -- nothing to shorten without a template
+    if t and t:find("<") and names[t] == nil and not asked[t] then
+      asked[t] = true
+      table.insert(requests, { "-lite-whatis" .. thread_frame(thread_id, level) .. " " .. mi.quote(t),
+        function(res) names[t] = res and res.type or false end })
+    end
+  end
+  self:ask_all(requests)
+  for _, var in ipairs(vars) do
+    if var.type and names[var.type] then var.type = names[var.type] end
+  end
+end
+
 ---An expression as a variable with its own varobj, in a frame: a struct's or
 ---array's value is its contents, as gdb prints them, rather than "{...}".
 ---@return debug.variable?
@@ -391,7 +442,8 @@ function Gdb:root_variable(expression, thread_id, level)
     return nil, why or err
   end
   table.insert(self.varobjs, created.name)
-  local var = self:variable(expression, created, { kind = "var", varobj = created.name })
+  local var = self:variable(expression, created,
+    { kind = "var", varobj = created.name, thread = thread_id, level = level })
   if var.value and (var.value:find("^{%.%.%.}$") or var.value:find("^%[%d+%]$") or var.value == "") then
     local value, why = self:evaluate(expression, thread_id, level)
     if value then
@@ -406,7 +458,9 @@ end
 
 ---An expression to watch, as a variable that unfolds.
 function Gdb:watch(expression, thread_id, level)
-  return self:root_variable(expression, thread_id, level)
+  local var, err = self:root_variable(expression, thread_id, level)
+  if var then self:shorten_types({ var }, thread_id, level) end
+  return var, err
 end
 
 ---The threads, each with its innermost frame.
@@ -447,7 +501,7 @@ function Gdb:variables(ref)
         if not c.type and (c.exp == "public" or c.exp == "private" or c.exp == "protected") then
           list(c.name)
         else
-          table.insert(vars, self:variable(c.exp, c, { kind = "var", varobj = c.name }))
+          table.insert(vars, self:variable(c.exp, c, { kind = "var", varobj = c.name, thread = t.thread, level = t.level }))
         end
       end
       if res.has_more == "1" then table.insert(vars, { name = "...", value = "more not shown" }) end
@@ -456,6 +510,7 @@ function Gdb:variables(ref)
     local ok, err = list(t.varobj)
     if not ok then return nil, err end
   end
+  self:shorten_types(vars, t.thread, t.level)
   return vars
 end
 
