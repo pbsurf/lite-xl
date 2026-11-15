@@ -459,13 +459,17 @@ top:
           e.motion.y = event_plus.motion.y;
           e.motion.xrel += event_plus.motion.xrel;
           e.motion.yrel += event_plus.motion.yrel;
+          e.motion.state = event_plus.motion.state;
         }
         lua_pushstring(L, "mousemoved");
         lua_pushinteger(L, e.motion.x * window_renderer.scale_x);
         lua_pushinteger(L, e.motion.y * window_renderer.scale_y);
         lua_pushinteger(L, e.motion.xrel * window_renderer.scale_x);
         lua_pushinteger(L, e.motion.yrel * window_renderer.scale_y);
-        return 5;
+        /* the buttons held (a mask), so that a release we never got (another
+        ** program took it) doesn't leave a press held */
+        lua_pushinteger(L, e.motion.state);
+        return 6;
       }
 
     case SDL_EVENT_MOUSE_WHEEL:

@@ -1965,9 +1965,13 @@ function core.on_event(type, ...)
     keymap.on_key_released(...)
   elseif type == "mousemoved" then
     -- where the pointer is, though a popup may keep the move from the root view
+    local x, y, dx, dy, buttons = ...
     local mouse = core.root_view.mouse
-    mouse.x, mouse.y = ...
-    core.root_view:on_mouse_moved(...)
+    mouse.x, mouse.y = x, y
+    -- none held, though we got no release (another program took it): the
+    -- press ends (buttons is nil for a touch's tap)
+    if buttons == 0 and next(mouse.held) then core.root_view:end_mouse_press() end
+    core.root_view:on_mouse_moved(x, y, dx, dy)
   elseif type == "mousepressed" then
     if not core.root_view:on_mouse_pressed(...) then
       did_keymap = keymap.on_mouse_pressed(...)

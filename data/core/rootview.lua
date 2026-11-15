@@ -30,7 +30,18 @@ function RootView:new()
   RootView.super.new(self)
   self.root_node = Node()
   self.deferred_draws = {}
-  self.mouse = { x = 0, y = 0 }
+  -- where the mouse is; `pressed`: where the press of the buttons held went
+  -- down ({ button, x, y }: the first of them), nil with none held. Views
+  -- tell from it a drag that started elsewhere in them (no hover feedback for
+  -- it; one from another view doesn't reach them, see mouse_capture).
+  self.mouse = { x = 0, y = 0, pressed = nil, held = {} }
+  -- Mouse capture: the view a press went to gets the mouse's moves until no
+  -- button is held, wherever the pointer goes, and the others get none (no
+  -- hover in them while a drag passes over). Presses the root view handles
+  -- (dividers, tabs, menus) capture nothing: those drags keep moves from the
+  -- views themselves.
+  ---@type core.view?
+  self.mouse_capture = nil
   self.drag_overlay = { x = 0, y = 0, w = 0, h = 0, visible = false, opacity = 0,
                         base_color = style.drag_overlay,
                         color = { table.unpack(style.drag_overlay) } }
@@ -264,6 +275,9 @@ end
 ---@return boolean
 function RootView:on_mouse_pressed(button, x, y, clicks)
   tooltip.dismiss()
+  local mouse = self.mouse
+  if not next(mouse.held) then mouse.pressed = { button = button, x = x, y = y } end
+  mouse.held[button] = true
   -- the tab menu gets clicks first while shown: a click anywhere closes it,
   -- choosing the row under the mouse, if any
   local menu = self.tab_menu
@@ -281,6 +295,7 @@ function RootView:on_mouse_pressed(button, x, y, clicks)
   end
   -- and its input line too
   if core.command_view:input_overlaps_point(x, y) then
+    self.mouse_capture = self.mouse_capture or core.command_view
     return core.command_view:on_mouse_pressed(button, x, y, clicks)
   end
   local div = self.root_node:get_divider_overlapping_point(x, y)
@@ -312,8 +327,23 @@ function RootView:on_mouse_pressed(button, x, y, clicks)
       return true
     end
   elseif not self.dragged_node then -- avoid sending on_mouse_pressed events when dragging tabs
-    core.set_active_view(node.active_view)
-    return self.on_view_mouse_pressed(button, x, y, clicks) or node.active_view:on_mouse_pressed(button, x, y, clicks)
+    local view = node.active_view
+    core.set_active_view(view)
+    self.mouse_capture = self.mouse_capture or view
+    return self.on_view_mouse_pressed(button, x, y, clicks) or view:on_mouse_pressed(button, x, y, clicks)
+  end
+end
+
+
+---No mouse button is held anymore: the press ends, and its capture, after
+---which the views see where the pointer is (the hover the capture kept from
+---them, the mouse leaving the view that had it).
+function RootView:end_mouse_press()
+  local mouse = self.mouse
+  mouse.held, mouse.pressed = {}, nil
+  if self.mouse_capture then
+    self.mouse_capture = nil
+    self.pointer_recheck = true
   end
 end
 
@@ -408,6 +438,9 @@ function RootView:on_mouse_released(button, x, y, ...)
   else -- avoid sending on_mouse_released events when dragging tabs
     self.root_node:on_mouse_released(button, x, y, ...)
   end
+  -- after the views' releases, which still see the press
+  self.mouse.held[button] = nil
+  if not next(self.mouse.held) then self:end_mouse_press() end
 end
 
 
@@ -462,6 +495,15 @@ function RootView:on_mouse_moved(x, y, dx, dy)
 
   -- avoid sending on_mouse_moved events when dragging tabs
   if dn then return end
+
+  -- a view's drag: its moves are its alone (overlapping_node stays its node
+  -- until the press ends)
+  local captured = self.mouse_capture
+  if captured then
+    captured:on_mouse_moved(x, y, dx, dy)
+    core.request_cursor(captured.cursor)
+    return
+  end
 
   -- hovering a suggestion selects it, and the views under the box (or the
   -- input line) don't see the mouse
