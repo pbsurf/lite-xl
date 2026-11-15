@@ -168,6 +168,12 @@ another repository's version, uninstalls removing dependents under `--assume-yes
 * **unsaved_lines:** a red bar in the gutter beside lines changed since the file
   was saved (`style.unsaved_line`); lines edited or undone back to how they were
   aren't marked.
+* **lsp** (imported from lite-xl-lsp, with our changes): code actions on ctrl+.
+  (quick fixes for the diagnostics at the cursor or on its line, such as clangd's
+  "Include <vector>", and refactorings of the selection); rename (alt+r) across
+  files; signature help that follows the caret through a call, above the line so
+  completions show below; diagnostics in the hover popup, with the server's notes
+  (why each overload candidate doesn't fit, with the types).
 * **search_ui** (imported, with our changes): a "Highlight All" option marking every
   match in `style.search_match`; the replace row shows only when wanted (ctrl+r,
   or the chevron left of the search box).

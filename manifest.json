@@ -3,7 +3,7 @@
     {
       "id": "lsp",
       "name": "Language Server Protocol",
-      "description": "LSP client (lite-xl-lsp d1432ae) with our changes: squiggly diagnostics, diagnostics in hover popups, mouse_hover_mode.",
+      "description": "LSP client (lite-xl-lsp d1432ae) with our changes: squiggly diagnostics, diagnostics and their notes in hover popups, mouse_hover_mode, code actions, rename, signature help following the caret.",
       "version": "0.10",
       "mod_version": "3",
       "path": "addons/plugins/lsp",
