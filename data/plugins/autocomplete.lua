@@ -486,8 +486,14 @@ local function draw_description_box(box)
   end
 end
 
+-- Where the boxes were last drawn, for the mouse: the suggestions box (x, y,
+-- w, h), its first row's y, the row height, the first row's index, and the
+-- description box (desc), if any; nil when not shown.
+local drawn
+
 local function draw_suggestions_box(av)
   if #suggestions <= 0 then
+    drawn = nil
     return
   end
 
@@ -517,6 +523,10 @@ local function draw_suggestions_box(av)
   local y = ry + style.padding.y / 2
   local show_count = math.min(#suggestions, ah)
   local start_index = suggestions_offset
+  drawn = {
+    x = rx, y = ry, w = rw, h = rh, rows_y = y, lh = lh,
+    first = start_index, count = show_count, desc = desc or nil
+  }
 
   for i=start_index, start_index+show_count-1, 1 do
     if not suggestions[i] then
@@ -613,6 +623,24 @@ local on_text_remove = Doc.remove
 local update = RootView.update
 local draw = RootView.draw
 local on_focus_lost = RootView.on_focus_lost
+local on_mouse_pressed = RootView.on_mouse_pressed
+local on_mouse_moved = RootView.on_mouse_moved
+local on_mouse_wheel = RootView.on_mouse_wheel
+
+---Whether a point is on the suggestions or description box, and the index of
+---the suggestion under it, if any.
+local function suggestion_at(x, y)
+  if not drawn or #suggestions == 0 or not get_active_view() then return false end
+  local function inside(b)
+    return b and x >= b.x and x < b.x + b.w and y >= b.y and y < b.y + b.h
+  end
+  if not inside(drawn) then return inside(drawn.desc) end
+  local row = math.floor((y - drawn.rows_y) / drawn.lh)
+  if row >= 0 and row < drawn.count then
+    return true, drawn.first + row
+  end
+  return true
+end
 
 RootView.on_text_input = function(...)
   on_text_input(...)
@@ -659,6 +687,37 @@ RootView.draw = function(...)
     -- draw suggestions box after everything else
     core.root_view:defer_draw(draw_suggestions_box, av)
   end
+end
+
+-- clicking a suggestion inserts it; clicks elsewhere on the boxes do nothing
+-- (they'd go to the text under them)
+RootView.on_mouse_pressed = function(self, button, x, y, clicks)
+  local on_box, idx = suggestion_at(x, y)
+  if not on_box then return on_mouse_pressed(self, button, x, y, clicks) end
+  if button == "left" and idx then
+    suggestions_idx = idx
+    command.perform("autocomplete:complete")
+  end
+  return true
+end
+
+RootView.on_mouse_moved = function(self, x, y, ...)
+  on_mouse_moved(self, x, y, ...)
+  if suggestion_at(x, y) then core.request_cursor("arrow") end
+end
+
+-- the wheel over the boxes scrolls the suggestions, not the text under them
+RootView.on_mouse_wheel = function(self, dy, dx, ...)
+  local x, y = self.mouse.x, self.mouse.y
+  if not suggestion_at(x, y) then return on_mouse_wheel(self, dy, dx, ...) end
+  if dy ~= 0 then
+    local ah = math.min(config.plugins.autocomplete.max_height, #suggestions)
+    suggestions_offset = common.clamp(
+      suggestions_offset - (dy > 0 and 1 or -1), 1, #suggestions - ah + 1
+    )
+    core.redraw = true
+  end
+  return true
 end
 
 -- the suggestions close when the window loses focus, as menus do
