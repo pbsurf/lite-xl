@@ -1205,11 +1205,12 @@ local function show_panel_terminal()
   panel.show(core.terminal_view)
 end
 
--- a new terminal tab: in the panel while it has the focus (or in_panel), else the editor's
+-- a new terminal tab: in the panel while it has the focus (also in what's
+-- attached to its node: a search pane), or in_panel; else the editor's
 local function open_tab(options, in_panel)
   local tv = TerminalView(options)
-  local node = core.root_view.root_node:get_node_for_view(core.active_view)
-  if in_panel or (in_panel == nil and node and node.is_panel) then
+  local node = core.root_view:get_active_node()
+  if in_panel or (in_panel == nil and node.is_panel) then
     panel.show(tv)
   else
     core.root_view:get_active_node_default():add_view(tv)
@@ -1256,8 +1257,8 @@ command.add(nil, {
   -- a new terminal tab with a profile picked from config.plugins.terminal.profiles
   ["terminal:open-tab-with-profile"] = function()
     -- the command view's node is the editor's, not the panel's: pick where first
-    local node = core.root_view.root_node:get_node_for_view(core.active_view)
-    local in_panel = node and node.is_panel
+    local node = core.root_view:get_active_node()
+    local in_panel = node.is_panel
     core.command_view:enter("Open Terminal", {
       submit = function(text, item)
         if item then open_tab({ profile = item.text }, in_panel) end
