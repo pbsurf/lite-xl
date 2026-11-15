@@ -142,6 +142,11 @@ local function get_cache(session)
   return cache
 end
 
+---Called when the target hovered turns out to have no value to show (not a
+---variable of the frame): another plugin's hover can show instead.
+---@type fun()?
+hover.on_no_value = nil
+
 ---Forgets the hovered target (the session moved on, the mouse left).
 function hover.clear()
   if current then
@@ -154,6 +159,17 @@ end
 local function stopped_session()
   local s = debug and debug.session
   return s and s.state == "stopped" and s:get_frame() and s or nil
+end
+
+---Whether the mouse rests on a target that shows a value, or may (not
+---evaluated yet): another plugin's hover (the language server's) waits.
+---@return boolean
+function hover.has_value()
+  local session = stopped_session()
+  if not current or not session or current.generation ~= session.generation then
+    return false
+  end
+  return get_cache(session)[current.expression] ~= false
 end
 
 -- whether a line of a file is in the selected frame's function (in a core
@@ -257,6 +273,7 @@ local function update(view, x, y)
     if current ~= target or session ~= stopped_session() then return end
     res = resolve(session, target)
     if current == target and res then tooltip.hover(hover, target, 0) end
+    if current == target and res == false and hover.on_no_value then hover.on_no_value() end
   end)
 end
 

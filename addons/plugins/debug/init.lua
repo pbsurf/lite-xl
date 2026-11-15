@@ -502,14 +502,18 @@ end
 
 hover.setup(debug, supports_breakpoints)
 
--- while stopped, the language server's hover popups don't show: hovering is
--- for values
+-- while stopped, the language server's hover popups don't show over a value
+-- shown (or being evaluated): elsewhere (a function, a type, a variable of
+-- another function), and once a target has none, they do
 core.add_thread(function()
   local lsp = package.loaded["plugins.lsp"]
   if lsp and lsp.hover_suppressors then
     table.insert(lsp.hover_suppressors, function()
-      return config.plugins.debug.hover_values and debug.session ~= nil and debug.session.state == "stopped"
+      return config.plugins.debug.hover_values and hover.has_value()
     end)
+    hover.on_no_value = function()
+      if not lsp.hover_position.triggered then lsp.hover_timer:restart() end
+    end
   end
 end)
 
