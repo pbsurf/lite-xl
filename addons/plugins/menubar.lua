@@ -63,6 +63,7 @@ config.plugins.menubar = common.merge({
       "-",
       { command = "doc:save", text = "Save" },
       { command = "doc:save-as-picker", text = "Save As..." },
+      { command = "core:save-all", text = "Save All" },
       { command = "doc:reload", text = "Reload from Disk" },
       { command = "file:rename", text = "Rename File..." },
       { command = "file:delete", text = "Delete File" },
