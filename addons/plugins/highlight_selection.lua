@@ -12,7 +12,6 @@ local command = require "core.command"
 local config = require "core.config"
 local style = require "core.style"
 local DocView = require "core.docview"
-local CommandView = require "core.commandview"
 
 config.plugins.highlight_selection = common.merge({
   enabled = true,
@@ -113,7 +112,8 @@ end
 local get_line_marks = DocView.get_line_marks
 function DocView:get_line_marks(line)
   local marks = get_line_marks(self, line)
-  if not config.plugins.highlight_selection.enabled or self:is(CommandView) then
+  -- not in an input field (the command view's, a search box)
+  if not config.plugins.highlight_selection.enabled or self:get_document_view() ~= self then
     return marks
   end
   local needle = get_needle(self.doc)

@@ -16,7 +16,6 @@ local command = require "core.command"
 local keymap = require "core.keymap"
 local Doc = require "core.doc"
 local DocView = require "core.docview"
-local CommandView = require "core.commandview"
 local RootView = require "core.rootview"
 
 config.plugins.navigate = common.merge({
@@ -38,7 +37,8 @@ local stepped
 
 local function get_doc_view()
   local av = core.active_view
-  if av and av:extends(DocView) and not av:extends(CommandView) then
+  -- not an input field (the command view's, a search box)
+  if av and av:extends(DocView) and av:get_document_view() == av then
     return av
   end
 end
