@@ -62,9 +62,12 @@ function RootView:defer_draw(fn, ...)
 end
 
 
+---The node of the active view, or of the attachment the focus is in
+---(Node:attach), else the primary node.
 ---@return core.node
 function RootView:get_active_node()
   local node = self.root_node:get_node_for_view(core.active_view)
+    or self.root_node:get_node_for_attachment(core.active_view)
   if not node then node = self:get_primary_node() end
   return node
 end
@@ -154,8 +157,7 @@ end
 ---the bottom panel (core.panel), get_last_used_node(), which then becomes active.
 ---@return core.node
 function RootView:get_active_node_default()
-  local node = self.root_node:get_node_for_view(core.active_view)
-  if not node then node = self:get_primary_node() end
+  local node = self:get_active_node()
   if node.locked or node.is_panel then
     node = self:get_last_used_node()
     local default_view = node.active_view or node.views[1]
@@ -303,7 +305,7 @@ function RootView:on_mouse_pressed(button, x, y, clicks)
   end
   local div = self.root_node:get_divider_overlapping_point(x, y)
   local node = self.root_node:get_child_overlapping_point(x, y)
-  if div and (node and not node.active_view:scrollbar_overlaps_point(x, y)) then
+  if div and (node and not node:get_view_overlapping_point(x, y):scrollbar_overlaps_point(x, y)) then
     self.dragged_divider = div
     return true
   end
@@ -330,7 +332,7 @@ function RootView:on_mouse_pressed(button, x, y, clicks)
       return true
     end
   elseif not self.dragged_node then -- avoid sending on_mouse_pressed events when dragging tabs
-    local view = node.active_view
+    local view = node:get_view_overlapping_point(x, y)
     core.set_active_view(view)
     self.mouse_capture = self.mouse_capture or view
     return self.on_view_mouse_pressed(button, x, y, clicks) or view:on_mouse_pressed(button, x, y, clicks)
@@ -540,12 +542,12 @@ function RootView:on_mouse_moved(x, y, dx, dy)
   local tab_index = self.overlapping_node and self.overlapping_node:get_tab_overlapping_point(x, y)
   if self.overlapping_node and self.overlapping_node:get_tab_button_index(x, y) then
     core.request_cursor("arrow")
-  elseif div and (self.overlapping_node and not self.overlapping_node.active_view:scrollbar_overlaps_point(x, y)) then
+  elseif div and (self.overlapping_node and not self.overlapping_node:get_view_overlapping_point(x, y):scrollbar_overlaps_point(x, y)) then
     core.request_cursor(div.type == "hsplit" and "sizeh" or "sizev")
   elseif tab_index then
     core.request_cursor("arrow")
   elseif self.overlapping_node then
-    core.request_cursor(self.overlapping_node.active_view.cursor)
+    core.request_cursor(self.overlapping_node:get_view_overlapping_point(x, y).cursor)
   end
 end
 
@@ -564,7 +566,7 @@ end
 ---@return boolean
 function RootView:on_file_dropped(filename, x, y)
   local node = self.root_node:get_child_overlapping_point(x, y)
-  local result = node and node.active_view:on_file_dropped(filename, x, y)
+  local result = node and node:get_view_overlapping_point(x, y):on_file_dropped(filename, x, y)
   if result then return result end
   local info = system.get_file_info(filename)
   if info and info.type == "dir" then
@@ -630,7 +632,7 @@ function RootView:on_touch_moved(x, y, dx, dy, id)
     node:scroll_tabs_freely(-dx)
     node.tab_shift = node.tab_scroll   -- follow the finger, no animation
   else
-    local view = node.active_view
+    local view = node:get_view_overlapping_point(t.x, t.y)
     view.scroll.to.x = view.scroll.to.x - dx
     view.scroll.to.y = view.scroll.to.y - dy
     view:clamp_scroll_position()
@@ -681,7 +683,7 @@ function RootView:on_mouse_wheel(dy, dx)
     end
     return true
   end
-  return node.active_view:on_mouse_wheel(dy, dx)
+  return node:get_view_overlapping_point(x, y):on_mouse_wheel(dy, dx)
 end
 
 

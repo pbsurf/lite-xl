@@ -13,6 +13,8 @@ local View = require "core.view"
 ---@field is_panel? boolean The bottom panel's node (core.panel)
 ---@field on_collapse? fun(node: core.node) Called when the node's last view is
 ---removed and the node goes away, its sibling taking its parent's place
+---@field attachment? core.view A leaf's attachment (Node:attach)
+---@field attachment_side? "bottom"|"top"|"right"
 local Node = Object:extend()
 
 ---A button at the right end of the tab bar, shown while the node's tabs scroll.
@@ -63,7 +65,14 @@ function Node:on_mouse_moved(x, y, ...)
     self.hovered.x, self.hovered.y = x, y
     -- now, not at the next update: a tap moves and clicks in the same frame
     self:tab_hovered_update(x, y)
-    self.active_view:on_mouse_moved(x, y, ...)
+    -- the view or the attachment, whichever is under the pointer: the other
+    -- one sees it leave
+    local view = self:get_view_overlapping_point(x, y)
+    if self.attachment then
+      if self.mouse_view and self.mouse_view ~= view then self.mouse_view:on_mouse_left() end
+      self.mouse_view = view
+    end
+    view:on_mouse_moved(x, y, ...)
   else
     self:propagate("on_mouse_moved", x, y, ...)
   end
@@ -73,6 +82,7 @@ end
 function Node:on_mouse_released(...)
   if self.type == "leaf" then
     self.active_view:on_mouse_released(...)
+    if self.attachment then self.attachment:on_mouse_released(...) end
   else
     self:propagate("on_mouse_released", ...)
   end
@@ -84,15 +94,22 @@ function Node:on_mouse_left()
     self.hovered.x, self.hovered.y = -1, -1
     self:tab_hovered_update(-1, -1)
     self.active_view:on_mouse_left()
+    if self.attachment then self.attachment:on_mouse_left() end
+    self.mouse_view = nil
   else
     self:propagate("on_mouse_left")
   end
 end
 
 
+-- the node each attachment is attached to (Node:attach), also out of the tree
+-- (the hidden bottom panel's)
+local attachment_nodes = setmetatable({}, { __mode = "k" })
+
 function Node:consume(node)
   for k, _ in pairs(self) do self[k] = nil end
   for k, v in pairs(node) do self[k] = v   end
+  if self.attachment then attachment_nodes[self.attachment] = self end
 end
 
 
@@ -144,6 +161,8 @@ function Node:remove_view(root, view)
         or self.views[idx] or self.views[#self.views])
     end
   else
+    -- the attachment goes with the node's views, before the node goes
+    self:detach()
     local parent = self:get_parent_node(root)
     local is_a = (parent.a == self)
     local other = parent[is_a and "b" or "a"]
@@ -235,6 +254,71 @@ function Node:set_active_view(view)
   end
 end
 
+
+---Attaches a view to a leaf node, replacing its attachment, if any: a strip
+---along one side of the node's views, below the tab bar (a search pane). It
+---belongs to the node, not to its tabs: it stays as tabs change, goes with the
+---node when it moves (split, merged) and is detached when its last view is
+---removed. Its size across the side (`size.y` for "bottom" and "top", `size.x`
+---for "right") is its own; 0 hides it. While focus is in it (on it, or a view
+---for which its `contains_view(view)` returns true: a widget's text box), the
+---node is the active one (RootView:get_active_node), its active view the
+---current tab, so commands acting on tabs and splits act there. A view is
+---attached to one node at a time: attached to another, it moves. Its
+---`on_detach(node)`, if any, is called when it's detached (moved too).
+---@param view core.view
+---@param side? "bottom"|"top"|"right" Default "bottom"
+function Node:attach(view, side)
+  assert(self.type == "leaf", "Tried to attach a view to a non-leaf node")
+  local other = attachment_nodes[view]
+  if other and other ~= self and other.attachment == view then other:detach() end
+  if self.attachment ~= view then self:detach() end
+  self.attachment, self.attachment_side = view, side or "bottom"
+  attachment_nodes[view] = self
+end
+
+---Detaches the node's attachment, if any.
+function Node:detach()
+  local view = self.attachment
+  if not view then return end
+  self.attachment, self.attachment_side, self.mouse_view = nil, nil, nil
+  if attachment_nodes[view] == self then attachment_nodes[view] = nil end
+  view:on_mouse_left()
+  if view.on_detach then view:on_detach(self) end
+end
+
+---Whether `view` is the node's attachment or in it (focus in it is in the node).
+---@param view core.view
+---@return boolean
+function Node:attachment_contains(view)
+  local att = self.attachment
+  return att ~= nil and view ~= nil
+    and (att == view or (att.contains_view ~= nil and att:contains_view(view)))
+end
+
+---The leaf node whose attachment is or contains `view`, if any.
+---@param view core.view
+---@return core.node?
+function Node:get_node_for_attachment(view)
+  if self.type == "leaf" then
+    return self:attachment_contains(view) and self or nil
+  end
+  return self.a:get_node_for_attachment(view) or self.b:get_node_for_attachment(view)
+end
+
+---The view under a point in a leaf node: its attachment, if over it, else its
+---active view.
+---@return core.view
+function Node:get_view_overlapping_point(px, py)
+  local att = self.attachment
+  if att and att.size.x > 0 and att.size.y > 0
+    and px >= att.position.x and px < att.position.x + att.size.x
+    and py >= att.position.y and py < att.position.y + att.size.y
+  then
+    return att
+  end
+  return self.active_view
+end
 
 function Node:get_view_idx(view)
   for i, v in ipairs(self.views) do
@@ -638,14 +722,32 @@ end
 
 function Node:update_layout()
   if self.type == "leaf" then
-    local av = self.active_view
+    local x, y, w, h = self.position.x, self.position.y, self.size.x, self.size.y
     if self:should_show_tabs() then
       local _, _, _, th = self:get_tab_rect(1)
-      av.position.x, av.position.y = self.position.x, self.position.y + th
-      av.size.x, av.size.y = self.size.x, self.size.y - th
-    else
-      Node.copy_position_and_size(av, self)
+      y, h = y + th, h - th
     end
+    -- the attachment takes its size along its side, and a divider when shown
+    local att = self.attachment
+    if att then
+      local ds = style.divider_size
+      if self.attachment_side == "right" then
+        local aw = math.max(0, math.min(att.size.x, w - ds))
+        att.position.x, att.position.y = x + w - aw, y
+        att.size.x, att.size.y = aw, h
+        w = w - (aw > 0 and aw + ds or 0)
+      else
+        local ah = math.max(0, math.min(att.size.y, h - ds))
+        att.position.x = x
+        att.position.y = self.attachment_side == "top" and y or y + h - ah
+        att.size.x, att.size.y = w, ah
+        if self.attachment_side == "top" and ah > 0 then y = y + ah + ds end
+        h = h - (ah > 0 and ah + ds or 0)
+      end
+    end
+    local av = self.active_view
+    av.position.x, av.position.y = x, y
+    av.size.x, av.size.y = w, math.max(0, h)
   else
     local x1, y1 = self.a:get_locked_size()
     local x2, y2 = self.b:get_locked_size()
@@ -728,6 +830,7 @@ function Node:update()
     for _, view in ipairs(self.views) do
       view:update()
     end
+    if self.attachment then self.attachment:update() end
     self:tab_hovered_update(self.hovered.x, self.hovered.y)
     for i, w in ipairs(self:get_tab_target_widths()) do
       local view = self.views[i]
@@ -869,6 +972,20 @@ function Node:draw()
     core.push_clip_rect(pos.x, pos.y, size.x, size.y)
     self.active_view:draw()
     core.pop_clip_rect()
+    local att = self.attachment
+    if att and att.size.x > 0 and att.size.y > 0 then
+      local ap, as, ds = att.position, att.size, style.divider_size
+      if self.attachment_side == "right" then
+        renderer.draw_rect(ap.x - ds, ap.y, ds, as.y, style.divider)
+      elseif self.attachment_side == "top" then
+        renderer.draw_rect(ap.x, ap.y + as.y, as.x, ds, style.divider)
+      else
+        renderer.draw_rect(ap.x, ap.y - ds, as.x, ds, style.divider)
+      end
+      core.push_clip_rect(ap.x, ap.y, as.x, as.y)
+      att:draw()
+      core.pop_clip_rect()
+    end
   else
     local x, y, w, h = self:get_divider_rect()
     renderer.draw_rect(x, y, w, h, self:get_divider_color())
@@ -904,6 +1021,7 @@ function Node:close_all_docviews(keep_active)
       end
     end
     self.tab_scroll = 0
+    if #self.views == 0 then self:detach() end
     if #self.views == 0 and self.is_primary_node then
       -- if we are not the primary view and we had the active view it doesn't
       -- matter to reattribute the active view because, within the close_all_docviews

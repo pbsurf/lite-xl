@@ -219,7 +219,8 @@ function panel.hide()
   local region = panel.get_region()
   if not region then return end
   local root = core.root_view.root_node
-  local had_focus = region:get_node_for_view(core.active_view) ~= nil
+  local had_focus = (region:get_node_for_view(core.active_view)
+    or region:get_node_for_attachment(core.active_view)) ~= nil
   local split = region:get_parent_node(root)
   if region.size.y > 0 then panel.height = region.size.y end
   hidden_divider = region.size.y <= 0 and split.divider or nil

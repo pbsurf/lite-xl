@@ -31,32 +31,32 @@ local t = {
   end,
 
   ["root:switch-to-previous-tab"] = function(node)
-    local idx = node:get_view_idx(core.active_view)
+    local idx = node:get_view_idx(node.active_view)
     idx = idx - 1
     if idx < 1 then idx = #node.views end
     node:set_active_view(node.views[idx])
   end,
 
   ["root:switch-to-next-tab"] = function(node)
-    local idx = node:get_view_idx(core.active_view)
+    local idx = node:get_view_idx(node.active_view)
     idx = idx + 1
     if idx > #node.views then idx = 1 end
     node:set_active_view(node.views[idx])
   end,
 
   ["root:move-tab-left"] = function(node)
-    local idx = node:get_view_idx(core.active_view)
+    local idx = node:get_view_idx(node.active_view)
     if idx > 1 then
       table.remove(node.views, idx)
-      table.insert(node.views, idx - 1, core.active_view)
+      table.insert(node.views, idx - 1, node.active_view)
     end
   end,
 
   ["root:move-tab-right"] = function(node)
-    local idx = node:get_view_idx(core.active_view)
+    local idx = node:get_view_idx(node.active_view)
     if idx < #node.views then
       table.remove(node.views, idx)
-      table.insert(node.views, idx + 1, core.active_view)
+      table.insert(node.views, idx + 1, node.active_view)
     end
   end,
 
