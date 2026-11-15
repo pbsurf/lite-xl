@@ -15,7 +15,6 @@ local search = require "core.doc.search"
 local projectsearch = require "plugins.projectsearch"
 local CommandView = require "core.commandview"
 local DocView = require "core.docview"
-local Node = require "core.node"
 local Widget = require "libraries.widget"
 local Button = require "libraries.widget.button"
 local CheckBox = require "libraries.widget.checkbox"
@@ -64,11 +63,15 @@ config.plugins.search_ui = common.merge({
   }
 }, config.plugins.search_ui)
 
+-- The pane is attached (Node:attach) to a node of the editor or the bottom
+-- panel: it searches that node's active tab, whichever it is.
+
 -- The view searched: a DocView, or another view providing get_search_doc(),
 -- returning a doc-like object with read_only set (lines, get_selection,
 -- set_selection, get_text, sanitize_position, optionally search_backward: next
--- and previous swapped), and scroll_to_line(line) (a terminal)
----@type core.docview
+-- and previous swapped), and scroll_to_line(line) (a terminal). Kept in step
+-- with the pane's node's active view (sync_target).
+---@type core.docview?
 local doc_view = nil
 
 ---@return core.doc?
@@ -362,8 +365,25 @@ local function row_shown()
 end
 
 local update_size
--- the leaf node the pane is under (below)
-local host_node
+
+---The node the pane is attached to, if any (looked up: nodes that merge move
+---into their parent's table).
+---@return core.node?
+local function host_node()
+  return core.root_view.root_node:get_node_for_attachment(widget)
+end
+
+---Whether the pane is shown: visible, in a node of the tree (not one of the
+---hidden bottom panel's).
+local function shown()
+  return widget:is_visible() and host_node() ~= nil
+end
+
+---Whether the view can be searched.
+local function searchable(view)
+  return view ~= nil and not view:is(CommandView) and view.textbox == nil
+    and (view:extends(DocView) or view.get_search_doc ~= nil)
+end
 
 -- shows or hides the chevron and the replace row (in file scope)
 local function show_replace_controls()
@@ -410,6 +430,65 @@ end
 local function set_target(view)
   doc_view = view
   update_replace_controls()
+end
+
+---The target follows the active tab of the pane's node (a tab switched to,
+---from the pane's boxes too), its results counted anew.
+local function sync_target()
+  local node = host_node()
+  local view = node and searchable(node.active_view) and node.active_view or nil
+  if view == doc_view then return end
+  set_target(view)
+  if view and shown() and scope:get_selected() == 1 and findtext:get_text() ~= "" then
+    Results:find(findtext:get_text(), target_doc(view), true)
+  else
+    Results:clear()
+  end
+end
+
+-- moving the pane: it's not closing
+local moving = false
+
+---Attaches the pane to a node, on the side config chooses, moved there if it's
+---elsewhere, shown or hidden as it was.
+---@param node core.node
+local function attach(node)
+  local side = config.plugins.search_ui.position
+  if node.attachment == widget then
+    if node.attachment_side == side then return end
+    -- sized anew for the side (update_size), from its size across the side
+    -- (the node sets the other)
+    widget.init_size = true
+    if side == "right" then widget.size.x = 0 else widget.size.y = 0 end
+  end
+  -- from wherever it is: another node, the hidden bottom panel's
+  moving = true
+  node:attach(widget, side)
+  moving = false
+  -- laid out now: the node layout runs after the views update
+  core.root_view.root_node:update_layout()
+end
+
+---Its node gone, or its last tab: the pane hides (shown again by a search).
+function widget:on_detach()
+  if moving then return end
+  -- focus isn't given back: it goes where the node's removal puts it
+  self.prev_view = nil
+  self:swap_active_child()
+  self:hide()
+  doc_view = nil
+  Results:clear()
+end
+
+---The pane goes to the node of the active view when that can be searched (a
+---find from a doc: F3, Enter after clicking back into it), from wherever it is.
+local function follow_active()
+  local av = core.active_view
+  if searchable(av) then
+    local node = core.root_view.root_node:get_node_for_view(av)
+    if node then attach(node) end
+  end
+  sync_target()
 end
 
 local function toggle_scope(idx, not_set)
@@ -502,36 +581,17 @@ local function project_search()
 end
 
 local find_enabled = true
-
--- The view a find or replace is for, if not the target already: the active view
--- if it can be searched (F3 in a doc), else the one active before (from the
--- pane's boxes), if the pane is under it as for a view focused while it's shown.
--- (Not the one before when a doc is active: that's the tab switched from.)
-local function view_to_search()
-  for _, view in ipairs({ core.active_view, core.last_active_view }) do
-    if view and view ~= findtext.textview and view ~= replacetext.textview
-      and not view:is(CommandView) and (view:is(DocView) or view.get_search_doc)
-    then
-      if core.root_view.root_node:get_node_for_view(view) == host_node() then
-        return view
-      end
-      return
-    end
-  end
-end
 ---@param reverse? boolean
 ---@param typing? boolean the search text changed: a backward search should
 ---still find the current match as it grows
 local function find(reverse, typing)
+  follow_active()
   if
     not view_is_open(doc_view) or findtext:get_text() == "" or not find_enabled
   then
     Results:clear()
     return
   end
-
-  local view = view_to_search()
-  if view then set_target(view) end
 
   local doc = target_doc(doc_view)
   if not doc then return end
@@ -598,8 +658,8 @@ local function find(reverse, typing)
 end
 
 local function find_replace()
-  local view = view_to_search()
-  if view then set_target(view) end
+  follow_active()
+  if not view_is_open(doc_view) then return end
   local doc = target_doc(doc_view)
   if doc.read_only then
     status:set_label("Read only")
@@ -672,84 +732,6 @@ local function step_history(box, dir)
   if box == findtext and scope:get_selected() == 1 then find(false, true) end
 end
 
-local inside_node = false
-local current_position = ""
-
--- The pane goes under the node of the view it searches (a split of the editor
--- area, the bottom panel), its own node split from that one.
-
----The pane's node. Looked up, not kept: nodes that merge (Node:remove_view)
----move into their parent's table.
----@return core.node?
-local function pane_node()
-  return inside_node and core.root_view.root_node:get_node_for_view(widget) or nil
-end
-
----The leaf node the pane is under, nil if it's not in one (that node was split).
----@return core.node?
-function host_node()
-  local node = pane_node()
-  local parent = node and node:get_parent_node(core.root_view.root_node)
-  if not parent then return nil end
-  local other = parent.a == node and parent.b or parent.a
-  return other.type == "leaf" and other or nil
-end
-
----The node the pane goes under to search a view: the view's, else the primary one.
----@return core.node
-local function target_node(view)
-  local node = view and core.root_view.root_node:get_node_for_view(view)
-  if node and not node:get_view_idx(widget) then return node end
-  return core.root_view:get_primary_node()
-end
-
--- takes the pane out of its node, to be added again
-local function remove_from_node()
-  widget:hide()
-  local node = pane_node()
-  if node then node:remove_view(core.root_view.root_node, widget) end
-  core.root_view.root_node:update_layout()
-  widget:set_size(0, 0)
-  widget.init_size = true
-  inside_node, current_position = false, ""
-end
-
----Whether the pane is in place: where it goes to search `av` if given.
-local function placed_for(av)
-  return inside_node and current_position == config.plugins.search_ui.position
-    and (av == nil or host_node() == target_node(av))
-end
-
----Adds the pane under the view it will search (`av`, else the one it searches),
----moved there if it's elsewhere.
-local function add_to_node(av)
-  if not placed_for(av) then
-    -- taking the pane out and splitting a node move the focus: it's given back,
-    -- as the view searched is the one focused before the pane's box (find)
-    local active = core.active_view
-    if inside_node then remove_from_node() end
-    local node = target_node(av or doc_view)
-    if config.plugins.search_ui.position == "right" then
-      node:split("right", widget, {x=true}, true)
-      current_position = "right"
-    elseif config.plugins.search_ui.position == "top" then
-      node:split("up", widget, {y=true}, false)
-      current_position = "top"
-    else
-      node:split("down", widget, {y=true}, false)
-      current_position = "bottom"
-    end
-    widget:show()
-    -- sized by its new node before it next updates: show_animated takes a zero
-    -- width for hidden and would restore its zero prev_size
-    core.root_view.root_node:update_layout()
-    inside_node = true
-    if active ~= core.active_view and core.root_view.root_node:get_node_for_view(active) then
-      core.set_active_view(active)
-    end
-  end
-end
-
 ---Show or hide the search pane.
 ---@param av? core.docview
 ---@param toggle? boolean
@@ -768,27 +750,29 @@ local function show_find(av, toggle)
     return
   end
 
-  if placed_for(av) then
-    if toggle then
-      widget:toggle_visible(true, false, true)
+  -- the pane goes to the view's node; with none (a project search from
+  -- elsewhere), it stays, else it goes where docs open
+  local node = av and core.root_view.root_node:get_node_for_view(av)
+    or host_node() or core.root_view:get_last_used_node()
+  if host_node() ~= node then
+    attach(node)
+    -- shown at once where it moved
+    widget:show()
+  elseif toggle then
+    widget:toggle_visible(true, false, true)
+  elseif not widget:is_visible() then
+    if config.plugins.search_ui.position == "right" then
+      widget:show_animated(false, true)
     else
-      if not widget:is_visible() then
-        if config.plugins.search_ui.position == "right" then
-          widget:show_animated(false, true)
-        else
-          widget:show_animated(true, false)
-        end
-      end
+      widget:show_animated(true, false)
     end
-  else
-    add_to_node(av)
   end
 
   if widget:is_visible() then
     status:set_label("")
 
     widget:swap_active_child(findtext)
-    set_target(av)
+    set_target(searchable(node.active_view) and node.active_view or nil)
     local doc = view_is_open(doc_view) and target_doc(doc_view)
     if doc then
       local doc_text = doc:get_text(table.unpack({ doc:get_selection() }))
@@ -976,7 +960,7 @@ end
 ---@return renderer.color? color
 function widget.highlight_matcher(view)
   if
-    not highlightall:is_checked() or not widget:is_visible()
+    not highlightall:is_checked() or not shown()
     or scope:get_selected() ~= 1 or view ~= doc_view
   then
     return nil
@@ -1094,8 +1078,6 @@ local function update_right_positioning(self)
     self.init_size = false
     self:show_animated(false, true)
   end
-
-  add_to_node()
 end
 
 ---@param self widget
@@ -1158,12 +1140,16 @@ local function update_bottom_positioning(self)
     self.init_size = false
     self:show_animated(true, false)
   end
-
-  add_to_node()
 end
 
 -- reposition items on scale changes
 function widget:update()
+  -- the side config chooses (changed in the settings), the tab searched
+  local node = host_node()
+  if node and node.attachment_side ~= config.plugins.search_ui.position then
+    attach(node)
+  end
+  if self.visible then sync_target() end
   if Widget.update(self) then
     if config.plugins.search_ui.position == "right" then
       update_right_positioning(self)
@@ -1191,65 +1177,13 @@ function widget:on_scale_change(...)
 end
 
 --------------------------------------------------------------------------------
--- Override set_active_view to keep track of currently active docview
---------------------------------------------------------------------------------
-local core_set_active_view = core.set_active_view
-function core.set_active_view(...)
-  core_set_active_view(...)
-  local view = core.next_active_view or core.active_view
-  if
-    view ~= doc_view
-    and
-    widget:is_visible()
-    and
-    (
-      view:extends(DocView)
-      and
-      view ~= findtext.textview
-      and
-      view ~= replacetext.textview
-      and
-      view.doc.filename
-      or
-      view.get_search_doc
-    )
-    and
-    -- only a view the pane is under: one elsewhere is searched with the pane
-    -- moved there (show_find). Last: a node being split (making its new node
-    -- focuses an EmptyView) isn't a whole tree yet.
-    core.root_view.root_node:get_node_for_view(view) == host_node()
-  then
-    set_target(view)
-    Results:clear()
-  end
-end
-
--- The last tab leaving the node the pane is under (a split, the bottom panel;
--- closed, hidden, moved out): the pane goes first, so the node goes as it
--- would without it (next to the fixed-size pane, it would stay empty, or the
--- pane would take its place). Not the primary node, which stays.
-local node_remove_view = Node.remove_view
-function Node:remove_view(root, view)
-  if view ~= widget and #self.views == 1 and self.views[1] == view
-    and not self.is_primary_node and self == host_node()
-  then
-    remove_from_node()
-    -- its node merged into its parent's table
-    local node = root:get_node_for_view(view)
-    if node then node_remove_view(node, root, view) end
-    return
-  end
-  node_remove_view(self, root, view)
-end
-
---------------------------------------------------------------------------------
 -- Register commands
 --------------------------------------------------------------------------------
 command.add(
   function()
     if core.active_view:is(DocView) or core.active_view.get_search_doc then
       return true, core.active_view
-    elseif widget:is_visible() then
+    elseif shown() then
       return true, doc_view
     elseif scope:get_selected() == 2 then
       return true, nil
@@ -1267,7 +1201,7 @@ command.add(
   }
 )
 
-command.add(function() return widget:is_visible() and not core.active_view:is(CommandView) end, {
+command.add(function() return shown() and not core.active_view:is(CommandView) end, {
   ["search-replace:hide"] = function()
     -- typed and found, then closed: worth keeping, unlike a search that failed
     if #Results.matches > 0 then remember_find() end
@@ -1309,7 +1243,7 @@ command.add(function() return widget:is_visible() and not core.active_view:is(Co
 
 -- also from a view searched without being a DocView (a terminal binds it)
 command.add(function()
-  return widget:is_visible() and not core.active_view:is(CommandView)
+  return shown() and not core.active_view:is(CommandView)
     or core.active_view.get_search_doc ~= nil
 end, {
   ["search-replace:file-search"] = function()
@@ -1322,7 +1256,7 @@ end, {
 -- find-replace:replace (ctrl+r) only applies in a doc; in the pane's boxes,
 -- show the replace row
 command.add(function()
-  return widget:is_visible() and scope:get_selected() == 1 and can_replace()
+  return shown() and scope:get_selected() == 1 and can_replace()
     and (core.active_view == findtext.textview or core.active_view == replacetext.textview)
 end, {
   ["search-replace:show-replace"] = function()
@@ -1332,7 +1266,7 @@ end, {
 
 command.add(function()
   local av = core.active_view
-  if widget:is_visible() and (av == findtext.textview or av == replacetext.textview) then
+  if shown() and (av == findtext.textview or av == replacetext.textview) then
     return true, av.textbox
   end
   return false
@@ -1345,7 +1279,7 @@ end, {
 -- pane's active child
 command.add(
   function()
-    return widget:is_visible()
+    return shown()
       and
       (
         core.active_view == findtext.textview
@@ -1409,7 +1343,7 @@ end
 local find_replace_repeat = command.map["find-replace:repeat-find"].perform
 command.map["find-replace:repeat-find"].perform = function(...)
   if
-    widget:is_visible()
+    shown()
     or
     (config.plugins.search_ui.replace_core_find and findtext:get_text() ~= "")
   then
@@ -1423,7 +1357,7 @@ end
 local find_replace_previous = command.map["find-replace:previous-find"].perform
 command.map["find-replace:previous-find"].perform = function(...)
   if
-    widget:is_visible()
+    shown()
     or
     (config.plugins.search_ui.replace_core_find and findtext:get_text() ~= "")
   then
