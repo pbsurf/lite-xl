@@ -8,7 +8,7 @@ local watches = require "plugins.debug.watches"
 ---Watch expressions (kept per project), evaluated in the selected frame at
 ---each stop: as the variables, they unfold into their members and changed
 ---values are highlighted. The last row adds one; Enter or a double click on
----an expression edits it, Delete removes it.
+---an expression edits it, Delete removes it; a right-click has these too.
 ---@class debug.watchesview : debug.variablesview
 local WatchesView = VariablesView:extend()
 
@@ -159,6 +159,50 @@ command.add(nil, {
     WatchesView.prompt(nil, default)
   end,
 })
+
+command.add(function()
+  local expression = expression_at_cursor()
+  return expression ~= nil and expression:find("%S") ~= nil, expression
+end, {
+  -- as it is, without asking (the editor's context menu's Add Watch); one
+  -- already watched isn't added again
+  ["debug:add-watch-at-cursor"] = function(expression)
+    expression = expression:match("^%s*(.-)%s*$")
+    debug().show_view("watches", false)
+    for _, e in ipairs(watches.list()) do
+      if e == expression then return end
+    end
+    watches.add(expression)
+  end,
+})
+
+-- a right-click: on a watch's row, it's selected, to edit or remove; on the
+-- add row or empty space, adding one
+local menu_found, menu = pcall(require, "plugins.contextmenu")
+if menu_found then
+  menu:register(function()
+    local view = core.active_view
+    local mouse = core.root_view.mouse
+    if not (view:is(WatchesView) and view:overlaps_point(mouse.x, mouse.y)
+      and not view:scrollbar_overlaps_point(mouse.x, mouse.y)) then
+      return false
+    end
+    -- a member's row has none
+    local node = view.rows[view.hovered_row or 0]
+    return not node or node.watch ~= nil or node.add
+  end, function()
+    local view = core.active_view
+    local node = view.rows[view.hovered_row or 0]
+    if node then view.selected_key = node.key end
+    if node and node.watch then
+      return {
+        { text = "Edit Watch...", command = "debug-watches:edit", info = keymap.get_binding("debug-watches:edit") },
+        { text = "Remove Watch", command = "debug-watches:remove", info = keymap.get_binding("debug-watches:remove") },
+      }
+    end
+    return { { text = "Add Watch...", command = "debug-watches:add", info = keymap.get_binding("debug-watches:add") } }
+  end)
+end
 
 keymap.add {
   ["delete"] = "debug-watches:remove",

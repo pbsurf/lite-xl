@@ -658,7 +658,7 @@ if menu_found then
       table.insert(items, { text = "Run to Here", command = "debug:run-to-cursor",
         info = keymap.get_binding("debug:run-to-cursor") })
     end
-    table.insert(items, { text = "Add Watch", command = "debug:add-watch" })
+    table.insert(items, { text = "Add Watch", command = "debug:add-watch-at-cursor" })
     return items
   end)
 end
