@@ -36,6 +36,16 @@ json.null = "{{json::null}}"
 -- integers to floats. The drawback is that the user should manually convert
 -- these strings to a number. Numbers with less than 15 digits are not affected.
 json.number_flag = "{{json::num}}"
+
+-- An empty table encodes as {}; one marked with json.array, as [].
+local array_mt = {}
+
+---Marks a table as a JSON array, so that it encodes as [] when empty.
+---@param t? table
+---@return table
+function json.array(t)
+  return setmetatable(t or {}, array_mt)
+end
 local number_flag_len = #json.number_flag
 
 -------------------------------------------------------------------------------
@@ -96,7 +106,7 @@ local function encode_table(val, stack)
       table.insert(res, encode(v, stack))
     end
     stack[val] = nil
-    if #res > 0 then
+    if #res > 0 or getmetatable(val) == array_mt then
       return "[" .. table.concat(res, ",") .. "]"
     else
       return "{}"
@@ -340,6 +350,9 @@ local function parse_array(str, i)
     if chr == "]" then break end
     if chr ~= "," then decode_error(str, i, "expected ']' or ','") end
   end
+  -- an empty array encodes back as one (sent back to the server, e.g. a
+  -- diagnostic's in a code action request)
+  if n == 1 then json.array(res) end
   return res, i
 end
 
