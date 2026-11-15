@@ -1734,6 +1734,17 @@ function lsp.get_diagnostics_text(doc, line, col, max_severity)
     if covers and severity_level <= (max_severity or math.huge) then
       local severity = severity_names[severity_level]
       table.insert(texts, severity .. ": " .. message.message)
+      -- the server's notes (clangd: each overload candidate and why it isn't
+      -- viable, with the types), at their location: line, or file:line
+      for _, info in ipairs(message.relatedInformation or {}) do
+        local path = common.normalize_path(util.tofilename(info.location.uri))
+        local line_nr = info.location.range.start.line + 1
+        local where = path == doc.abs_filename and ("line " .. line_nr)
+          or (common.path_belongs_to(path, core.project_dir)
+            and common.relative_path(core.project_dir, path)
+            or common.home_encode(path)) .. ":" .. line_nr
+        table.insert(texts, string.format("  %s: %s", where, info.message))
+      end
       if not range then
         range = { line1 = line1, col1 = col1, line2 = line2, col2 = math.max(col2, col1 + 1) }
       end
