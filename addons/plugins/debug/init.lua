@@ -48,6 +48,9 @@ config.plugins.debug = common.merge({
   -- while stopped, hovering a variable in the editor shows its value (and
   -- the language server's hover info doesn't show)
   hover_values = true,
+  -- a stop (a breakpoint hit, a signal, a step) raises and focuses the editor's
+  -- window if another has the focus
+  raise_window = true,
   -- the keys: f5 start or continue (f8 too, as before), f10 step over, f11
   -- step into, f12 step out, shift+f5 or shift+f8 stop, f9 breakpoint, ctrl+f8
   -- run to the cursor. f10 and f11 step only while stopped: otherwise they're
@@ -222,6 +225,9 @@ local function on_event(name, session)
     local file, line = current_location()
     if file then show_location(file, line) end
     front_stack_once(session)
+    if config.plugins.debug.raise_window and not system.window_has_focus() then
+      system.raise_window()
+    end
   elseif name == "frame" or name == "thread" then
     local file, line = current_location()
     if file then show_location(file, line) end
