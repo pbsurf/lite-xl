@@ -759,20 +759,23 @@ for _, name in ipairs(editing) do
   end
 end
 
--- commands on the file: an input field's view (the command view's, a widget's
--- text box) isn't a document; they act on the document view it's for
--- (DocView:get_document_view()), if any
-for _, name in ipairs({ "doc:save", "doc:save-as", "doc:save-as-picker", "doc:reload", "file:rename", "file:delete" }) do
+-- commands on the file, and going to a line: an input field's view (the
+-- command view's, a widget's text box) isn't a document; they act on the
+-- document view it's for (DocView:get_document_view()), if any. Saving doesn't
+-- apply to a read-only doc without a file (a diff, help text): nothing of the
+-- user's to save
+local saving = { ["doc:save"] = true, ["doc:save-as"] = true, ["doc:save-as-picker"] = true }
+for _, name in ipairs({ "doc:save", "doc:save-as", "doc:save-as-picker", "doc:reload", "file:rename",
+    "file:delete", "doc:go-to-line" }) do
   local cmd = command.map[name]
   local predicate = cmd.predicate
   cmd.predicate = function(...)
     local view = core.active_view
     if view:extends(DocView) then
       local dv = view:get_document_view()
-      if dv ~= view then
-        if not dv then return false end
-        return true, dv, ...
-      end
+      if not dv then return false end
+      if saving[name] and dv.doc.read_only and not dv.doc.filename then return false end
+      if dv ~= view then return true, dv, ... end
     end
     return predicate(...)
   end
