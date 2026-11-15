@@ -515,6 +515,17 @@ function Gdb:variables(ref)
       end
     end
   else
+    -- children by pretty printers (a member that's a container), which gdb
+    -- says have none: { var, varobj, ref_info }, to ask
+    local dynamic = {}
+    local function add(name, c)
+      local ref_info = { kind = "var", varobj = c.name, thread = t.thread, level = t.level }
+      local var = self:variable(name, c, ref_info)
+      table.insert(vars, var)
+      if c.dynamic == "1" and not var.ref and c.displayhint ~= "string" then
+        table.insert(dynamic, { var, c.name, ref_info })
+      end
+    end
     local function list(varobj)
       local res, err = self:ask("-var-list-children --all-values " .. mi.quote(varobj) .. " 0 " .. MAX_CHILDREN)
       if not res then return nil, err end
@@ -524,8 +535,7 @@ function Gdb:variables(ref)
         local children = res.children or {}
         for i = 1, #children - 1, 2 do
           local k, v = children[i], children[i + 1]
-          table.insert(vars, self:variable("[" .. self:summary(k) .. "]", v,
-            { kind = "var", varobj = v.name, thread = t.thread, level = t.level }))
+          add("[" .. self:summary(k) .. "]", v)
         end
         if res.has_more == "1" then table.insert(vars, { name = "...", value = "more not shown" }) end
         return true
@@ -535,7 +545,7 @@ function Gdb:variables(ref)
         if not c.type and (c.exp == "public" or c.exp == "private" or c.exp == "protected") then
           list(c.name)
         else
-          table.insert(vars, self:variable(c.exp, c, { kind = "var", varobj = c.name, thread = t.thread, level = t.level }))
+          add(c.exp, c)
         end
       end
       if res.has_more == "1" then table.insert(vars, { name = "...", value = "more not shown" }) end
@@ -543,6 +553,14 @@ function Gdb:variables(ref)
     end
     local ok, err = list(t.varobj)
     if not ok then return nil, err end
+    -- whether those have any: their first
+    local requests = {}
+    for _, d in ipairs(dynamic) do
+      table.insert(requests, { "-var-list-children --no-values " .. mi.quote(d[2]) .. " 0 1", function(res)
+        if res and has_children(res) then d[1].ref = self:make_ref(d[3]) end
+      end })
+    end
+    self:ask_all(requests)
   end
   self:shorten_types(vars, t.thread, t.level)
   return vars
