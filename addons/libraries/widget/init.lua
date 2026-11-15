@@ -109,9 +109,26 @@ local last_hovered_child = nil
 ---@type table<integer, widget>
 local floating_widgets = {}
 
----Flag that indicates if the tooltip is been shown
----@type boolean
-local widget_showing_tooltip = false
+---The widget whose tooltip the status bar shows, if any.
+---@type widget?
+local tooltip_owner = nil
+
+local function show_tooltip(widget)
+  tooltip_owner = widget
+  core.status_view:show_tooltip(widget.tooltip)
+end
+
+-- Removes the tooltip shown; with `widget`, only if it's that widget's or one
+-- inside it's (it's hidden, or the pointer left it: it won't see the pointer
+-- leave the one hovered).
+local function remove_tooltip(widget)
+  if not tooltip_owner then return end
+  local owner = tooltip_owner
+  while widget and owner and owner ~= widget do owner = owner.parent end
+  if widget and not owner then return end
+  tooltip_owner = nil
+  core.status_view:remove_tooltip()
+end
 
 ---When no parent is given to the widget constructor it will automatically
 ---overwrite RootView methods to intercept system events.
@@ -263,6 +280,10 @@ end
 ---Hide the widget.
 function Widget:hide()
   self.visible = false
+  -- the pointer leaves it (and what it was over in it): shown again, what's
+  -- under the pointer is entered anew, its tooltip and hover feedback shown
+  self:on_mouse_leave(-1, -1, 0, 0)
+  self.mouse_is_hovering = false
   -- we need to force size to zero on parent widget to properly hide it
   -- when used as a lite node, otherwise the reserved space of the node
   -- will stay visible and dragging will reveal empty space.
@@ -284,6 +305,7 @@ end
 ---@param lock_y? boolean Do not resize height while animating
 ---@param options? widget.animation.options
 function Widget:hide_animated(lock_x, lock_y, options)
+  remove_tooltip(self)
   local x, y = self.size.x, self.size.y
   local target_x = lock_x and self.size.x or 0
   local target_y = lock_y and self.size.y or 0
@@ -906,10 +928,7 @@ end
 function Widget:on_mouse_released(button, x, y)
   if not self.visible then return false end
 
-  if widget_showing_tooltip then
-    widget_showing_tooltip = false
-    core.status_view:remove_tooltip()
-  end
+  remove_tooltip()
 
   if self.captured_widget then
     self.captured_widget:on_mouse_released(button, x, y)
@@ -1028,10 +1047,7 @@ function Widget:on_mouse_moved(x, y, dx, dy)
       then
         hovered = child
       elseif child.mouse_is_hovering then
-        if widget_showing_tooltip then
-          widget_showing_tooltip = false
-          core.status_view:remove_tooltip()
-        end
+        remove_tooltip()
         child.mouse_is_hovering = false
         child:on_mouse_leave(x, y, dx, dy)
         system.set_cursor("arrow")
@@ -1069,10 +1085,7 @@ function Widget:on_mouse_moved(x, y, dx, dy)
     if not self.mouse_is_hovering  then
       system.set_cursor("arrow")
       self.mouse_is_hovering = true
-      if #self.tooltip > 0 then
-        widget_showing_tooltip = true
-        core.status_view:show_tooltip(self.tooltip)
-      end
+      if #self.tooltip > 0 then show_tooltip(self) end
       self:on_mouse_enter(x, y, dx, dy)
       last_hovered_child = self
     end
@@ -1104,6 +1117,7 @@ end
 
 ---Emitted once when the mouse leaves the widget.
 function Widget:on_mouse_leave(x, y, dx, dy)
+  remove_tooltip(self)
   for _, child in pairs(self.childs) do
     if child.mouse_is_hovering then
       child:on_mouse_leave(x, y, dx, dy)
