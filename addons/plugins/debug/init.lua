@@ -45,8 +45,6 @@ config.plugins.debug = common.merge({
     return t
   end)(),
   max_frames = 200,
-  -- types after values in the variables
-  show_types = false,
   -- while stopped, hovering a variable in the editor shows its value (and
   -- the language server's hover info doesn't show)
   hover_values = true,

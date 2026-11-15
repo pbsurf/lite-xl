@@ -1,7 +1,6 @@
 local core = require "core"
 local common = require "core.common"
 local command = require "core.command"
-local config = require "core.config"
 local keymap = require "core.keymap"
 local style = require "core.style"
 local View = require "core.view"
@@ -13,8 +12,10 @@ local shapes = require "libraries.shapes"
 ---after a function returned (stepping out of it, or over its end), what it
 ---returned comes first.
 ---Values that changed since they were last shown (at an earlier stop) are
----highlighted. Hovering a row shows its type. What's unfolded stays so from stop to stop (by the thread, the
----frame's function and the variable's path). While the program runs, the last
+---highlighted; types follow them, dimmed. A row cut off (by the view's edge, or
+---a long or multiline value) shows whole in a tooltip over it while hovered.
+---What's unfolded stays so from stop to stop (by the thread, the frame's
+---function and the variable's path). While the program runs, the last
 ---stop's values stay, dimmed.
 ---
 ---Subclasses (the watches) give the tree's roots with fetch_roots().
@@ -260,9 +261,9 @@ function VariablesView:row_at(x, y)
   return self.rows[i] and i or nil
 end
 
--- the row's tooltip target: its key, if it has a type to show
+-- the row's tooltip target: its key, if it's cut off (as last drawn)
 local function tooltip_target(node)
-  return node and node.type and node.type ~= "" and node.key or nil
+  return node and node.truncated and node.key or nil
 end
 
 function VariablesView:on_mouse_moved(x, y, ...)
@@ -282,20 +283,71 @@ function VariablesView:on_mouse_left()
   tooltip.hover(self, nil)
 end
 
--- the type, in a box under the row, from the name
+-- a tooltip's lines: the text broken at newlines and where wider than `w`
+-- (after a space if there's one late enough, else anywhere), at most `max`
+local function wrap(font, text, w, max)
+  local lines = {}
+  for line in (text .. "\n"):gmatch("(.-)\n") do
+    repeat
+      if #lines == max then
+        lines[max] = lines[max] .. "…"
+        return lines
+      end
+      -- the longest prefix that fits (at least a character)
+      local lo, hi = 1, #line
+      if font:get_width(line) > w then
+        hi = hi - 1
+        while lo < hi do
+          local mid = (lo + hi + 1) // 2
+          if font:get_width(line:sub(1, mid)) <= w then lo = mid else hi = mid - 1 end
+        end
+        -- not inside a UTF-8 sequence
+        while lo > 1 and line:byte(lo + 1) and line:byte(lo + 1) & 0xC0 == 0x80 do lo = lo - 1 end
+        local space = line:sub(1, lo):match(".*()%s")
+        hi = space and space > lo * 2 / 3 and space or lo
+      end
+      table.insert(lines, line:sub(1, hi))
+      line = line:sub(hi + 1)
+    until line == ""
+  end
+  return lines
+end
+
+-- the whole row, over it (its text where the row's is), wrapped at the
+-- window's edge (moved left if there's little room there); the type on a line
+-- of its own after a wrapped value
 function VariablesView:draw_tooltip(node, y, h)
   local font = style.code_font
-  local text = node.type
-  local w = font:get_width(text) + style.padding.x * 2
-  local th = font:get_height() + style.padding.y
   local root = core.root_view.root_node
+  local pad = style.padding.x
+  local text = node.name .. (node.value and (" = " .. node.value) or ("  " .. (node.error or "")))
+  if #text > 5000 then text = text:sub(1, 5000) .. "…" end
+  local type_text = node.type and node.type ~= "" and node.type
   local x = self:expander_x(node) + self:get_indent()
-  x = math.max(0, math.min(x, root.size.x - w - 1))
-  -- below the row, else above it
-  local ty = y + h
-  if ty + th > root.size.y then ty = y - th end
-  common.draw_popup_box(x, ty, w, th)
-  renderer.draw_text(font, text, x + style.padding.x, ty + style.padding.y / 2, style.text)
+  local max_w = root.size.x - x - pad - SCALE
+  if max_w < font:get_width(string.rep("x", 60)) then max_w = root.size.x - 2 * pad - 2 * SCALE end
+  local lines = wrap(font, text, max_w, 20)
+  -- wrapped: to the edge, hiding the row under it
+  local w = #lines > 1 and max_w or 0
+  for _, line in ipairs(lines) do w = math.max(w, font:get_width(line)) end
+  local type_w = type_text and font:get_width("  " .. type_text) or 0
+  local type_inline = #lines == 1 and w + type_w <= max_w
+  if type_text then w = math.max(w, type_inline and w + type_w or font:get_width(type_text)) end
+  w = math.min(w, max_w)
+  local lh = font:get_height()
+  local th = lh * (#lines + ((type_text and not type_inline) and 1 or 0))
+  x = math.max(pad, math.min(x, root.size.x - w - pad - SCALE))
+  local ty = y + (h - lh) / 2
+  ty = math.max(style.padding.y / 2, math.min(ty, root.size.y - th - style.padding.y / 2))
+  common.draw_popup_box(x - pad, ty - style.padding.y / 2, w + 2 * pad, th + style.padding.y)
+  for i, line in ipairs(lines) do
+    renderer.draw_text(font, line, x, ty + (i - 1) * lh, style.text)
+  end
+  if type_text then
+    local tx, tline = x, #lines
+    if type_inline then tx = x + font:get_width(lines[1]) + font:get_width("  ") else tline = #lines + 1 end
+    common.draw_text(font, style.dim, type_text, "left", tx, ty + (tline - 1) * lh, 0, lh)
+  end
 end
 
 function VariablesView:expander_x(node)
@@ -336,6 +388,7 @@ function VariablesView:draw_node(node, x, y, h, dim)
     shapes.expander(x + (indent - size) / 2, y + (h - size) / 2, size, style.dim, self:is_expanded(node))
   end
   x = x + indent
+  node.truncated = false
   if node.scope or node.add then
     return common.draw_text(style.font, style.dim, node.name, "left", x, y, 0, h)
   end
@@ -345,7 +398,8 @@ function VariablesView:draw_node(node, x, y, h, dim)
   if node.value then
     x = common.draw_text(font, style.dim, " = ", "left", x, y, 0, h)
     local value = node.value:gsub("\n", " ")
-    if #value > 500 then value = value:sub(1, 500) .. "…" end
+    if value ~= node.value then node.truncated = true end
+    if #value > 500 then value = value:sub(1, 500) .. "…"; node.truncated = true end
     local color = dim and style.dim or (node.changed and style.debug.changed or value_color(value))
     if node.changed and not dim then
       local th = font:get_height()
@@ -357,8 +411,8 @@ function VariablesView:draw_node(node, x, y, h, dim)
     -- often just out of scope: not as loud as an error
     x = common.draw_text(style.font, style.dim, node.error, "left", x, y, 0, h)
   end
-  if node.type and config.plugins.debug.show_types then
-    x = common.draw_text(style.font, style.dim, "  " .. node.type, "left", x, y, 0, h)
+  if node.type and node.type ~= "" then
+    x = common.draw_text(font, style.dim, "  " .. node.type, "left", x, y, 0, h)
   end
   return x
 end
@@ -382,6 +436,8 @@ function VariablesView:draw()
       renderer.draw_rect(ox, y, w, h, style.line_highlight)
     end
     local x = self:draw_node(node, ox + style.padding.x, y, h, dim)
+    -- cut off by the view's edge (or its scrollbar)
+    if x > self.position.x + self.size.x - style.scrollbar_size then node.truncated = true end
     self.max_h_scroll = math.max(self.max_h_scroll, x + style.padding.x - self.position.x + self.scroll.x)
     local target = i == self.hovered_row and tooltip_target(node)
     if target and tooltip.shown(self, target) then
