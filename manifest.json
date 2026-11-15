@@ -93,6 +93,13 @@
       "path": "addons/plugins/autoinsert.lua"
     },
     {
+      "id": "bracketmatch",
+      "description": "Underlines matching pair for bracket under the caret (lite-xl-plugins 6e4aa64).",
+      "version": "0.2",
+      "mod_version": "3",
+      "path": "addons/plugins/bracketmatch.lua"
+    },
+    {
       "id": "lfautoinsert",
       "description": "Automatically inserts indentation and closing bracket/text after newline (lite-xl-plugins 6e4aa64).",
       "version": "0.3",
