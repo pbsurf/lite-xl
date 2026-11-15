@@ -93,6 +93,13 @@
       "path": "addons/plugins/autoinsert.lua"
     },
     {
+      "id": "lfautoinsert",
+      "description": "Automatically inserts indentation and closing bracket/text after newline (lite-xl-plugins 6e4aa64).",
+      "version": "0.3",
+      "mod_version": "3",
+      "path": "addons/plugins/lfautoinsert.lua"
+    },
+    {
       "id": "paste_indent",
       "description": "Pasting several lines re-indents them as a block to where they go, in the doc's tabs or spaces; ctrl+shift+v pastes them as they are.",
       "version": "0.1",
