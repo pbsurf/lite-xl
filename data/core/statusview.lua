@@ -1258,21 +1258,8 @@ function StatusView:draw()
 end
 
 
--- The menu opened from an item gets mouse events first while shown: a click
--- anywhere closes it, choosing the row under the mouse, if any
-local root_on_mouse_pressed = RootView.on_mouse_pressed
-function RootView:on_mouse_pressed(button, x, y, clicks)
-  local menu = core.status_view and core.status_view.menu
-  if not (menu and menu.show_context_menu) then
-    return root_on_mouse_pressed(self, button, x, y, clicks)
-  end
-  local mx, my = menu.position.x, menu.position.y
-  if x < mx or x >= mx + menu.items.width or y < my or y >= my + menu.items.height then
-    menu.selected = -1
-  end
-  return menu:on_mouse_pressed(button, x, y, clicks)
-end
-
+-- The menu opened from an item gets mouse moves first while shown (clicks
+-- too, as any context menu: RootView:on_mouse_pressed)
 local root_on_mouse_moved = RootView.on_mouse_moved
 function RootView:on_mouse_moved(x, y, ...)
   local menu = core.status_view and core.status_view.menu

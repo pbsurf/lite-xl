@@ -278,10 +278,13 @@ function RootView:on_mouse_pressed(button, x, y, clicks)
   local mouse = self.mouse
   if not next(mouse.held) then mouse.pressed = { button = button, x = x, y = y } end
   mouse.held[button] = true
-  -- the tab menu gets clicks first while shown: a click anywhere closes it,
-  -- choosing the row under the mouse, if any
-  local menu = self.tab_menu
-  if menu.show_context_menu then
+  -- a context menu shown (modal: the tab menu, the editor's, the tree view's,
+  -- the status bar's) gets clicks first: a click anywhere closes it, choosing
+  -- the row under the mouse, if any. Not the view, tab or divider under it,
+  -- where the menu is drawn over them, nor the view clicked made active (the
+  -- menu's command is for the view it was opened on)
+  local menu = core.context_menu
+  if menu and menu.show_context_menu then
     local mx, my = menu.position.x, menu.position.y
     if x < mx or x >= mx + menu.items.width or y < my or y >= my + menu.items.height then
       menu.selected = -1
