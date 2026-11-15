@@ -2126,6 +2126,7 @@ end
 ---@param new_name string
 function lsp.request_symbol_rename(doc, line, col, new_name)
   if not doc.lsp_open then return end
+  lsp.update_document(doc) -- pending changes go first
 
   local servers_found = false
   for _, name in pairs(lsp.get_active_servers(doc.filename, true)) do
@@ -2137,14 +2138,11 @@ function lsp.request_symbol_rename(doc, line, col, new_name)
       server:push_request('textDocument/rename', {
         params = request_params,
         callback = function(server, response)
-          if response.result and #response.result.changes then
-            for file_uri, changes in pairs(response.result.changes) do
-              core.log(file_uri .. " " .. #changes)
-              -- TODO: Finish implement textDocument/rename
-            end
+          if response.error then
+            core.error("[LSP] Rename: %s", response.error.message or "failed")
+          elseif response.result then
+            lsp.apply_workspace_edit(response.result)
           end
-
-          core.log("%s", json.prettify(json.encode(response)))
         end
       })
       return
