@@ -15,7 +15,13 @@ config.plugins.autoinsert = common.merge({ map = {
   ['"'] = '"',
   ["'"] = "'",
   ["`"] = "`",
-} }, config.plugins.autoinsert)
+},
+  -- a closing bracket typed as a line's first character takes the
+  -- indentation of the line with its opening bracket
+  reindent = true,
+  -- how many lines above to look for the opening bracket
+  reindent_line_limit = 2000,
+}, config.plugins.autoinsert)
 
 
 local function is_closer(chr)
@@ -41,6 +47,59 @@ end
 local function in_comment(doc, line, col)
   return col > 1 and token_type_at(doc, line, col - 1) == "comment"
     and token_type_at(doc, line, col) == "comment"
+end
+
+-- The opening bracket of each closing one, from the map
+local function opener_of(closer)
+  for open, close in pairs(config.plugins.autoinsert.map) do
+    if close == closer and open ~= close then return open end
+  end
+end
+
+---The line with the opening bracket `opener` that a `closer` typed at the
+---start of `line` would close, if it's found: brackets in comments and strings
+---don't count.
+local function opener_line(doc, line, opener, closer)
+  local pattern = "[%" .. opener .. "%" .. closer .. "]"
+  local depth = 0
+  local last = math.max(1, line - config.plugins.autoinsert.reindent_line_limit)
+  for l = line - 1, last, -1 do
+    local brackets = {}
+    for _, type, text in doc.highlighter:each_token(l) do
+      if type ~= "comment" and type ~= "string" then
+        for b in text:gmatch(pattern) do table.insert(brackets, b) end
+      end
+    end
+    for i = #brackets, 1, -1 do
+      if brackets[i] == closer then
+        depth = depth + 1
+      elseif depth == 0 then
+        return l
+      else
+        depth = depth - 1
+      end
+    end
+  end
+end
+
+---Before a closing bracket is typed as the first character of a line (the
+---caret at the end of its indentation; in code, not a comment or string),
+---gives the line its opening bracket's line's indentation.
+local function reindent_for_closer(doc, closer)
+  local opener = config.plugins.autoinsert.reindent and opener_of(closer)
+  if not opener then return end
+  local line, col = doc:get_selection()
+  local indent = doc.lines[line]:match("^[\t ]*")
+  local type = token_type_at(doc, line, col)
+  if col ~= #indent + 1 or type == "comment" or type == "string" then return end
+  local l = opener_line(doc, line, opener, closer)
+  local want = l and doc.lines[l]:match("^[\t ]*")
+  if want and want ~= indent then
+    if #indent > 0 then doc:remove(line, 1, line, col) end
+    if #want > 0 then doc:insert(line, 1, want) end
+    -- an insert at the caret leaves it before the text
+    doc:set_selection(line, #want + 1)
+  end
 end
 
 local function count_char(text, chr)
@@ -71,6 +130,8 @@ function DocView:on_text_input(text)
   if self.doc:has_selection() then
     return on_text_input(self, text)
   end
+
+  reindent_for_closer(self.doc, text)
 
   -- skip inserting closing text
   local chr = self.doc:get_char(self.doc:get_selection())
