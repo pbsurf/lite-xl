@@ -605,6 +605,8 @@ command.add(nil, {
     breakpoints.load()
     breakpoints.clear_all()
   end,
+  ["debug:enable-all-breakpoints"] = function() breakpoints.set_all_enabled(true) end,
+  ["debug:disable-all-breakpoints"] = function() breakpoints.set_all_enabled(false) end,
 })
 
 for _, id in ipairs(debug.view_ids) do

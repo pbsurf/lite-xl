@@ -11,7 +11,7 @@ local breakpoints = require "plugins.debug.breakpoints"
 ---All breakpoints, by file and line, with the line's code and condition: a
 ---checkbox enables or disables one (space too), Delete removes it, f2 edits
 ---its condition, and selecting one shows its line; a right-click has these
----too. During a session, one the debugger couldn't place says so.
+---too, and (also on empty space) enabling, disabling or removing them all. During a session, one the debugger couldn't place says so.
 ---@class debug.breakpointsview : core.view
 local BreakpointsView = View:extend()
 
@@ -243,18 +243,30 @@ keymap.add {
   ["f2"] = "debug-breakpoints:edit-condition",
 }
 
--- a row right-clicked: selected, and its breakpoint's menu
+-- a right-click: on a row, it's selected, with its breakpoint's menu; then
+-- (anywhere in the view) ones for all of them
 local menu_found, menu = pcall(require, "plugins.contextmenu")
 if menu_found then
   menu:register(function()
     local view = core.active_view
-    return view:is(BreakpointsView) and view.hovered_row ~= nil
+    local mouse = core.root_view.mouse
+    return view:is(BreakpointsView) and #view.items > 0 and view:overlaps_point(mouse.x, mouse.y)
+      and not view:scrollbar_overlaps_point(mouse.x, mouse.y)
   end, function()
     local view = core.active_view
-    view.selected_idx = view.hovered_row
-    local item = view.items[view.selected_idx]
-    local items = debug().breakpoint_menu_items(item.file, item.line)
-    table.insert(items, menu.DIVIDER)
+    local items = {}
+    local item = view.items[view.hovered_row or 0]
+    if item then
+      view.selected_idx = view.hovered_row
+      items = debug().breakpoint_menu_items(item.file, item.line)
+      table.insert(items, menu.DIVIDER)
+    end
+    if breakpoints.any(false) then
+      table.insert(items, { text = "Enable All Breakpoints", command = "debug:enable-all-breakpoints" })
+    end
+    if breakpoints.any(true) then
+      table.insert(items, { text = "Disable All Breakpoints", command = "debug:disable-all-breakpoints" })
+    end
     table.insert(items, { text = "Remove All Breakpoints", command = "debug:clear-breakpoints" })
     return items
   end)

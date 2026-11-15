@@ -180,6 +180,29 @@ function breakpoints.set_enabled(file, line, enabled)
   changed(file)
 end
 
+---Enables or disables all breakpoints.
+function breakpoints.set_all_enabled(enabled)
+  breakpoints.load()
+  for _, file in ipairs(breakpoints.files()) do
+    local any = false
+    for _, bp in pairs(files[file]) do
+      if bp.enabled ~= enabled then bp.enabled = enabled; any = true end
+    end
+    if any then changed(file) end
+  end
+end
+
+---Whether any breakpoint is enabled (`enabled`) or disabled (not).
+function breakpoints.any(enabled)
+  breakpoints.load()
+  for _, lines in pairs(files) do
+    for _, bp in pairs(lines) do
+      if bp.enabled == enabled then return true end
+    end
+  end
+  return false
+end
+
 ---Moves a breakpoint (the debugger put it on another line).
 function breakpoints.move(file, from, to)
   if from == to or not breakpoints.has(file, from) then return end
