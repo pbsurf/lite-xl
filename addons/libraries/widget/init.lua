@@ -704,6 +704,19 @@ function Widget:mouse_on_top(x, y)
     y <= self.position.y - self.border.width + self:get_height()
 end
 
+---Whether `view` is the widget, one of its descendants or a text box's view
+---in it: for a widget attached to a node (Node:attach), focus there is in the
+---node.
+---@param view core.view
+---@return boolean
+function Widget:contains_view(view)
+  if view == self or (self.textview and view == self.textview) then return true end
+  for _, child in ipairs(self.childs) do
+    if child:contains_view(view) then return true end
+  end
+  return false
+end
+
 ---Mark a widget as having focus.
 ---TODO: Implement set focus system by pressing a key like tab?
 function Widget:set_focus(has_focus)
