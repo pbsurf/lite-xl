@@ -195,6 +195,19 @@ local function redraw_char(dv, x, y, line, col, bg_color, char_color)
 end
 
 
+-- whether a character is selected: the selection's color wins over the marks
+local function is_selected(doc, line, col)
+  for _, line1, col1, line2, col2 in doc:get_selections(true) do
+    if (line > line1 or (line == line1 and col >= col1))
+      and (line < line2 or (line == line2 and col < col2))
+    then
+      return true
+    end
+  end
+  return false
+end
+
+
 local function draw_decoration(dv, x, y, line, col, width)
   local conf = config.plugins.bracketmatch
   local color = style.bracketmatch_color or style.syntax["function"]
@@ -205,13 +218,22 @@ local function draw_decoration(dv, x, y, line, col, width)
 
   local h = conf.line_size
 
+  -- selected characters aren't marked
+  local any_selected = false
+  for i = 1, width, 1 do
+    if is_selected(dv.doc, line, col + i - 1) then any_selected = true end
+  end
   if conf.color_char or conf.style == "block" then
     for i = 1, width, 1 do
-      redraw_char(dv, x, y, line, col + i - 1,
-                  conf.style == "block" and block_color, conf.color_char and char_color)
+      if not is_selected(dv.doc, line, col + i - 1) then
+        redraw_char(dv, x, y, line, col + i - 1,
+                    conf.style == "block" and block_color, conf.color_char and char_color)
+      end
     end
   end
-  if conf.style == "underline" then
+  if any_selected then
+    return
+  elseif conf.style == "underline" then
     local x1 = x + dv:get_col_x_offset(line, col)
     local x2 = x + dv:get_col_x_offset(line, col + width)
     local lh = dv:get_line_height()
