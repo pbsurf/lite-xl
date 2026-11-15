@@ -44,7 +44,7 @@ local function keymap_macos(keymap)
     ["shift+f3"] = "find-replace:previous-find",
     ["cmd+g"] = "doc:go-to-line",
     ["cmd+s"] = "doc:save",
-    ["cmd+shift+s"] = "doc:save-as",
+    ["cmd+shift+s"] = "core:save-all",
 
     ["cmd+z"] = "doc:undo",
     ["cmd+y"] = "doc:redo",

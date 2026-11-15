@@ -437,7 +437,7 @@ keymap.add_direct {
   ["ctrl+shift+i"] = "find-replace:toggle-regex",
   ["ctrl+g"] = "doc:go-to-line",
   ["ctrl+s"] = "doc:save",
-  ["ctrl+shift+s"] = "doc:save-as",
+  ["ctrl+shift+s"] = "core:save-all",
 
   ["ctrl+z"] = "doc:undo",
   ["ctrl+y"] = "doc:redo",

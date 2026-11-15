@@ -1169,13 +1169,20 @@ end
 
 
 ---Saves docs one after another, asking for a filename for those without one, then
----calls `on_saved`. Stops at a save that fails or is cancelled.
-local function save_docs(docs, on_saved)
+---calls `on_saved`. Stops at a save that fails or is cancelled (a failed one
+---offers Save As, which goes on from there). Docs with files are saved at once,
+---so with only those, `on_saved` is called before it returns, if they all saved.
+---@param docs core.doc[]
+---@param on_saved? fun()
+function core.save_docs(docs, on_saved)
   local i = 0
   local function save_next()
     i = i + 1
     local doc = docs[i]
-    if not doc then return on_saved() end
+    if not doc then
+      if on_saved then on_saved() end
+      return
+    end
     if doc.filename then return core.save_doc(doc, nil, save_next) end
     -- show the unnamed doc being named
     local view = core.get_views_referencing_doc(doc)[1]
@@ -1185,6 +1192,19 @@ local function save_docs(docs, on_saved)
     core.save_doc_as(doc, save_next)
   end
   save_next()
+end
+
+
+---Saves the modified docs that have files (unnamed ones are left as they are),
+---then calls `on_saved`: before it returns, unless a save failed (see
+---core.save_docs).
+---@param on_saved? fun()
+function core.save_all(on_saved)
+  local docs = {}
+  for _, doc in ipairs(core.docs) do
+    if doc:is_dirty() and doc.abs_filename then table.insert(docs, doc) end
+  end
+  core.save_docs(docs, on_saved)
 end
 
 
@@ -1212,7 +1232,7 @@ function core.confirm_close_docs(docs, close_fn, ...)
       if item.text == "Save" then
         -- in a thread: the nag view takes focus back from the command view on return
         core.add_thread(function()
-          save_docs(dirty, function() close_fn(table.unpack(args)) end)
+          core.save_docs(dirty, function() close_fn(table.unpack(args)) end)
         end)
       elseif item.text == "Discard" then
         close_fn(table.unpack(args))

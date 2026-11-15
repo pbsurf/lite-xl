@@ -401,6 +401,16 @@ command.add(nil, {
   end,
 })
 
+-- the modified docs that have files (not unnamed ones)
+command.add(function()
+  for _, doc in ipairs(core.docs) do
+    if doc:is_dirty() and doc.abs_filename then return true end
+  end
+  return false
+end, {
+  ["core:save-all"] = function() core.save_all() end,
+})
+
 -- for project directories over config.max_project_files: index them all anyway,
 -- now and when opened again
 command.add(function()
