@@ -37,7 +37,10 @@ config.plugins.lfautoinsert = common.merge({ map = {
       ["%[%[%s*\n"] = "]]"
     }
   },
-} }, config.plugins.lfautoinsert)
+},
+  -- how many lines below to look for an opening bracket's closing one
+  closed_check_lines = 5000,
+}, config.plugins.lfautoinsert)
 
 local function get_autoinsert_map(filename)
   local map = {}
@@ -62,6 +65,57 @@ local function indent_size(doc, line)
   local text = doc.lines[line] or ""
   local s, e = text:find("^[\t ]*")
   return e - s
+end
+
+
+local openers = { ["}"] = "{", [")"] = "(", ["]"] = "[" }
+
+-- a line's indentation in columns, a tab as tab_width
+local function indent_width(text, tab_width)
+  local w = 0
+  for c in text:match("^[\t ]*"):gmatch(".") do
+    w = c == "\t" and (w // tab_width + 1) * tab_width or w + 1
+  end
+  return w
+end
+
+---Whether the opening bracket before the caret at line, col (`opener`, on
+---that line) is closed already: counting brackets from the caret on (those
+---in comments and strings aside), its `closer` comes before a line indented
+---less than the opener's line (the enclosing block's end, closing nothing of
+---ours). Preprocessor lines and labels, often at column 0 in a block, don't
+---end it.
+local function is_closed(doc, line, col, opener, closer)
+  local tab_width = config.tab_width or config.indent_size
+  local min_indent = indent_width(doc.lines[line], tab_width)
+  local last = math.min(#doc.lines, line + config.plugins.lfautoinsert.closed_check_lines)
+  local depth = 1
+  for l = line, last do
+    local text = doc.lines[l]
+    if l > line and text:find("%S") and not text:find("^%s*#")
+       and not text:find("^%s*[%a_][%w_]*%s*:%s*$")
+       and indent_width(text, tab_width) < min_indent then
+      return false
+    end
+    local pos = 1
+    for _, type, token in doc.highlighter:each_token(l) do
+      if type ~= "comment" and type ~= "string" then
+        -- on the caret's line, only what's after it
+        local from = l == line and math.max(1, col - pos + 1) or 1
+        for i = from, #token do
+          local c = token:sub(i, i)
+          if c == opener then
+            depth = depth + 1
+          elseif c == closer then
+            depth = depth - 1
+            if depth == 0 then return true end
+          end
+        end
+      end
+      pos = pos + #token
+    end
+  end
+  return false
 end
 
 command.add("core.docview!", {
@@ -101,8 +155,11 @@ command.add("core.docview!", {
              (col < #doc.lines[line])
           then
             local clean_remainder = remainder:match("%s*(.*)")
-            -- Avoid inserting `close` if it's already present
+            -- Avoid inserting `close` if it's already present; for a bracket,
+            -- anywhere below that closes the block
             local already_closed = clean_remainder:find(close, 1, true) == 1
+              or (openers[close] ~= nil and col == #doc.lines[line]
+                  and is_closed(doc, line, col, openers[close], close))
             if not already_closed and col == #doc.lines[line] then
               -- Add the `close` only if we're at the end of the line
               post = string.format("\n%s%s", current_indent, close)
