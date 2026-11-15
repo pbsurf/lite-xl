@@ -112,8 +112,14 @@ function VariablesView:fetch(session, node)
   local vars = session:variables(node.ref)
   if not vars then return false end
   node.children = {}
+  -- by name, so it's the same from stop to stop; a name again (a multimap's
+  -- key) numbered
+  local seen = {}
   for _, v in ipairs(vars) do
-    local child = self:make_node(session, v, node.key .. "/" .. v.name, node.depth + 1)
+    local key = node.key .. "/" .. v.name
+    seen[v.name] = (seen[v.name] or 0) + 1
+    if seen[v.name] > 1 then key = key .. "#" .. seen[v.name] end
+    local child = self:make_node(session, v, key, node.depth + 1)
     table.insert(node.children, child)
     if child.ref and self.expanded[child.key] then
       if self:fetch(session, child) == false then return false end

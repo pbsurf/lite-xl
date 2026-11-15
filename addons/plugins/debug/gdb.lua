@@ -475,6 +475,28 @@ function Gdb:threads()
   return threads
 end
 
+-- a child varobj's value, or for a struct's (which has none) its members',
+-- as {x = 1, y = 2} (theirs as {...})
+function Gdb:summary(c)
+  if c.value and c.value ~= "" and c.value ~= "{...}" or not has_children(c) then return c.value or c.exp end
+  local parts = {}
+  local function add(varobj)
+    local res = self:ask("-var-list-children --all-values " .. mi.quote(varobj) .. " 0 20")
+    if not res then return end
+    for _, m in ipairs(res.children or {}) do
+      -- C++'s access specifiers: what's in them
+      if not m.type and (m.exp == "public" or m.exp == "private" or m.exp == "protected") then
+        add(m.name)
+      else
+        table.insert(parts, m.exp .. " = " .. ((m.value and m.value ~= "") and m.value or "{...}"))
+      end
+    end
+    if res.has_more == "1" then table.insert(parts, "...") end
+  end
+  add(c.name)
+  return "{" .. table.concat(parts, ", ") .. "}"
+end
+
 ---A scope's or a variable's variables: { name, value, type, ref (if it has
 ---children) }.
 ---@param ref integer
@@ -496,6 +518,18 @@ function Gdb:variables(ref)
     local function list(varobj)
       local res, err = self:ask("-var-list-children --all-values " .. mi.quote(varobj) .. " 0 " .. MAX_CHILDREN)
       if not res then return nil, err end
+      -- a map's (pretty printer's) children are its keys and values in turn:
+      -- an entry each, named by its key, unfolding into its value's members
+      if res.displayhint == "map" then
+        local children = res.children or {}
+        for i = 1, #children - 1, 2 do
+          local k, v = children[i], children[i + 1]
+          table.insert(vars, self:variable("[" .. self:summary(k) .. "]", v,
+            { kind = "var", varobj = v.name, thread = t.thread, level = t.level }))
+        end
+        if res.has_more == "1" then table.insert(vars, { name = "...", value = "more not shown" }) end
+        return true
+      end
       for _, c in ipairs(res.children or {}) do
         -- C++'s access specifiers are pseudo-children: list what's in them
         if not c.type and (c.exp == "public" or c.exp == "private" or c.exp == "protected") then
