@@ -368,6 +368,16 @@ function DocView:get_gutter_width()
   return width + column_width(self), padding
 end
 
+-- whether x, y is in the view's breakpoint column
+local function in_column(dv, x, y)
+  -- the column starts where draw_line_gutter last drew it: add-ons may put
+  -- columns of their own before it
+  local cx = dv.position.x + (dv.debug_column_x or 0)
+  return x >= cx and x < cx + column_hit_width(dv)
+    and y >= dv.position.y and y < dv.position.y + dv.size.y
+    and not dv:scrollbar_overlaps_point(x, y)
+end
+
 local on_mouse_pressed = DocView.on_mouse_pressed
 function DocView:on_mouse_pressed(button, x, y, clicks)
   if button == "left" and self.debug_hovered_line then
@@ -386,11 +396,10 @@ function DocView:on_mouse_moved(x, y, ...)
     if was then core.redraw = true end
     return true
   end
-  -- the column starts where draw_line_gutter last drew it: add-ons may put
-  -- columns of their own before it
-  local cx = self.position.x + (self.debug_column_x or 0)
-  if x >= cx and x < cx + column_hit_width(self)
-     and not self:scrollbar_overlaps_point(x, y) then
+  -- the breakpoint a click would toggle, on hover; while a button is held,
+  -- only if it was pressed in the column (not in a drag from elsewhere)
+  local pressed = core.root_view.mouse.pressed
+  if in_column(self, x, y) and (not pressed or in_column(self, pressed.x, pressed.y)) then
     self.debug_hovered_line = self:resolve_screen_position(x, y)
     self.cursor = "arrow"
   end
