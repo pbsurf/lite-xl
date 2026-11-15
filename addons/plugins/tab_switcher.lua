@@ -151,7 +151,10 @@ end
 ---@param items tab_switcher.tab_item[]
 ---@param dir number
 local function start_cycle(items, dir)
-  cycle = { items = items, idx = items[1].view == core.active_view and 1 or 0 }
+  -- the current tab: the active node's, also with the focus in what's attached
+  -- to it (a search pane's box)
+  local current = core.root_view:get_active_node().active_view
+  cycle = { items = items, idx = items[1].view == current and 1 or 0 }
   core.keep_visit_order = true
   if dir < 0 and cycle.idx == 0 then cycle.idx = 1 end
   command.perform(dir > 0 and "tab-switcher:previous-tab" or "tab-switcher:next-tab")
