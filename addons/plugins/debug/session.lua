@@ -44,6 +44,9 @@ local breakpoints = require "plugins.debug.breakpoints"
 ---@class debug.session : core.object
 local Session = Object:extend()
 
+-- the last stop's generation, of any session
+local last_generation = 0
+
 ---@class debug.launch_options
 ---@field program string absolute
 ---@field arguments? string[]
@@ -118,8 +121,10 @@ function Session:new(backend_class, options)
   self.thread = nil
   self.frames = nil
   self.frame_index = nil
-  -- counts stops: what's fetched for one is stale at the next
-  self.generation = 0
+  -- counts stops, across sessions: what's fetched for one is stale at the
+  -- next, also a new session's first (in the same frame as the last's)
+  self.generation = last_generation
+  self.first_generation = last_generation + 1
   -- the program's exit: { code, signal, description }
   self.exit = nil
   self.error = nil
@@ -187,9 +192,10 @@ function Session:on_backend_event(name, data)
     self.stop, self.frames, self.frame_index, self.threads = nil, nil, nil, nil
     self:set_state("running")
   elseif name == "stopped" then
-    self.generation = self.generation + 1
+    last_generation = last_generation + 1
+    self.generation = last_generation
     local generation = self.generation
-    if generation == 1 and self.options.stop_at_entry and data.reason == "breakpoint-hit" then
+    if generation == self.first_generation and self.options.stop_at_entry and data.reason == "breakpoint-hit" then
       data.description = "Entry"
     end
     if data.reason == "function-finished" and data.return_value then
