@@ -113,6 +113,9 @@ findtext:set_tooltip("Text to search")
 
 ---@type widget.textbox
 local replacetext = TextBox(widget, "", "replacement...  (↑↓ history)")
+-- ctrl+s and the like in them: the file searched
+findtext.textview.document_view = function() return doc_view end
+replacetext.textview.document_view = function() return doc_view end
 replacetext:set_position(10, findtext:get_bottom() + 10)
 replacetext:set_tooltip("Text to replace")
 

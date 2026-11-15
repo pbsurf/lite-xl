@@ -38,6 +38,15 @@ function TextView:new()
   self.label = ""
 end
 
+---An input field: the file commands (ctrl+s...) don't act on it. A widget
+---for a document (a search box) sets `document_view`, a function giving the
+---view they act on instead.
+---@return core.docview?
+function TextView:get_document_view()
+  local view = self.document_view and self.document_view()
+  return view and view:extends(DocView) and view:get_document_view() or nil
+end
+
 function TextView:get_name()
   return self.name
 end
