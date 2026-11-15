@@ -1337,23 +1337,15 @@ end, {
 
 local tried_term = false
 
----Saves the modified docs that have files: builds compile what's on disk.
-function build.save_docs()
-  for i,v in ipairs(core.docs) do
-    if v:is_dirty() and v.filename and v.abs_filename then
-      v:save()
-    end
-  end
-end
-
 command.add(function(root_view, arguments)
   return not build.is_running() and build.can_build(build.targets[build.state.target]), arguments
 end, {
   ["build:build"] = function()
-    build.save_docs()
-    if #build.targets > 0 then
-      build.build()
-    end
+    core.save_all(function()
+      if #build.targets > 0 then
+        build.build()
+      end
+    end)
   end
 })
 
@@ -1361,14 +1353,15 @@ command.add(function(root_view, arguments)
   return not build.is_running() and build.can_build(build.targets[build.state.target]) and build.can_run(build.targets[build.state.target]), arguments
 end, {
   ["build:build-and-run"] = function(arguments)
-    build.save_docs()
-    if #build.targets > 0 then
-      build.build(function(status)
-        if status == 0 then
-          build.run(arguments)
-        end
-      end)
-    end
+    core.save_all(function()
+      if #build.targets > 0 then
+        build.build(function(status)
+          if status == 0 then
+            build.run(arguments)
+          end
+        end)
+      end
+    end)
   end,
 })
 
@@ -1376,11 +1369,12 @@ command.add(function(root_view, arguments)
   return not build.is_running() and build.can_build(build.targets[build.state.target]) and build.can_clean(build.targets[build.state.target]), arguments
 end, {
   ["build:clean-and-build"] = function()
-    build.save_docs()
-    build.clean(function(status)
-      if (status or 0) == 0 and #build.targets > 0 then
-        build.build()
-      end
+    core.save_all(function()
+      build.clean(function(status)
+        if (status or 0) == 0 and #build.targets > 0 then
+          build.build()
+        end
+      end)
     end)
   end
 })

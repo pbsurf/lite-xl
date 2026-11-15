@@ -330,9 +330,10 @@ function debug.build_and_start(options)
   if not has_build or not build.can_build(build.targets[build.state.target]) then
     return debug.start(options)
   end
-  build.save_docs()
-  build.build(function(status)
-    if status == 0 then debug.start(options) end
+  core.save_all(function()
+    build.build(function(status)
+      if status == 0 then debug.start(options) end
+    end)
   end)
 end
 
