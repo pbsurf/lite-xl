@@ -163,6 +163,15 @@ function diagnostics.get(filename, severity)
   return nil
 end
 
+---Get one server's diagnostics for a file, as it sent them.
+---@param filename string
+---@param server string Name of the server.
+---@return lsp.diagnostics.message[] | nil
+function diagnostics.get_server(filename, server)
+  local index = diagnostics.get_index(filename)
+  return index and diagnostics.list[index].servers[server] or nil
+end
+
 ---@param item lsp.diagnostics.item
 local function merge_messages(item)
   item.messages = {}

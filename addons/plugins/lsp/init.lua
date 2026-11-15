@@ -966,6 +966,18 @@ function lsp.start_server(filename, project_directory)
           end
         )
 
+        -- Apply edits the server asks for (e.g. clangd's code actions that
+        -- run a command: the command's result is this request)
+        client:add_request_listener(
+          "workspace/applyEdit",
+          function(server, request)
+            local applied, reason = lsp.apply_workspace_edit(request.params.edit)
+            server:push_response(request.method, request.id, {
+              applied = applied, failureReason = reason
+            })
+          end
+        )
+
         -- Respond to window/showDocument request
         client:add_request_listener(
           "window/showDocument",
@@ -1914,6 +1926,197 @@ function lsp.request_call_hierarchy(doc, line, col)
   end
 
   core.log("[LSP] Call hierarchy not supported.")
+end
+
+---Applies a document's TextEdits, whose ranges all refer to the document before
+---any of them: from the last position back, so earlier ranges stay valid (of
+---edits at one position, the last first, so they end up in their order).
+---@param doc core.doc
+---@param edits table[]
+local function apply_text_edits(doc, edits)
+  local sorted = {}
+  for i, edit in ipairs(edits) do sorted[i] = { edit = edit, index = i } end
+  table.sort(sorted, function(a, b)
+    local sa, sb = a.edit.range.start, b.edit.range.start
+    if sa.line ~= sb.line then return sa.line > sb.line end
+    if sa.character ~= sb.character then return sa.character > sb.character end
+    return a.index > b.index
+  end)
+  for _, item in ipairs(sorted) do
+    local line1, col1, line2, col2 = util.toselection(item.edit.range, doc)
+    doc:remove(line1, col1, line2, col2)
+    doc:insert(line1, col1, item.edit.newText)
+  end
+end
+
+---Applies an LSP WorkspaceEdit (from a code action, a rename, a server's
+---workspace/applyEdit request). Files not open in a view open in a tab, so
+---their unsaved changes show; the active view stays active.
+---File operations (create, rename, delete) aren't supported: such an edit
+---applies nothing.
+---@param edit table
+---@return boolean applied
+---@return string? failure_reason
+function lsp.apply_workspace_edit(edit)
+  local files = {}
+  if edit.documentChanges then
+    for _, change in ipairs(edit.documentChanges) do
+      if change.kind then
+        local reason = "file operations (" .. change.kind .. ") not supported"
+        core.error("[LSP] Can't apply edit: %s", reason)
+        return false, reason
+      end
+      table.insert(files, { uri = change.textDocument.uri, edits = change.edits })
+    end
+  elseif edit.changes then
+    for uri, edits in pairs(edit.changes) do
+      table.insert(files, { uri = uri, edits = edits })
+    end
+  end
+  local active_view = core.active_view
+  for _, file in ipairs(files) do
+    local doc = core.open_doc(util.tofilename(file.uri))
+    if #core.get_views_referencing_doc(doc) == 0 then
+      core.root_view:open_doc(doc)
+    end
+    apply_text_edits(doc, file.edits)
+  end
+  if active_view and core.active_view ~= active_view then
+    core.set_active_view(active_view)
+  end
+  return true
+end
+
+---Runs a server's command (a code action's): its edits, if any, come back as
+---a workspace/applyEdit request.
+---@param server lsp.server
+---@param cmd table LSP Command: command, arguments
+local function execute_command(server, cmd)
+  server:push_request('workspace/executeCommand', {
+    params = { command = cmd.command, arguments = cmd.arguments },
+    callback = function(server, response)
+      if response.error then
+        core.error("[LSP] %s: %s", cmd.title or cmd.command,
+          response.error.message or "command failed")
+      end
+    end
+  })
+end
+
+---@param doc core.doc
+---@param line integer
+---@param col integer
+local function lsp_position(doc, line, col)
+  return { line = line - 1, character = util.doc_utf8_to_utf16(doc, line, col) - 1 }
+end
+
+---Asks the document's servers for code actions at the selection (or caret):
+---quick fixes for the diagnostics there, else for those on its lines (so the
+---caret can be anywhere on an error's line), and refactorings; the user picks
+---one from a list, which is applied (its edit, then its command).
+---@param doc core.doc
+function lsp.request_code_actions(doc)
+  if not doc.lsp_open then return end
+  local line1, col1, line2, col2 = doc:get_selection(true)
+  lsp.update_document(doc) -- pending changes go first
+
+  local servers = {}
+  for _, name in pairs(lsp.get_active_servers(doc.filename, true)) do
+    local server = lsp.servers_running[name]
+    if server.capabilities.codeActionProvider then
+      table.insert(servers, server)
+    end
+  end
+  if #servers == 0 then
+    core.log("[LSP] Code actions not supported")
+    return
+  end
+
+  local function before(la, ca, lb, cb)
+    return la < lb or (la == lb and ca <= cb)
+  end
+  local actions, pending = {}, #servers
+
+  local function show()
+    if #actions == 0 then
+      core.log("[LSP] No code actions here")
+      return
+    end
+    -- the server's preferred fixes first, then fixes, then the rest
+    local function rank(a)
+      return a.action.isPreferred and 0
+        or ((a.action.kind or ""):match("^quickfix") and 1)
+        or 2
+    end
+    for i, a in ipairs(actions) do a.index = i end
+    table.sort(actions, function(a, b)
+      if rank(a) ~= rank(b) then return rank(a) < rank(b) end
+      return a.index < b.index
+    end)
+    -- not if the selection changed meanwhile: the actions were for that one
+    local s1, s2, s3, s4 = doc:get_selection(true)
+    if s1 ~= line1 or s2 ~= col1 or s3 ~= line2 or s4 ~= col2 then return end
+    listbox.clear()
+    for _, a in ipairs(actions) do
+      listbox.append {
+        text = a.action.title,
+        info = (a.action.kind or "") .. (#servers > 1 and (" " .. a.server.name) or ""),
+        server = a.server, action = a.action
+      }
+    end
+    listbox.show_list(nil, function(_, item)
+      local action, server = item.action, item.server
+      if type(action.command) == "string" then -- a Command, not a CodeAction
+        execute_command(server, action)
+        return
+      end
+      if action.edit then lsp.apply_workspace_edit(action.edit) end
+      if action.command then execute_command(server, action.command) end
+    end)
+  end
+
+  local function done()
+    pending = pending - 1
+    if pending == 0 then show() end
+  end
+
+  for _, server in ipairs(servers) do
+    -- the server's own diagnostics, as it sent them: those touching the
+    -- selection, or else those on its lines
+    local touching, on_lines = {}, {}
+    for _, d in ipairs(diagnostics.get_server(doc.filename, server.name) or {}) do
+      local dl1, dc1, dl2, dc2 = util.toselection(d.range, doc)
+      if before(dl1, dc1, line2, col2) and before(line1, col1, dl2, dc2) then
+        table.insert(touching, d)
+      end
+      if dl1 <= line2 and dl2 >= line1 then
+        table.insert(on_lines, d)
+      end
+    end
+    server:push_request('textDocument/codeAction', {
+      params = {
+        textDocument = { uri = util.touri(core.project_absolute_path(doc.filename)) },
+        range = {
+          start = lsp_position(doc, line1, col1),
+          ["end"] = lsp_position(doc, line2, col2)
+        },
+        context = {
+          diagnostics = json.array(#touching > 0 and touching or on_lines),
+          triggerKind = 1 -- Invoked
+        }
+      },
+      timeout = 5,
+      timeout_callback = done,
+      callback = function(server, response)
+        for _, action in ipairs(type(response.result) == "table" and response.result or {}) do
+          if not action.disabled then
+            table.insert(actions, { server = server, action = action })
+          end
+        end
+        done()
+      end
+    })
+  end
 end
 
 ---Sends a request to applicable LSP servers to rename a symbol.
@@ -2916,6 +3119,10 @@ command.add(
     end
   end,
 
+  ["lsp:code-actions"] = function(doc)
+    lsp.request_code_actions(doc)
+  end,
+
   ["lsp:show-signature"] = function(doc)
     local line1, col1, line2, col2 = doc:get_selection()
     if line1 == line2 and col1 == col2 then
@@ -3154,6 +3361,7 @@ keymap.add {
   ["alt+c"]             = "lsp:view-call-hierarchy",
   ["alt+r"]             = "lsp:rename-symbol",
   ["f4"]                = "lsp:switch-source-header",
+  ["ctrl+."]            = "lsp:code-actions",
 }
 
 --
@@ -3193,6 +3401,7 @@ local menu_found, menu = pcall(require, "plugins.contextmenu")
 if menu_found then
   menu:register(lsp_predicate_symbols, {
     menu.DIVIDER,
+    { text = "Code Actions",            command = "lsp:code-actions" },
     { text = "Show Symbol Info",        command = "lsp:show-symbol-info" },
     { text = "Goto Definition",         command = "lsp:goto-definition" },
     { text = "Goto Implementation",     command = "lsp:goto-implementation" },

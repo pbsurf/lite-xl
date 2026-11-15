@@ -393,7 +393,10 @@ function Server:initialize(workspace, editor_name, editor_version)
       initializationOptions = self.init_options,
       capabilities = util.deep_merge({
         workspace = {
-          configuration = true -- 'workspace/configuration' requests
+          configuration = true, -- 'workspace/configuration' requests
+          applyEdit = true, -- 'workspace/applyEdit' requests (lsp.apply_workspace_edit)
+          workspaceEdit = { documentChanges = true },
+          executeCommand = {} -- code actions' commands
         },
         textDocument = {
           synchronization = {
@@ -467,6 +470,20 @@ function Server:initialize(workspace, editor_name, editor_version)
           --  dynamicRegistration = false, -- not supported
           --  linkSupport = true
           -- },
+          -- CodeAction literals (not only Commands), applied by
+          -- lsp:code-actions; no resolve, so their edits come with them
+          codeAction = {
+            codeActionLiteralSupport = {
+              codeActionKind = {
+                valueSet = {
+                  "", "quickfix", "refactor", "refactor.extract",
+                  "refactor.inline", "refactor.rewrite", "source",
+                  "source.organizeImports", "source.fixAll"
+                }
+              }
+            },
+            isPreferredSupport = true,
+          },
           -- codeAction = {
           --  dynamicRegistration = false, -- not supported
           --  codeActionLiteralSupport = {valueSet = {}},
