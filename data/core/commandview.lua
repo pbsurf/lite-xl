@@ -109,6 +109,14 @@ function CommandView:set_hidden_suggestions()
 end
 
 
+---The view it was entered from, for the file commands (ctrl+s saves the
+---file being edited, not the command view's text).
+---@return core.docview?
+function CommandView:get_document_view()
+  local view = core.last_active_view
+  if view and view ~= self and view:extends(DocView) then return view:get_document_view() end
+end
+
 function CommandView:get_name()
   return View.get_name(self)
 end

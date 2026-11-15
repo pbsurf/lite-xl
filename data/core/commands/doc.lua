@@ -759,6 +759,25 @@ for _, name in ipairs(editing) do
   end
 end
 
+-- commands on the file: an input field's view (the command view's, a widget's
+-- text box) isn't a document; they act on the document view it's for
+-- (DocView:get_document_view()), if any
+for _, name in ipairs({ "doc:save", "doc:save-as", "doc:save-as-picker", "doc:reload", "file:rename", "file:delete" }) do
+  local cmd = command.map[name]
+  local predicate = cmd.predicate
+  cmd.predicate = function(...)
+    local view = core.active_view
+    if view:extends(DocView) then
+      local dv = view:get_document_view()
+      if dv ~= view then
+        if not dv then return false end
+        return true, dv, ...
+      end
+    end
+    return predicate(...)
+  end
+end
+
 local function can_undo(stack) return stack[stack.idx - 1] ~= nil end
 local function can_copy(dv) return config.copy_whole_line or dv.doc:has_any_selection() end
 local function has_filename(dv) return dv.doc.filename ~= nil end

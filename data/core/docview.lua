@@ -91,6 +91,14 @@ end
 
 ---The file's name, or, when another open doc has a file of the same name, the
 ---shortest end of its path that no other one shares (e.g. core/init.lua).
+---The document view the file commands (Save, Reload, Rename...) act on when
+---this view is active: itself. An input field's (the command view's, a
+---widget's text box) isn't a document: it gives the view it's for, if any.
+---@return core.docview?
+function DocView:get_document_view()
+  return self
+end
+
 function DocView:get_name()
   local path = self.doc.abs_filename or self.doc:get_name()
   local name = path:match("[^/\\]*$")
