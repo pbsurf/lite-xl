@@ -93,13 +93,17 @@ end
 ---that returns the items (or nil for none), for menus that depend on where it opens.
 ---An `exclusive` set shows alone (with any other exclusive ones that apply), in
 ---place of the rest: for a part of a view with a menu of its own, e.g. a gutter.
+---A number is its priority (`true` is 1): of the exclusive sets that apply, only
+---those of the highest show, so a part within another (a column of the gutter)
+---can have its own menu in place of the whole's.
 ---@param predicate core.command.predicate
 ---@param items core.contextmenu.item[] | fun(x: number, y: number): core.contextmenu.item[]?
----@param exclusive? boolean
+---@param exclusive? boolean | number
 function ContextMenu:register(predicate, items, exclusive)
   predicate = command.generate_predicate(predicate)
   if type(items) ~= "function" then update_items_size(items, true) end
-  table.insert(self.itemset, { predicate = predicate, items = items, exclusive = exclusive })
+  if exclusive == true then exclusive = 1 end
+  table.insert(self.itemset, { predicate = predicate, items = items, exclusive = exclusive or nil })
 end
 
 ---Shows the context menu.
@@ -109,12 +113,16 @@ end
 function ContextMenu:show(x, y)
   self.items = nil
   local items_list = { width = 0, height = 0 }
-  local exclusive = false
+  -- the highest priority of the exclusive sets that apply, if any
+  local exclusive
   for _, items in ipairs(self.itemset) do
-    if items.exclusive and items.predicate(x, y) then exclusive = true break end
+    if items.exclusive and (not exclusive or items.exclusive > exclusive)
+      and items.predicate(x, y) then
+      exclusive = items.exclusive
+    end
   end
   for _, items in ipairs(self.itemset) do
-    local set = (items.exclusive or not exclusive) and items.predicate(x, y) and items.items
+    local set = items.exclusive == exclusive and items.predicate(x, y) and items.items
     if type(set) == "function" then
       set = set(x, y)
       if set then update_items_size(set) end
