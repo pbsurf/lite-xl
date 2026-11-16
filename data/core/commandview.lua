@@ -5,6 +5,7 @@ local style = require "core.style"
 local command = require "core.command"
 local Doc = require "core.doc"
 local DocView = require "core.docview"
+local keymap = require "core.keymap"
 local View = require "core.view"
 
 
@@ -43,6 +44,11 @@ local noop = function() end
 ---@field wrap boolean
 ---@field placeholder string? dim text shown while the input is empty
 ---@field modes core.commandview.mode[]? prefixes that switch to other commands
+---@field multi_select boolean? tab marks or unmarks the selected suggestion and
+---selects the one below it, towards the input (shift+tab the one above), as fzf
+---does, and ctrl+click marks
+---the one clicked; marks stay while the text filters the suggestions. With items marked, submit gets them as a third
+---argument (core.commandview.item[], in the order marked).
 local default_state = {
   submit = noop,
   suggest = noop,
@@ -190,7 +196,8 @@ function CommandView:leave_mode()
 end
 
 
-function CommandView:move_suggestion_idx(dir)
+---Selects the suggestion dir away; keep_text: without completing it.
+function CommandView:move_suggestion_idx(dir, keep_text)
   local function overflow_suggestion_idx(n, count)
     if count == 0 then return 0 end
     if self.state.wrap then
@@ -221,7 +228,7 @@ function CommandView:move_suggestion_idx(dir)
   if self.state.show_suggestions then
     local n = self.suggestion_idx + dir
     self.suggestion_idx = overflow_suggestion_idx(n, #self.suggestions)
-    self:complete()
+    if not keep_text then self:complete() end
     self.last_change_id = self.doc:get_change_id()
   else
     local current_suggestion = #self.suggestions > 0 and self.suggestions[self.suggestion_idx].text
@@ -246,6 +253,44 @@ function CommandView:move_suggestion_idx(dir)
 end
 
 
+---Whether the item is marked (state.multi_select).
+---@param item core.commandview.item
+function CommandView:is_marked(item)
+  return self.state.marked_set ~= nil and self.state.marked_set[item.text] ~= nil
+end
+
+
+---Marks or unmarks the suggestion at idx (state.multi_select).
+---@param idx integer
+function CommandView:toggle_mark_at(idx)
+  local state = self.state
+  local item = self.suggestions[idx]
+  if not state.multi_select or not item then return end
+  if state.marked_set[item.text] then
+    state.marked_set[item.text] = nil
+    for i, marked in ipairs(state.marked) do
+      if marked.text == item.text then table.remove(state.marked, i); break end
+    end
+  else
+    state.marked_set[item.text] = true
+    table.insert(state.marked, item)
+  end
+end
+
+
+---Marks or unmarks the selected suggestion (state.multi_select), then selects
+---the one dir away, if any (no wrapping: repeated marks stop at the end).
+---@param dir integer
+function CommandView:toggle_mark(dir)
+  if not self.state.multi_select then return end
+  self:toggle_mark_at(self.suggestion_idx)
+  local idx = self.suggestion_idx + dir
+  if idx >= 1 and idx <= #self.suggestions then
+    self:move_suggestion_idx(dir, true)
+  end
+end
+
+
 function CommandView:complete()
   if #self.suggestions > 0 then
     self:set_text(self.suggestions[self.suggestion_idx].text)
@@ -257,9 +302,9 @@ function CommandView:submit()
   local suggestion = self.suggestions[self.suggestion_idx]
   local text = self:get_text()
   if self.state.validate(text, suggestion) then
-    local submit = self.state.submit
+    local submit, marked = self.state.submit, self.state.marked
     self:exit(true)
-    submit(text, suggestion)
+    submit(text, suggestion, marked and #marked > 0 and marked or nil)
   end
 end
 
@@ -290,6 +335,9 @@ function CommandView:enter(label, ...)
   end
 
   self.state = common.merge(default_state, options)
+  if self.state.multi_select then
+    self.state.marked, self.state.marked_set = {}, {}
+  end
 
   -- We need to keep the text entered with CommandView:set_text to
   -- maintain compatibility with deprecated usage, but still allow
@@ -467,6 +515,19 @@ function CommandView:draw_line_text(line, x, y)
     local yoffset = self:get_line_text_y_offset()
     renderer.draw_text(self:get_font(), placeholder, x, y + yoffset, style.dim)
   end
+  local marked = self.state.marked
+  if marked and #marked > 0 then
+    -- how many are marked, right-aligned, and how many of those the text
+    -- filters out
+    local shown = 0
+    for _, item in ipairs(self.suggestions) do
+      if self.state.marked_set[item.text] then shown = shown + 1 end
+    end
+    local text = #marked .. " marked"
+    if shown < #marked then text = text .. ", " .. #marked - shown .. " hidden" end
+    common.draw_text(self:get_font(), style.dim, text, "right",
+      self.position.x, y, self.size.x - style.padding.x, self:get_line_height())
+  end
   return CommandView.super.draw_line_text(self, line, x, y)
 end
 
@@ -511,13 +572,16 @@ end
 
 
 ---Handles a click on the suggestions box: a left click on a suggestion
----completes it and submits.
+---completes it and submits; with ctrl (state.multi_select), marks or unmarks it.
 ---@param button core.view.mousebutton
 ---@param x number
 ---@param y number
 function CommandView:on_suggestions_mouse_pressed(button, x, y)
   local idx = self:get_suggestion_at(x, y)
-  if idx and button == "left" then
+  if idx and button == "left" and self.state.multi_select
+      and (keymap.modkeys["ctrl"] or keymap.modkeys["cmd"]) then
+    self:toggle_mark_at(idx)
+  elseif idx and button == "left" then
     self.suggestion_idx = idx
     self:complete()
     self:submit()
@@ -585,6 +649,11 @@ local function draw_suggestions_box(self)
     local color = (i == self.suggestion_idx) and style.accent or style.text
     local y = self.position.y - (i - first + 1) * lh - dh
     local font = item.font or self:get_font()
+    if self:is_marked(item) then
+      -- a dot left of the text, in the label's column
+      local r = math.floor(font:get_height() * 0.15)
+      common.draw_circle(x - style.padding.x / 2 - r, y + lh / 2, r, style.accent)
+    end
     local indent = (item.indent or 0) * font:get_width("  ")
     local tx, w = x + indent, self.size.x - x - indent - style.padding.x
     if item.icon then

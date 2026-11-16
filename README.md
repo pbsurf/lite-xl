@@ -61,6 +61,9 @@ upstream's `release/v2.1.x`. Additions to the editor:
   (again for the one before), beside the tab that was next to it, at the cursor
   and scroll it had. Recent files (`core.recent_files`, kept between sessions)
   are ordered by when they were closed.
+* **Open several files from ctrl+p:** tab marks the selected file and moves down
+  (shift+tab up), as in fzf, or ctrl+click marks one;
+  marks stay while you type to find others, and enter opens all the marked files.
 * **Save All:** ctrl+shift+s (`core:save-all`, in place of Save As, which stays
   in the File menu) saves every modified file (unnamed ones aren't files yet).
 * **Reloaded files:** a file reloaded from disk (autoreload) gets a status bar

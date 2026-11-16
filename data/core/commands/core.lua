@@ -169,9 +169,12 @@ command.add(nil, {
     core.command_view:enter("Open File From Project", {
       modes = command.find_file_modes,
       placeholder = "file name, or type " .. table.concat(hints, ", "),
-      submit = function(text, item)
-        text = item and item.text or text
-        core.root_view:open_doc(core.open_doc(common.home_expand(text)))
+      multi_select = true,
+      -- marked files open in the order marked, the last one active
+      submit = function(text, item, marked)
+        for _, file in ipairs(marked or { item or { text = text } }) do
+          core.root_view:open_doc(core.open_doc(common.home_expand(file.text)))
+        end
       end,
       suggest = suggest
     })
