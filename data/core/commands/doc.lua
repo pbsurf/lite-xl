@@ -201,6 +201,23 @@ local function block_comment(comment, line1, col1, line2, col2)
   end
 end
 
+-- "file:line", or "file:line1-line2" for a selection over several lines (one
+-- ending at a line's start doesn't take that line), for the caret's selection;
+-- the file relative to the project if in it, unless absolute
+local function line_reference(dv, absolute)
+  local line1, col1, line2, col2 = dv.doc:get_selection(true)
+  if line2 > line1 and col2 == 1 then line2 = line2 - 1 end
+  local file = dv.doc.abs_filename
+  if not absolute then file = core.normalize_to_project_dir(file) end
+  return file .. ":" .. line1 .. (line2 > line1 and "-" .. line2 or "")
+end
+
+local function copy_reference(dv, absolute)
+  local ref = line_reference(dv, absolute)
+  system.set_clipboard(ref)
+  core.log("Copied %s", ref)
+end
+
 local function insert_paste(doc, value, whole_line, idx)
   if whole_line then
     local line1, col1 = doc:get_selection_idx(idx)
@@ -357,6 +374,10 @@ local commands = {
     dv.last_line2 = #dv.doc.lines
     dv.last_col2 = #dv.doc.lines[#dv.doc.lines]
   end,
+
+  ["doc:copy-reference"] = function(dv) copy_reference(dv, false) end,
+
+  ["doc:copy-absolute-reference"] = function(dv) copy_reference(dv, true) end,
 
   ["doc:select-lines"] = function(dv)
     for idx, line1, _, line2 in dv.doc:get_selections(true) do
@@ -794,5 +815,7 @@ command.enabled["doc:select-none"] = function(dv)
   return dv.doc:has_any_selection() or #dv.doc.selections > 4
 end
 command.enabled["doc:reload"] = has_filename
+command.enabled["doc:copy-reference"] = has_filename
+command.enabled["doc:copy-absolute-reference"] = has_filename
 command.enabled["file:rename"] = has_filename
 command.enabled["file:delete"] = has_filename
