@@ -1,5 +1,6 @@
 -- mod-version:3
--- Buttons for the tab bar while its tabs scroll: scroll_left and scroll_right, and
+-- Buttons for the tab bar while its tabs don't fit at full width: scroll_left and
+-- scroll_right (active while the tabs scroll), and
 -- menu, which shows how many tabs there are and opens a menu of all the tabs in
 -- the split, each with a close button (delete closes the selected one from the
 -- keyboard). config.tab_buttons chooses which show; tab-overflow:show opens the

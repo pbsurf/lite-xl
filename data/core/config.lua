@@ -48,7 +48,8 @@ config.max_tab_width = 320
 -- a preview tab (italic), which the next one replaces until it's kept: by a
 -- double click on its tab or the file in the tree view, an edit, or a drag
 config.preview_tabs = true
--- Buttons at the right end of the tab bar while its tabs scroll, left to right;
+-- Buttons at the right end of the tab bar, left to right, while its tabs don't
+-- fit at full width (style.tab_width, or as fit_tab_width sizes them);
 -- names nothing registered in Node.tab_buttons are skipped (the tab_overflow
 -- add-on registers "scroll_left", "scroll_right" and "menu")
 config.tab_buttons = { "menu" }

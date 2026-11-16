@@ -17,7 +17,8 @@ local View = require "core.view"
 ---@field attachment_side? "bottom"|"top"|"right"
 local Node = Object:extend()
 
----A button at the right end of the tab bar, shown while the node's tabs scroll.
+---A button at the right end of the tab bar, shown while the node's tabs don't fit
+---at their full width (shows_tab_buttons).
 ---@class core.node.tab_button
 ---@field icon? string Glyph in style.icon_font, drawn centered
 ---@field draw? fun(node: core.node, x: number, y: number, w: number, h: number, hovered: boolean) Drawing instead of icon
@@ -25,7 +26,8 @@ local Node = Object:extend()
 ---@field active? fun(node: core.node): boolean While false: dim, ignoring clicks
 ---@field width? fun(node: core.node): number Default: 3 icon widths. Called while
 ---working out how many tabs fit, so it can't depend on that (get_max_tabs,
----tabs_overflow, get_tab_area_width, target_tab_width, get_tab_target_widths).
+---tabs_overflow, shows_tab_buttons, get_tab_area_width, target_tab_width,
+---get_tab_target_widths).
 
 ---Tab bar buttons by name; config.tab_buttons chooses which show, in which order.
 ---@type table<string, core.node.tab_button>
@@ -421,9 +423,22 @@ function Node:tabs_overflow()
 end
 
 
+---Whether the tab bar shows its buttons: while the tabs scroll, and while
+---several tabs at their full width (style.tab_width, or with fit_tab_width their
+---width within min_tab_width and max_tab_width) don't fit the tab bar, so titles
+---get cut short.
+function Node:shows_tab_buttons()
+  if self:tabs_overflow() then return true end
+  if #self.views < 2 then return false end
+  local total = 0
+  for _, w in ipairs(self:get_tab_full_widths()) do total = total + w end
+  return total > self.size.x
+end
+
+
 ---The width of the tab bar left for tabs, left of the buttons.
 function Node:get_tab_area_width()
-  if self:tabs_overflow() then
+  if self:shows_tab_buttons() then
     return self.size.x - self:get_tab_buttons_width()
   end
   return self.size.x
@@ -464,18 +479,22 @@ local function fill_cap(widths, total)
 end
 
 
----Each tab's width, once it's done animating: target_tab_width(); or with
----config.fit_tab_width, its fit width within config.min_tab_width and
----config.max_tab_width, the widest shrunk as needed to fit the tab area, and none
----wider than target_tab_width() while the tabs scroll. The node's own
----fit_tab_width and max_tab_width override config's.
----@return number[]
-function Node:get_tab_target_widths()
-  local widths, w = {}, self:target_tab_width()
+function Node:fits_tab_width()
   local fit = self.fit_tab_width
   if fit == nil then fit = config.fit_tab_width end
-  if not fit then
-    for i = 1, #self.views do widths[i] = w end
+  return fit
+end
+
+
+---Each tab's width with room to spare: style.tab_width; or with
+---config.fit_tab_width, its fit width within config.min_tab_width and
+---config.max_tab_width. The node's own fit_tab_width and max_tab_width override
+---config's.
+---@return number[]
+function Node:get_tab_full_widths()
+  local widths = {}
+  if not self:fits_tab_width() then
+    for i = 1, #self.views do widths[i] = style.tab_width end
     return widths
   end
   local min_w = config.min_tab_width * SCALE
@@ -483,6 +502,23 @@ function Node:get_tab_target_widths()
   for i, view in ipairs(self.views) do
     widths[i] = math.max(min_w, math.min(self:get_tab_fit_width(view), max_w))
   end
+  return widths
+end
+
+
+---Each tab's width, once it's done animating: target_tab_width(); or with
+---fit_tab_width, its full width (get_tab_full_widths), the widest shrunk as needed
+---to fit the tab area, and none wider than target_tab_width() while the tabs
+---scroll.
+---@return number[]
+function Node:get_tab_target_widths()
+  local w = self:target_tab_width()
+  if not self:fits_tab_width() then
+    local widths = {}
+    for i = 1, #self.views do widths[i] = w end
+    return widths
+  end
+  local widths = self:get_tab_full_widths()
   local cap = self:tabs_overflow() and w or fill_cap(widths, self:get_tab_area_width())
   for i = 1, #widths do widths[i] = math.min(widths[i], cap) end
   return widths
@@ -569,7 +605,7 @@ end
 
 
 function Node:get_tab_button_index(px, py)
-  if not self:should_show_tabs() or not self:tabs_overflow() then return end
+  if not self:should_show_tabs() or not self:shows_tab_buttons() then return end
   for i = 1, #self:get_tab_buttons() do
     local x, y, w, h = self:get_tab_button_rect(i)
     if px >= x and px < x + w and py >= y and py < y + h then
@@ -945,7 +981,7 @@ function Node:draw_tabs()
   end
   core.pop_clip_rect()
 
-  if self:tabs_overflow() then
+  if self:shows_tab_buttons() then
     for i, button in ipairs(self:get_tab_buttons()) do
       local bx, by, bw, bh = self:get_tab_button_rect(i)
       local hovered = self.hovered_tab_button == i
