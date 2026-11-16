@@ -1,5 +1,6 @@
 -- mod-version:3
 local core = require "core"
+local common = require "core.common"
 local command = require "core.command"
 local keymap = require "core.keymap"
 local ContextMenu = require "core.contextmenu"
@@ -29,17 +30,37 @@ local function in_selection(doc, line, col)
   return false
 end
 
+-- Whether x, y is in the active doc view's gutter (the line numbers, and any
+-- columns add-ons put there), the active view then.
+local function in_gutter(x, y)
+  local dv = core.active_view
+  if not (x and y and dv:extends(DocView)) then return false end
+  local x1, y1 = dv.position.x, dv.position.y
+  return x >= x1 and x < x1 + dv:get_gutter_click_width()
+    and y >= y1 and y < y1 + dv.size.y and not dv:scrollbar_overlaps_point(x, y), dv
+end
+
+-- Whether line is within one of doc's selections, as whole lines (one ending at
+-- a line's start doesn't take that line).
+local function in_selected_lines(doc, line)
+  for _, l1, c1, l2, c2 in doc:get_selections(true) do
+    if l2 > l1 and c2 == 1 then l2 = l2 - 1 end
+    if (l1 ~= l2 or c1 ~= c2) and line >= l1 and line <= l2 then return true end
+  end
+  return false
+end
+
 -- A right-click on a doc's text moves the caret there first, so the menu's items
 -- (and their predicates) act on what was clicked; a click within the selection
--- keeps it, for Cut, Copy and the like.
+-- keeps it, for Cut, Copy and the like. In the gutter, to the line's start,
+-- unless the line is selected (its items then act on the selected lines).
 local function set_caret_at(x, y)
   local dv = core.active_view
-  if not dv:extends(DocView) or dv:scrollbar_hovering()
-    or x < dv.position.x + dv:get_gutter_click_width() then
-    return
-  end
+  if not dv:extends(DocView) or dv:scrollbar_hovering() then return end
   local line, col = dv:resolve_screen_position(x, y)
-  if not in_selection(dv.doc, line, col) then
+  if in_gutter(x, y) then
+    if not in_selected_lines(dv.doc, line) then dv.doc:set_selection(line, 1) end
+  elseif not in_selection(dv.doc, line, col) then
     dv.doc:set_selection(line, col)
   end
 end
@@ -74,9 +95,14 @@ function menu:on_selected(item)
   ContextMenu.on_selected(self, item)
 end
 
+-- at the caret, below its line (in the text: the view's corner is the gutter's)
 command.add("core.docview!", {
   ["context:show"] = function(dv)
-    menu:show(dv.position.x, dv.position.y)
+    local line, col = dv.doc:get_selection()
+    local x, y = dv:get_line_screen_position(line, col)
+    x = common.clamp(x, dv.position.x + dv:get_gutter_width(), dv.position.x + dv.size.x)
+    y = common.clamp(y + dv:get_line_height(), dv.position.y, dv.position.y + dv.size.y)
+    menu:show(x, y)
   end
 })
 
@@ -95,6 +121,19 @@ local cmds = {
 }
 
 menu:register("core.docview", cmds)
+
+---The gutter's menu, in place of the editor's, is the exclusive sets with this
+---priority whose predicate is `menu.in_gutter` (and which may check more):
+---add-ons add their own items for a line there. Columns of the gutter with
+---menus of their own (priority 1, as `exclusive == true`) replace it.
+menu.GUTTER = 0
+menu.in_gutter = in_gutter
+
+-- the line right-clicked (the caret's, set_caret_at), or the selected lines
+menu:register(in_gutter, {
+  { text = "Copy Reference", command = "doc:copy-reference" },
+  { text = "Copy Absolute Reference", command = "doc:copy-absolute-reference" },
+}, menu.GUTTER)
 
 
 return menu
