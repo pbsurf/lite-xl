@@ -421,6 +421,18 @@ if config.plugins.contextmenu ~= false then
     if #items > 0 then table.insert(items, 1, ContextMenu.DIVIDER) end
     return items
   end)
+
+  -- in the gutter's menu: the file's blame and history
+  menu:register(menu.in_gutter, function()
+    local dv = core.active_view
+    local items = valid_items({
+      { text = blame.is_shown(dv.doc) and "Hide Git Blame" or "Show Git Blame",
+        command = "gitkit:toggle-blame" },
+      { text = "File History", command = "gitkit:file-history" },
+    })
+    if #items > 0 then table.insert(items, 1, ContextMenu.DIVIDER) end
+    return items
+  end, menu.GUTTER)
 end
 
 -- the commit view can be searched (core's find takes only plain DocViews)
