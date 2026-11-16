@@ -982,6 +982,16 @@ function Node:draw_tabs()
   core.pop_clip_rect()
 
   if self:shows_tab_buttons() then
+    -- a divider between the tabs and the buttons, as between tabs (the last
+    -- tab's own is clipped): full height against the active tab
+    local area_x = x + self:get_tab_area_width()
+    local idx = self:get_tab_index_at(self.tab_shift + self:get_tab_area_width() - 1)
+    local tx, _, tw = self:get_tab_rect(idx or 1)
+    if idx and self.views[idx] == self.active_view and math.abs(tx + tw - area_x) < 1 then
+      renderer.draw_rect(area_x, y, ds, h, style.divider)
+    else
+      renderer.draw_rect(area_x, y + style.padding.y, ds, h - style.padding.y * 2, style.dim)
+    end
     for i, button in ipairs(self:get_tab_buttons()) do
       local bx, by, bw, bh = self:get_tab_button_rect(i)
       local hovered = self.hovered_tab_button == i
