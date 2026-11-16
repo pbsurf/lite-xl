@@ -671,6 +671,15 @@ if menu_found then
     table.insert(items, { text = "Add Watch", command = "debug:add-watch-at-cursor" })
     return items
   end)
+
+  -- and in the gutter's, running to the line right-clicked
+  menu:register(function(x, y)
+    return menu.in_gutter(x, y) and debug.is_active() and debug.session.state == "stopped"
+      and core.active_view:is(DocView) and supports_breakpoints(core.active_view.doc)
+  end, {
+    menu.DIVIDER,
+    { text = "Run to Here", command = "debug:run-to-cursor" },
+  }, menu.GUTTER)
 end
 
 
